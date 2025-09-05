@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Generate self-signed SSL certificate for IBKR Client Portal Gateway
+# This script creates a more secure certificate than the default one
+
+CERT_DIR="./certs"
+CERT_NAME="ibkr-gateway"
+
+# Create certs directory if it doesn't exist
+mkdir -p "$CERT_DIR"
+
+echo "Generating self-signed SSL certificate for IBKR Gateway..."
+
+# Generate private key
+openssl genrsa -out "$CERT_DIR/$CERT_NAME.key" 2048
+
+# Generate certificate signing request
+openssl req -new -key "$CERT_DIR/$CERT_NAME.key" -out "$CERT_DIR/$CERT_NAME.csr" -subj "/C=US/ST=State/L=City/O=IBKR Gateway/OU=IT/CN=localhost"
+
+# Generate self-signed certificate
+openssl x509 -req -days 365 -in "$CERT_DIR/$CERT_NAME.csr" -signkey "$CERT_DIR/$CERT_NAME.key" -out "$CERT_DIR/$CERT_NAME.crt"
+
+# Create PEM file (certificate + private key)
+cat "$CERT_DIR/$CERT_NAME.crt" "$CERT_DIR/$CERT_NAME.key" > "$CERT_DIR/cacert.pem"
+
+# Set appropriate permissions
+chmod 600 "$CERT_DIR/$CERT_NAME.key"
+chmod 644 "$CERT_DIR/$CERT_NAME.crt"
+chmod 644 "$CERT_DIR/cacert.pem"
+
+# Clean up CSR file
+rm "$CERT_DIR/$CERT_NAME.csr"
+
+echo "Certificate generated successfully!"
+echo "Certificate: $CERT_DIR/$CERT_NAME.crt"
+echo "Private Key: $CERT_DIR/$CERT_NAME.key"
+echo "PEM File: $CERT_DIR/cacert.pem"
+echo ""
+echo "To use this certificate, update conf.yaml:"
+echo "  sslCert: /app/certs/cacert.pem"

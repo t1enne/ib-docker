@@ -1,0 +1,39 @@
+services:
+  ib-gateway:
+    build: .
+    container_name: ib-client-portal-gateway
+    ports:
+      - "5000:5000"
+    environment:
+      - JAVA_OPTS=-Xmx512m -Djava.security.egd=file:/dev/./urandom
+    volumes:
+      # Optional: Mount directory for persistent session data
+      - ./data:/app/data
+      # Optional: Mount custom certificates
+      - ./certs:/app/certs:ro
+    restart: unless-stopped
+    networks:
+      - ib-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "-k",
+          "-X",
+          "POST",
+          "https://localhost:5000/v1/api/tickle",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  ib-network:
+    driver: bridge
+
+volumes:
+  ib-data:
+    driver: local

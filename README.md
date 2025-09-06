@@ -8,7 +8,7 @@ This Docker container provides a convenient way to run the Interactive Brokers C
 - 🔒 **SSL Support**: Self-signed certificates for secure connections
 - 🔧 **Configurable**: Environment variables for easy customization
 - 🏥 **Health Checks**: Built-in container health monitoring
-- 📊 **Examples**: Python examples for common API operations
+- 📊 **Cli**: Examples for common API operations
 
 ## Prerequisites
 
@@ -49,80 +49,7 @@ Key variables:
 - `SESSION_TIMEOUT`: Session timeout in seconds (default: `86400`)
 - `LOG_LEVEL`: Logging level (default: `INFO`)
 
-### SSL Certificates
-
-The container uses the default IBKR certificate. To generate a custom self-signed certificate:
-
-```bash
-./generate-cert.sh
-```
-
-This creates certificates in the `./certs` directory that can be mounted into the container.
-
 ## Usage Examples
-
-### Python Authentication Check
-
-```bash
-cd examples/python
-pip install -r requirements.txt
-python auth_status.py
-```
-
-### Basic API Calls
-
-After authentication, you can make API calls:
-
-```bash
-# Check authentication status
-curl -k https://localhost:5000/v1/api/iserver/auth/status
-
-# Get account information
-curl -k https://localhost:5000/v1/api/portfolio/accounts
-
-# Keep session alive
-curl -k -X POST https://localhost:5000/v1/api/tickle
-```
-
-## Docker Commands
-
-### Build the image:
-```bash
-docker build -t ib-gateway .
-```
-
-### Run with Docker Compose:
-```bash
-docker-compose up -d
-```
-
-### View logs:
-```bash
-docker-compose logs -f ib-gateway
-```
-
-### Stop the container:
-```bash
-docker-compose down
-```
-
-## File Structure
-
-```
-ib-docker/
-├── Dockerfile              # Container definition
-├── docker-compose.yml      # Docker Compose configuration
-├── conf.yaml              # Gateway configuration
-├── entrypoint.sh           # Container startup script
-├── generate-cert.sh        # SSL certificate generator
-├── .env.example           # Environment variables template
-├── examples/
-│   └── python/
-│       ├── auth_status.py  # Authentication example
-│       └── requirements.txt
-├── certs/                 # SSL certificates (generated)
-└── data/                  # Persistent data (mounted)
-```
 
 ## Important Notes
 

@@ -21,8 +21,6 @@ services:
           "curl",
           "-f",
           "-k",
-          "-X",
-          "POST",
           "https://localhost:5000/v1/api/tickle",
         ]
       interval: 30s

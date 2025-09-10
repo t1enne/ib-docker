@@ -1,5 +1,3 @@
-module Candles
-
 using DataFrames
 using Dates
 using HTTP
@@ -49,7 +47,18 @@ function search_securities(fetcher::CandlesFetcher, symbol::String)::Vector{Secu
             if haskey(item, "secType")
                 sec_type = item["secType"]
             elseif haskey(item, "sections") && !isempty(item["sections"])
-                sec_type = item["sections"][1]["secType"]
+								for subitem in item["sections"]
+                	sec_type = subitem["secType"]
+									security = Security(
+										conid,
+										get(item, "symbol", nothing),
+										get(item, "sections", nothing),
+										sec_type,
+										get(item, "description", nothing),
+										get(item, "companyHeader", nothing)
+									)
+            			push!(securities, security)
+								end	
             else
                 throw(ErrorException("Unrecognized security type"))
             end
@@ -67,7 +76,9 @@ function search_securities(fetcher::CandlesFetcher, symbol::String)::Vector{Secu
             )
             push!(securities, security)
         end
-
+				for (sc, i) in enumerate(securities)
+					println("$i - $(sc.symbol)")
+				end
         return securities
     catch e
         println("Error searching for $symbol: $e")
@@ -76,7 +87,6 @@ function search_securities(fetcher::CandlesFetcher, symbol::String)::Vector{Secu
 end
 
 function get_contract_id(securities::Vector{Security}, sec_type::Union{String, Nothing})::Union{Security, Nothing}
-		println(securities)
     if isempty(securities)
         println("No securities found")
         return nothing
@@ -99,8 +109,8 @@ function get_contract_id(securities::Vector{Security}, sec_type::Union{String, N
         println("$i. *$(sec.symbol !== nothing ? sec.symbol : "N/A")* $(sec.company_name !== nothing ? sec.company_name : "N/A") _$(sec.secType !== nothing ? sec.secType : "N/A")_ ($(sec.description !== nothing ? sec.description : "N/A")) [$(sec.conid !== nothing ? sec.conid : "N/A")]")
     end
 
-    # Non-interactive mode, select the first one
-    return securities[1]
+		sec_idx = readline()
+		return securities[parse(Int, sec_idx)]
 end
 
 function fetch_candles(fetcher::CandlesFetcher, conid::Int, interval::String="1d", period::String="30d", start_date::Union{String, Nothing}=nothing, end_date::Union{String, Nothing}=nothing)::Union{DataFrame, Nothing}
@@ -143,5 +153,3 @@ function fetch_candles(fetcher::CandlesFetcher, conid::Int, interval::String="1d
         return nothing
     end
 end
-
-end # module

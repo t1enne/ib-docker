@@ -1,8 +1,9 @@
 PROJECT = IbkrCli
 JULIA = julia --project=. 
 
+
 run:
-	$(JULIA) -e "import IbkrCli; IbkrCli.main()" $(filter-out $@,$(MAKECMDGOALS))
+	$(JULIA) -e "import IbkrCli; IbkrCli.main()" $(ARGS)
 
 # Run tests (once you add a test/ folder)
 test:

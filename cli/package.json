@@ -1,0 +1,22 @@
+{
+  "name": "cli",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "migrate:up": "bun run db/migrator.ts --up",
+    "migrate:down": "bun run db/migrator.ts --down"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "es-toolkit": "^1.39.10",
+    "https": "^1.0.0",
+    "kysely": "^0.27.3",
+    "kysely-bun-sqlite": "^0.4.0"
+  }
+}

@@ -1,18 +1,19 @@
 import type { Kysely } from "kysely";
-
-const intervals = ["1min", "5min", "15min", "30min", "1h", "4h", "1d", "1w"];
+import { BAR_INTERVAL } from "../../consts/interval";
 
 export async function up(db: Kysely<any>) {
   await db.schema
     .createTable("symbols")
     .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
-    .addColumn("symbol", "text", (col) => col.notNull().unique())
+    .addColumn("symbol", "text", (col) => col.notNull())
+    .addColumn("market", "text", (c) => c.notNull())
+    .addColumn("currency", "text", (c) => c.notNull())
     .addColumn("name", "text")
     .execute();
 
   // Create OHLCV tables for each interval
 
-  for (const interval of intervals) {
+  for (const interval of BAR_INTERVAL) {
     const tableName = `ohlcv_${interval}`;
     await db.schema
       .createTable(tableName)
@@ -57,7 +58,9 @@ export async function up(db: Kysely<any>) {
 }
 
 export async function down(db: Kysely<any>) {
-  const tables = ["symbols", ...intervals];
-  const ps = tables.map((name) => db.schema.dropTable(name).execute());
-  await Promise.all(ps);
+  const tables = ["symbols", ...BAR_INTERVAL];
+  for (const name of tables) {
+    console.log(`Dropping ${name}`);
+    db.schema.dropTable(`ohlcv_${name}`).execute();
+  }
 }

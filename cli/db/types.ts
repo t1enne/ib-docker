@@ -1,13 +1,6 @@
-import { Kysely, SqliteDialect } from "kysely";
-import Database from "better-sqlite3";
-import path from "path";
-
 export interface DatabaseSchema {
-  symbols: {
-    id: number;
-    symbol: string;
-    name: string | null;
-  };
+  symbols: ISymbol;
+  watchlist: WatchlistTable;
   ohlcv_1min: OhlcvTable;
   ohlcv_5min: OhlcvTable;
   ohlcv_15min: OhlcvTable;
@@ -19,7 +12,7 @@ export interface DatabaseSchema {
 }
 
 export interface OhlcvTable {
-  id: number;
+  id?: number;
   symbol_id: number;
   timestamp: number;
   open: number;
@@ -29,7 +22,18 @@ export interface OhlcvTable {
   volume: number;
 }
 
-const dbPath = path.join(process.cwd(), "db.sqlite");
-const dialect = new SqliteDialect({
-  database: new Database(dbPath) as any,
-});
+export interface WatchlistTable {
+  id?: number;
+  symbol: string;
+  target_price: number | null;
+  exit_price: number | null;
+  notes: string | null;
+}
+
+export interface ISymbol {
+  id: number;
+  symbol: string;
+  name: string | null;
+  market: string;
+  currency: string;
+}

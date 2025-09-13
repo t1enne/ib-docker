@@ -4,7 +4,12 @@
   "type": "module",
   "scripts": {
     "migrate:up": "bun run db/migrator.ts --up",
-    "migrate:down": "bun run db/migrator.ts --down"
+    "migrate:down": "bun run db/migrator.ts --down",
+    "tickle": "bun run scripts/tickle.ts",
+    "wls": "bun run scripts/watchlists.ts",
+    "wl": "bun run src/get-watchlist-candles.ts",
+    "monitor": "bun run scripts/monitor.ts",
+    "login": "bun run scripts/login.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -14,9 +19,14 @@
   },
   "dependencies": {
     "axios": "^1.11.0",
+    "blessed": "^0.1.81",
     "es-toolkit": "^1.39.10",
     "https": "^1.0.0",
     "kysely": "^0.27.3",
-    "kysely-bun-sqlite": "^0.4.0"
+    "kysely-bun-sqlite": "^0.4.0",
+    "playwright": "^1.55.0",
+    "tsx": "^4.20.5",
+    "valibot": "^1.1.0",
+    "ws": "^8.17.1"
   }
 }

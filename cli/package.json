@@ -9,7 +9,8 @@
     "wls": "bun run scripts/watchlists.ts",
     "wl": "bun run src/get-watchlist-candles.ts",
     "monitor": "bun run scripts/monitor.ts",
-    "login": "bun run scripts/login.ts"
+    "login": "bun run scripts/login.ts",
+    "add-symbol": "bun run scripts/add-symbol.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

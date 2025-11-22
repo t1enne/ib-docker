@@ -1,6 +1,6 @@
 services:
   ib-gateway:
-    build: .
+    build: ./ib-gateway
     container_name: ib-client-portal-gateway
     ports:
       - "5000:5000"
@@ -15,14 +15,7 @@ services:
     networks:
       - ib-network
     healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "-k",
-          "https://localhost:5000/v1/api/tickle",
-        ]
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:5000/v1/api/tickle"]
       interval: 30s
       timeout: 10s
       retries: 3

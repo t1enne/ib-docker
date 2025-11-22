@@ -7,7 +7,6 @@ export async function lookup(symbol: string) {
   const [err, r] = await attemptAsync(() =>
     client.post("iserver/secdef/search", payload),
   );
-  console.log(r);
   invariant(r, `${err}`);
   return r.data as ISecurity[];
 }

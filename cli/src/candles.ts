@@ -1,5 +1,5 @@
 import { attemptAsync, invariant } from "es-toolkit";
-import { client, fetchContractInfo } from "./shared";
+import { client, getContractInfo } from "./shared";
 import { db } from "../db/db";
 import * as v from "valibot";
 import { BAR_INTERVAL } from "../consts/interval";
@@ -17,7 +17,8 @@ export async function candles({
 }: v.InferInput<typeof ArgsSchema>) {
   v.parse(ArgsSchema, { conid, period, bar });
 
-  const symbolInfo = await fetchContractInfo(+conid);
+  const symbolInfo = await getContractInfo(+conid);
+  console.debug(symbolInfo);
   invariant(symbolInfo, "Failed retrieving symbol");
 
   const params = {
@@ -26,11 +27,19 @@ export async function candles({
     bar, // 5mins
   };
 
+  const tableName = `ohlcv_${bar as "1h"}` as const;
+  const maxTimestampResult = await db
+    .selectFrom(tableName)
+    .select((eb) => eb.fn.max("timestamp").as("maxTs"))
+    .where("symbol_id", "=", symbolInfo.id)
+    .executeTakeFirst();
+  const maxTs = maxTimestampResult?.maxTs as number | null;
+
   const [err, r] = await attemptAsync(() =>
     client.get("iserver/marketdata/history", { params }),
   );
   if (!!err) {
-    console.error(`${err}`);
+    console.error(`Failed getting marketdata: ${err}`, err);
     process.exit(1);
   }
   invariant(!!r?.data.data.length, "Missing data");
@@ -43,16 +52,7 @@ export async function candles({
     t: number;
   }>;
 
-  const tableName = `ohlcv_${bar as "1h"}` as const;
-  const maxTimestampResult = await db
-    .selectFrom(tableName)
-    .select((eb) => eb.fn.max("timestamp").as("maxTs"))
-    .where("symbol_id", "=", symbolInfo.con_id)
-    .executeTakeFirst();
-
-  const maxTs = maxTimestampResult?.maxTs as number | null;
-  const filteredData = data.filter((item) => maxTs === null || item.t > maxTs);
-
+  const filteredData = maxTs === null ? data : data;
   if (filteredData.length == 0) {
     process.exit(0);
   }
@@ -63,7 +63,7 @@ export async function candles({
     .insertInto(tableName)
     .values(
       filteredData.map((item) => ({
-        symbol_id: symbolInfo.con_id,
+        symbol_id: symbolInfo.id,
         timestamp: item.t,
         open: item.o,
         high: item.h,

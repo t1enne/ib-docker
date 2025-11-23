@@ -7,7 +7,6 @@
     "migrate:down": "bun run db/migrator.ts --down",
     "tickle": "bun run scripts/tickle.ts",
     "wls": "bun run scripts/watchlists.ts",
-    "wl": "bun run src/get-watchlist-candles.ts",
     "monitor": "bun run scripts/monitor.ts",
     "login": "bun run scripts/login.ts",
     "add-symbol": "bun run scripts/add-symbol.ts"
@@ -21,6 +20,7 @@
   "dependencies": {
     "axios": "^1.11.0",
     "blessed": "^0.1.81",
+    "dayjs": "^1.11.18",
     "es-toolkit": "^1.39.10",
     "https": "^1.0.0",
     "kysely": "^0.27.3",

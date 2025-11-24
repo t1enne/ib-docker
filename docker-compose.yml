@@ -21,6 +21,17 @@ services:
       retries: 3
       start_period: 40s
 
+  hono:
+    build: ./hono
+    container_name: ibkr-hono
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ib-network
+    restart: unless-stopped
+
 networks:
   ib-network:
     driver: bridge

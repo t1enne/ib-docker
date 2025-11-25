@@ -1,7 +1,7 @@
 export interface DatabaseSchema {
-  symbols: ISymbol;
+  symbol: ISymbol;
   watchlist: Watchlist;
-  watchlist_symbols: WatchlistSymbolsTable;
+  watchlist_symbol: WatchlistSymbolsTable;
   ohlcv_1min: OhlcvTable;
   ohlcv_5min: OhlcvTable;
   ohlcv_15min: OhlcvTable;

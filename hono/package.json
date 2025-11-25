@@ -9,7 +9,8 @@
     "tailwind": "bun run tailwindcss --input src/styles/main.css --output static/main.css",
     "check": "bun run tsc --noEmit",
     "migrate:up": "bun run src/db/migrator.ts --up",
-    "migrate:down": "bun run src/db/migrator.ts --down"
+    "migrate:down": "bun run src/db/migrator.ts --down",
+    "login": "bun run scripts/login.ts"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +23,7 @@
     "https": "^1.0.0",
     "kysely": "^0.28.8",
     "kysely-bun-sqlite": "^0.4.0",
+    "playwright": "^1.56.1",
     "valibot": "^1.1.0",
     "ws": "^8.17.1"
   },

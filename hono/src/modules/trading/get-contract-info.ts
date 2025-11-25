@@ -12,8 +12,8 @@ async function fetchContractInfo(conid: number): Promise<SymbolInfo> {
 }
 
 export async function getContractInfo(conid: number): Promise<ISymbol> {
-  const contract = await db
-    .selectFrom("symbols")
+  const contract = await (db as any)
+    .selectFrom("symbol")
     .selectAll()
     .where("id", "=", conid)
     .executeTakeFirst();
@@ -22,8 +22,8 @@ export async function getContractInfo(conid: number): Promise<ISymbol> {
     return contract;
   }
   const cinfo = await fetchContractInfo(conid);
-  return await db
-    .insertInto("symbols")
+  return await (db as any)
+    .insertInto("symbol")
     .values({
       id: conid,
       market: cinfo.exchange,

@@ -166,7 +166,7 @@ class WatchlistMonitor {
       this.ws.close();
     }
 
-    this.ws = new WebSocket("wss://localhost:5000/v1/api/ws");
+    this.ws = new WebSocket("wss://gateway:5000/v1/api/ws");
 
     this.ws.on("open", () => {
       this.statusBox.setContent("WebSocket connected");

@@ -16,7 +16,7 @@ export async function up(db: Kysely<any>) {
       col.notNull().references("watchlist.id"),
     )
     .addColumn("symbol_id", "integer", (col) =>
-      col.notNull().references("symbols.id"),
+      col.notNull().references("symbol.id"),
     )
     .addUniqueConstraint("unique_watchlist_symbol", [
       "watchlist_id",

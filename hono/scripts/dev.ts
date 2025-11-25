@@ -1,4 +1,4 @@
- import type { SpawnOptions } from "bun";
+import type { SpawnOptions } from "bun";
 
 const spawnOptions: any = {
   stdin: "inherit",

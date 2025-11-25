@@ -54,8 +54,8 @@ export async function updateWatchlist(
 }
 
 export async function deleteWatchlist(id: number): Promise<void> {
-  await db
-    .deleteFrom("watchlist_symbols")
+  await (db as any)
+    .deleteFrom("watchlist_symbol")
     .where("watchlist_id", "=", id)
     .execute();
   await db.deleteFrom("watchlist").where("id", "=", id).execute();
@@ -69,15 +69,15 @@ export async function addSymbolsToWatchlist(
     watchlist_id: watchlistId,
     symbol_id: symbolId,
   }));
-  await db.insertInto("watchlist_symbols").values(values).execute();
+  await (db as any).insertInto("watchlist_symbol").values(values).execute();
 }
 
 export async function removeSymbolsFromWatchlist(
   watchlistId: number,
   symbolIds: number[],
 ): Promise<void> {
-  await db
-    .deleteFrom("watchlist_symbols")
+  await (db as any)
+    .deleteFrom("watchlist_symbol")
     .where("watchlist_id", "=", watchlistId)
     .where("symbol_id", "in", symbolIds)
     .execute();
@@ -92,16 +92,16 @@ export async function getSymbolsInWatchlist(watchlistId: number): Promise<
     currency: string;
   }[]
 > {
-  return (await db
-    .selectFrom("watchlist_symbols")
-    .innerJoin("symbols", "symbols.id", "watchlist_symbols.symbol_id")
-    .where("watchlist_symbols.watchlist_id", "=", watchlistId)
+  return (await (db as any)
+    .selectFrom("watchlist_symbol")
+    .innerJoin("symbol", "symbol.id", "watchlist_symbol.symbol_id")
+    .where("watchlist_symbol.watchlist_id", "=", watchlistId)
     .select([
-      "symbols.id",
-      "symbols.symbol",
-      "symbols.name",
-      "symbols.market",
-      "symbols.currency",
+      "symbol.id",
+      "symbol.symbol",
+      "symbol.name",
+      "symbol.market",
+      "symbol.currency",
     ])
     .execute()) as {
     id: number;
@@ -124,7 +124,7 @@ export async function getWatchlistWithSymbols(
 export async function getSymbolId(conid: string): Promise<number | undefined> {
   console.log({ conid });
   const result = await db
-    .selectFrom("symbols")
+    .selectFrom("symbol")
     .where("id", "=", +conid)
     .select("id")
     .executeTakeFirst();

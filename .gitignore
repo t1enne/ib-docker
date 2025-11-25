@@ -15,3 +15,5 @@ wheels
 node_modules
 
 gateway
+db.sqlite-*
+static/main.css

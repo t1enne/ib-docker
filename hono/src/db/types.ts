@@ -1,7 +1,7 @@
 export interface DatabaseSchema {
-  symbols: ISymbol;
+  symbol: ISymbol;
   watchlist: Watchlist;
-  watchlist_symbols: WatchlistSymbolsTable;
+  watchlist_symbol: WatchlistSymbolsTable;
   ohlcv_1min: OhlcvTable;
   ohlcv_5min: OhlcvTable;
   ohlcv_15min: OhlcvTable;
@@ -15,7 +15,7 @@ export interface DatabaseSchema {
 export interface OhlcvTable {
   id?: number;
   symbol_id: number;
-  timestamp: Date;
+  timestamp: string; //date;
   open: number;
   high: number;
   low: number;
@@ -38,7 +38,7 @@ export interface WatchlistSymbolsTable {
 
 export interface ISymbol {
   id: number;
-  symbol: string;
+  ticker: string;
   name: string | null;
   market: string;
   currency: string;

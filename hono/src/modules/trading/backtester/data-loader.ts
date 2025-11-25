@@ -7,4 +7,10 @@ export const loadOHLCV = (table: string, symbolId: number): Promise<OHLCV[]> =>
     .where("symbol_id", "=", symbolId)
     .orderBy("timestamp", "asc")
     .selectAll()
-    .execute();
+    .execute()
+    .then((rows) =>
+      rows.map((row) => ({
+        ...row,
+        timestamp: new Date(row.timestamp as string).getTime() / 1000,
+      })),
+    );

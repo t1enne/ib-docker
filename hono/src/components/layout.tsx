@@ -1,5 +1,6 @@
 import { FC } from "hono/jsx";
 import { raw } from "hono/html";
+import { Navigation } from "./navigation";
 
 export const Layout: FC = (props) => {
   return (
@@ -22,7 +23,6 @@ export const Layout: FC = (props) => {
             type="text/css"
             href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/fill/style.css"
           />
-          <script type="module" src="/index.js" defer />
           <script
             src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
             defer
@@ -49,12 +49,13 @@ export const Layout: FC = (props) => {
           />
         </head>
         <body hx-ext="ws" ws-connect="/ws">
+          <Navigation />
           <aside
             id="toaster"
             x-data
             className="toast fixed z-10 top-0 left-0 pl-12 pt-24 pointer-events-none"
           />
-          <main id="root" className="p-4">
+          <main id="root" className="p-4 bg-black h-screen w-screen">
             {props.children}
           </main>
         </body>

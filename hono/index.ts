@@ -13,6 +13,7 @@ app.get(
   "/ws",
   upgradeWebSocket((_) => {
     console.log("Upgrading websockets");
+
     return {
       onOpen: () => console.log("Opened"),
       onClose: () => {

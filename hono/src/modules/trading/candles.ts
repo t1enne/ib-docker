@@ -60,14 +60,14 @@ export async function candles({
     process.exit(0);
   }
 
-  console.log(`Inserting ${filteredData.length} rows for ${symbolInfo.symbol}`);
+  console.log(`Inserting ${filteredData.length} rows for ${symbolInfo.ticker}`);
 
   await db
     .insertInto(tableName)
     .values(
       filteredData.map((item) => ({
         symbol_id: symbolInfo.id,
-        timestamp: dayjs(item.t).toISOString(),
+        timestamp: new Date(item.t).toISOString(),
         open: item.o,
         high: item.h,
         low: item.l,

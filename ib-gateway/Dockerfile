@@ -46,7 +46,7 @@ ENV JAVA_OPTS="-Xmx512m"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -fk https://localhost:5000/v1/api/tickle || exit 1
+  CMD ["sh", "-c", "ps aux | grep java | grep -v grep > /dev/null || exit 1"]
 
 # Run the gateway
 ENTRYPOINT ["/app/entrypoint.sh"]

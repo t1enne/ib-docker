@@ -11,8 +11,6 @@ export async function up(db: Kysely<any>) {
     .addColumn("name", "text")
     .execute();
 
-  // Create OHLCV tables for each interval
-
   for (const interval of BAR_INTERVAL) {
     const tableName = `ohlcv_${interval}`;
     await db.schema
@@ -21,7 +19,7 @@ export async function up(db: Kysely<any>) {
       .addColumn("symbol_id", "integer", (col) =>
         col.notNull().references("symbol.id"),
       )
-      .addColumn("timestamp", "date", (col) => col.notNull())
+      .addColumn("timestamp", "datetime", (col) => col.notNull())
       .addColumn("open", "real", (col) => col.notNull())
       .addColumn("high", "real", (col) => col.notNull())
       .addColumn("low", "real", (col) => col.notNull())
@@ -53,14 +51,14 @@ export async function up(db: Kysely<any>) {
   await db.schema
     .createIndex("symbol_symbol_idx")
     .on("symbol")
-    .column("ticker")
+    .column("symbol")
     .execute();
 }
 
 export async function down(db: Kysely<any>) {
-  const tables = ["symbol", ...BAR_INTERVAL];
+  const tables = ["symbol", ...BAR_INTERVAL.map((b) => `ohlcv_${b}`)];
   for (const name of tables) {
     console.log(`Dropping ${name}`);
-    db.schema.dropTable(`ohlcv_${name}`).execute();
+    await db.schema.dropTable(name).execute();
   }
 }

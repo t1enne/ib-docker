@@ -3,10 +3,11 @@ import { client } from "../shared/client";
 import type { ISecurity } from "../../types/ibkr";
 
 export async function lookup(symbol: string) {
-  const payload = { symbol };
   const [err, r] = await attemptAsync(() =>
-    client.post<{ data: ISecurity[] }>("iserver/secdef/search", payload),
+    client.post<ISecurity[]>("iserver/secdef/search", {
+      symbol: symbol.toUpperCase(),
+    }),
   );
   invariant(r, `${err}`);
-  return r.data.data;
+  return r.data;
 }

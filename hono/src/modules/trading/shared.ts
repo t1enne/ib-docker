@@ -4,19 +4,18 @@ import { db } from "../../db/db";
 import { client } from "../shared/client";
 
 export async function getContractInfo(conid: number) {
-  const savedSymbol = await (db as any)
+  const savedSymbol = await db
     .selectFrom("symbol")
     .selectAll()
     .where("id", "=", conid)
     .executeTakeFirst();
-  return savedSymbol ?? fetchContractInfo(conid);
+  return savedSymbol ?? (await fetchContractInfo(conid));
 }
 
 export async function fetchContractInfo(conid: number) {
   const ep = `iserver/contract/${conid}/info`;
   const [err, r] = await attemptAsync(() => client.get<SymbolInfo>(ep));
   invariant(r, `failed call to ${ep}: ${err}`);
-  console.log({ r });
   const values = await db
     .insertInto("symbol")
     .values({
@@ -28,5 +27,5 @@ export async function fetchContractInfo(conid: number) {
     })
     .returningAll()
     .executeTakeFirst();
-  return values;
+  return values!;
 }

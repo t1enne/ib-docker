@@ -15,7 +15,7 @@ export interface DatabaseSchema {
 export interface OhlcvTable {
   id?: number;
   symbol_id: number;
-  timestamp: string; //date;
+  timestamp: number; //date;
   open: number;
   high: number;
   low: number;

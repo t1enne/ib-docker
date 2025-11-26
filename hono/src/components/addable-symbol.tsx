@@ -4,12 +4,18 @@ interface Props {
   symbol: ISecurity;
 }
 export function AddableSymbol({ symbol }: Props) {
+  console.log(symbol);
+  const exchangeText = symbol.sections
+    .map((section) => `${section.secType} - ${section.exchange || ""}`)
+    .join("\n");
   return (
-    <div class="border p-2 mb-2">
+    <div class="border-b p-2 mb-2">
       <p>
         <strong>{symbol.symbol}</strong> - {symbol.companyName}
       </p>
       <p>{symbol.description}</p>
+      <p>{exchangeText}</p>
+      <div className="py-1" />
       <button
         type="button"
         hx-post={`/symbols/${symbol.conid}`}
@@ -18,6 +24,7 @@ export function AddableSymbol({ symbol }: Props) {
       >
         Add
       </button>
+      <div className="py-1" />
     </div>
   );
 }

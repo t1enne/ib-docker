@@ -18,21 +18,17 @@ function CandleDownloader({ symbolId }: { symbolId: number }) {
       >
         <div className="flex gap-2">
           <input type="hidden" name="conid" value={symbolId} />
-          <input
-            type="text"
-            name="period"
-            placeholder="Period (e.g. 90d)"
-            className="border p-2"
-          />
+          <input type="date" name="startDate" placeholder="Start Date" />
+          <input type="text" name="period" placeholder="Period (e.g. 90d)" />
           <select name="bar" className="border p-2">
-            <option value="1min">1min</option>
-            <option value="5min">5min</option>
-            <option value="15min">15min</option>
-            <option value="30min">30min</option>
-            <option value="1h">1h</option>
-            <option value="4h">4h</option>
             <option value="1d">1d</option>
             <option value="1w">1w</option>
+            <option value="4h">4h</option>
+            <option value="1h">1h</option>
+            <option value="30min">30min</option>
+            <option value="15min">15min</option>
+            <option value="5min">5min</option>
+            <option value="1min">1min</option>
           </select>
         </div>
       </form>
@@ -53,6 +49,7 @@ export function Symbol({ symbol, candles, showDownload }: Props) {
         </div>
         <p>MARKET: {symbol.market}</p>
         <p>CURRENCY: {symbol.currency}</p>
+        <p>ID: {symbol.id}</p>
       </div>
       {showDownload && <CandleDownloader symbolId={symbol.id} />}
       {candles && (
@@ -75,7 +72,7 @@ export function Symbol({ symbol, candles, showDownload }: Props) {
                 {candles.map((candle) => (
                   <tr key={candle.id}>
                     <td className="border px-4 py-2">
-                      {dayjs(candle.timestamp).format("DD/MM/YY-HH:mm")}
+                      {dayjs(candle.timestamp).format("YY/MM/DD-HH:mm")}
                     </td>
                     <td className="border px-4 py-2">{candle.open}</td>
                     <td className="border px-4 py-2">{candle.high}</td>

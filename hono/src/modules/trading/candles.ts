@@ -4,6 +4,7 @@ import { db } from "../../db/db";
 import * as v from "valibot";
 import { BAR_INTERVAL } from "../../consts/interval";
 import { client } from "../shared/client";
+import dayjs from "dayjs";
 
 const ArgsSchema = v.object({
   conid: v.number(),
@@ -19,33 +20,28 @@ export async function candles({
   v.parse(ArgsSchema, { conid, period, bar });
 
   const symbolInfo = await getContractInfo(+conid);
-  console.debug(symbolInfo);
   invariant(symbolInfo, "Failed retrieving symbol");
+  console.debug(`Getting candles for ${symbolInfo.ticker}`, symbolInfo);
 
-  const params = {
-    conid,
-    period, // 90d
-    bar, // 5mins
-  };
+  const tableName = `ohlcv_${bar}` as "ohlcv_1d";
+  await db
+    .deleteFrom(tableName)
+    .where("symbol_id", "=", symbolInfo.id)
+    .execute();
 
-  const tableName = `ohlcv_${bar as "1h"}` as const;
-  const maxTs = null;
-  // const maxTimestampResult = await db
-  //   .selectFrom(tableName)
-  //   .select((eb) => eb.fn.max("timestamp").as("maxTs"))
-  //   .where("symbol_id", "=", symbolInfo.id)
-  //   .executeTakeFirst();
-  // const maxTs = maxTimestampResult?.maxTs as number | null;
+  const params = { conid, bar, period };
 
   const [err, r] = await attemptAsync(() =>
     client.get("iserver/marketdata/history", { params }),
   );
   if (!!err) {
     console.error(`Failed getting marketdata: ${err}`, err);
-    process.exit(1);
+    return;
   }
-  console.log(r);
-  invariant(!!r?.data.data.length, "Missing data");
+  if (!r?.data?.data || r.data.data.length === 0) {
+    console.debug(`No candles found`);
+    return;
+  }
   const data = r.data.data as Array<{
     o: number;
     c: number;
@@ -54,20 +50,13 @@ export async function candles({
     v: number;
     t: number;
   }>;
-
-  const filteredData = maxTs === null ? data : data;
-  if (filteredData.length == 0) {
-    process.exit(0);
-  }
-
-  console.log(`Inserting ${filteredData.length} rows for ${symbolInfo.ticker}`);
-
+  console.log(data.slice(0, 10));
   await db
     .insertInto(tableName)
     .values(
-      filteredData.map((item) => ({
+      data.map((item) => ({
         symbol_id: symbolInfo.id,
-        timestamp: new Date(item.t).toISOString(),
+        timestamp: item.t,
         open: item.o,
         high: item.h,
         low: item.l,

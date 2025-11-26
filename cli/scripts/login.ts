@@ -1,0 +1,60 @@
+import { delay } from "es-toolkit";
+import { chromium } from "playwright";
+
+type TradingMode = "paper" | "live";
+
+async function loginToIBKR(
+  username: string,
+  password: string,
+  mode: TradingMode,
+) {
+  const browser = await chromium.launch({ headless: false }); // Set to true for headless
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true, // Handle self-signed cert
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto("https://localhost:5000");
+
+    // set paper trading mode
+    if (mode == "paper") {
+      await page.click('label[for="toggle1"]');
+    }
+    await delay(500);
+    await page.fill(
+      'input[name="username"], #username, input[type="text"]',
+      username,
+    );
+    await page.fill(
+      'input[name="password"], #password, input[type="password"]',
+      password,
+    );
+    await page.click(
+      'button[type="submit"], input[type="submit"], .login-button',
+    );
+    page.getByText("Client login succeeds");
+    // Wait for navigation or success indicator
+    console.log("Login attempt completed");
+    process.exit(0);
+  } catch (error) {
+    console.error("Login failed:", error);
+  } finally {
+    // Optionally close browser, or keep it open for manual interaction
+    // await browser.close();
+  }
+}
+
+// Get credentials from environment variables or command line args
+const username = process.env.IBKR_USERNAME;
+const password = process.env.IBKR_PASSWORD;
+const mode: TradingMode = process.env.TRADING_MODE == "live" ? "live" : "paper";
+
+if (!username || !password) {
+  console.error(
+    "Please provide username and password via env vars IBKR_USERNAME/IBKR_PASSWORD or command line args",
+  );
+  process.exit(1);
+}
+
+loginToIBKR(username, password, mode);

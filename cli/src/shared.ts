@@ -12,9 +12,9 @@ export const client = axios.create({
 
 export async function getContractInfo(conid: number) {
   const savedSymbol = await db
-    .selectFrom("symbols")
+    .selectFrom("symbol")
     .selectAll()
-    .where("symbols.id", "=", conid)
+    .where("symbol.id", "=", conid)
     .executeTakeFirst();
   return savedSymbol ?? fetchContractInfo(conid);
 }
@@ -24,7 +24,7 @@ export async function fetchContractInfo(conid: number) {
   const [err, r] = await attemptAsync(() => client.get<SymbolInfo>(ep));
   invariant(r, `failed call to ${ep}: ${err}`);
   const values = await db
-    .insertInto("symbols")
+    .insertInto("symbol")
     .values({
       id: r.data.con_id,
       name: r.data.company_name,

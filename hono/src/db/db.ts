@@ -15,6 +15,7 @@ const dialect = new BunSqliteDialect({
 
 export const db = new Kysely<DatabaseSchema>({
   dialect,
+  log: ["query", "error"],
   plugins: [new CamelCasePlugin()],
 });
 

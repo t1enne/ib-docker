@@ -53,5 +53,5 @@ export interface ISecurity {
   symbol: string; //  "IBM";
   description: string; //  "NYSE";
   restricted: null;
-  sections: Array<{ secType: string }>;
+  sections: Array<{ secType: string; exchange?: string }>;
 }

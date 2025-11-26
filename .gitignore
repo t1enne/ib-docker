@@ -15,5 +15,6 @@ wheels
 node_modules
 
 gateway
+db.sqlite
 db.sqlite-*
 hono/static/main.css

@@ -3,6 +3,7 @@
 html {
   background: black;
   color: green;
+  --bg-color: #001100;
 }
 
 *:focus-visible {
@@ -11,12 +12,12 @@ html {
 
 .retro-terminal {
   font-family: "Courier New", Courier, monospace;
-  background-color: #001100;
+  background-color: var(--bg-color);
   color: #00ff00;
   padding: 20px;
   border-radius: 0;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
   text-shadow: 0 0 5px #00ff00;
   filter: drop-shadow(0 0 2px #00ff00);
   box-shadow:
@@ -39,4 +40,21 @@ button {
   border: 1px solid currentColor;
   background: transparent;
   font-weight: 800;
+}
+
+input {
+  @apply border p-2;
+}
+
+table {
+  width: 100%;
+  table-layout: fixed; /* Ensures consistent column widths */
+}
+
+table th {
+  background-color: var(--bg-color);
+  font-weight: bold;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }

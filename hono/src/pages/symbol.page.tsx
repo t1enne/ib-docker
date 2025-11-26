@@ -16,7 +16,6 @@ export default async function Page({ ticker }: Props) {
     .selectFrom("ohlcv_1d")
     .where("symbol_id", "=", symbol.id)
     .orderBy("timestamp", "desc")
-    .limit(50)
     .selectAll()
     .execute();
 

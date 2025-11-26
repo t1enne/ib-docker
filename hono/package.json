@@ -10,7 +10,8 @@
     "check": "bun run tsc --noEmit",
     "migrate:up": "bun run src/db/migrator.ts --up",
     "migrate:down": "bun run src/db/migrator.ts --down",
-    "login": "bun run scripts/login.ts"
+    "login": "bun run scripts/login.ts",
+    "tickle": "bun run scripts/tickle.ts"
   },
   "keywords": [],
   "author": "",

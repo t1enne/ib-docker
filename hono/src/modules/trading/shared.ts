@@ -17,13 +17,13 @@ export async function fetchContractInfo(conid: number) {
   const [err, r] = await attemptAsync(() => client.get<SymbolInfo>(ep));
   invariant(r, `failed call to ${ep}: ${err}`);
   console.log({ r });
-  const values = await (db as any)
+  const values = await db
     .insertInto("symbol")
     .values({
       id: r.data.con_id,
       name: r.data.company_name,
       currency: r.data.currency,
-      symbol: r.data.symbol,
+      ticker: r.data.symbol,
       market: r.data.exchange,
     })
     .returningAll()

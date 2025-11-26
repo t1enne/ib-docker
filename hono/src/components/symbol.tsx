@@ -1,15 +1,94 @@
-import { ISymbol } from "../db/types";
+import dayjs from "dayjs";
+import { ISymbol, OhlcvTable } from "../db/types";
 
 interface Props {
   symbol: ISymbol;
+  candles?: OhlcvTable[];
+  showDownload?: boolean;
 }
-export function Symbol({ symbol }: Props) {
+
+function CandleDownloader({ symbolId }: { symbolId: number }) {
   return (
-    <div className="grid grid-cols-3">
-      <div className="hidden">{symbol.id}</div>
-      <div>{symbol.name}</div>
-      <div>{symbol.market}</div>
-      <div>{symbol.currency}</div>
+    <div>
+      <h2 className="text-lg font-semibold">Download Candles</h2>
+      <form
+        hx-post="/download-candles"
+        hx-target="#download-result"
+        hx-swap="innerHTML"
+      >
+        <div className="flex gap-2">
+          <input type="hidden" name="conid" value={symbolId} />
+          <input
+            type="text"
+            name="period"
+            placeholder="Period (e.g. 90d)"
+            className="border p-2"
+          />
+          <select name="bar" className="border p-2">
+            <option value="1min">1min</option>
+            <option value="5min">5min</option>
+            <option value="15min">15min</option>
+            <option value="30min">30min</option>
+            <option value="1h">1h</option>
+            <option value="4h">4h</option>
+            <option value="1d">1d</option>
+            <option value="1w">1w</option>
+          </select>
+        </div>
+      </form>
+      <div id="download-result" className="mt-4"></div>
+    </div>
+  );
+}
+
+export function Symbol({ symbol, candles, showDownload }: Props) {
+  return (
+    <div className="space-y-6">
+      <div className="">
+        <div className="hidden">{symbol.id}</div>
+        <div>
+          <a href={`/symbols/${symbol.ticker}`}>
+            <b>{symbol.name}</b>
+          </a>
+        </div>
+        <p>MARKET: {symbol.market}</p>
+        <p>CURRENCY: {symbol.currency}</p>
+      </div>
+      {showDownload && <CandleDownloader symbolId={symbol.id} />}
+      {candles && (
+        <>
+          {/* Market Data Table */}
+          <h2 className="text-lg font-semibold">Market Data (1d)</h2>
+          <div className="overflow-auto h-[600px] border">
+            <table className="table-auto border-collapse w-full">
+              <thead>
+                <tr>
+                  <th className="border px-4 py-2">Timestamp</th>
+                  <th className="border px-4 py-2">Open</th>
+                  <th className="border px-4 py-2">High</th>
+                  <th className="border px-4 py-2">Low</th>
+                  <th className="border px-4 py-2">Close</th>
+                  <th className="border px-4 py-2">Volume</th>
+                </tr>
+              </thead>
+              <tbody>
+                {candles.map((candle) => (
+                  <tr key={candle.id}>
+                    <td className="border px-4 py-2">
+                      {dayjs(candle.timestamp).format("DD/MM/YY-HH:mm")}
+                    </td>
+                    <td className="border px-4 py-2">{candle.open}</td>
+                    <td className="border px-4 py-2">{candle.high}</td>
+                    <td className="border px-4 py-2">{candle.low}</td>
+                    <td className="border px-4 py-2">{candle.close}</td>
+                    <td className="border px-4 py-2">{candle.volume}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

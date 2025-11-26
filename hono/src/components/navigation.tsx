@@ -47,17 +47,19 @@ export async function Navigation() {
           x-model="query"
           type="text"
           placeholder="Type to navigate..."
-          className="w-full p-2 border border-gray-300 mb-2"
+          className="w-full p-2 border mb-2"
           x-on:keydown="if ($event.key === 'Enter' && filteredRoutes.length > 0) { window.location.href = filteredRoutes[selectedIndex]; } else if ($event.key === 'ArrowDown') { $event.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, filteredRoutes.length - 1); } else if ($event.key === 'ArrowUp') { $event.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); }"
         />
         <ul className="max-h-60 overflow-y-auto">
           <template x-for="(route, index) in filteredRoutes">
             <li
-              x-bind:class="index === selectedIndex ? 'bg-blue-100' : ''"
-              className="p-2 cursor-pointer hover:bg-gray-100"
+              x-bind:class="index === selectedIndex ? 'text-white' : ''"
+              className="p-2 hover:text-white"
               x-on:click="window.location.href = route"
             >
-              <span x-text="route" className=""></span>
+              <a hx-boost x-bind:href={`route`}>
+                <span x-text="route" className=""></span>
+              </a>
             </li>
           </template>
         </ul>

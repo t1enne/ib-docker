@@ -4,7 +4,6 @@ import { db } from "../../db/db";
 import * as v from "valibot";
 import { BAR_INTERVAL } from "../../consts/interval";
 import { client } from "../shared/client";
-import dayjs from "dayjs";
 
 const ArgsSchema = v.object({
   conid: v.number(),
@@ -45,6 +44,7 @@ export async function candles({
     console.error(`Failed getting marketdata: ${err}`, err);
     process.exit(1);
   }
+  console.log(r);
   invariant(!!r?.data.data.length, "Missing data");
   const data = r.data.data as Array<{
     o: number;

@@ -12,8 +12,7 @@ export function AddableSymbol({ symbol }: Props) {
       <p>{symbol.description}</p>
       <button
         type="button"
-        hx-post={`/add-symbol/${symbol.conid}`}
-        hx-target="#add-result"
+        hx-post={`/symbols/${symbol.conid}`}
         hx-swap="innerHTML"
         class="bg-purple-500 text-white px-2 py-1 text-sm"
       >

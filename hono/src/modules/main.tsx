@@ -49,24 +49,6 @@ main.post("/download-candles", async (c) => {
   );
 });
 
-main.post("/add-symbol/:conid", async (c) => {
-  const conid = c.req.param("conid");
-  const symbolInfo = await getContractInfo(+conid);
-  if (!symbolInfo)
-    return c.html("<p class='text-red-600'>Symbol not found</p>");
-
-  // Get or create default watchlist
-  let watchlists = await getAllWatchlists();
-  let defaultWatchlist = watchlists.find((w) => w.name === "Default");
-  if (!defaultWatchlist) {
-    const id = await createWatchlist("Default");
-    defaultWatchlist = { id, name: "Default", notes: null, strategy: null };
-  }
-
-  await addSymbolsToWatchlist(defaultWatchlist.id!, [symbolInfo.id]);
-  return c.html("<p class='text-green-600'>Symbol added to watchlist</p>");
-});
-
 main.get("/candles/:conid/:bar?", async (c) => {
   const conid = +c.req.param("conid");
   const bar = c.req.param("bar") || "1d";

@@ -3,6 +3,7 @@ import { raw } from "hono/html";
 import { Navigation } from "./navigation";
 
 export const Layout: FC = (props) => {
+  // hx-ext="ws" ws-connect="/ws"
   return (
     <>
       {raw("<!doctype html>")}
@@ -12,7 +13,6 @@ export const Layout: FC = (props) => {
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <meta name="color-scheme" content="light dark" />
-          <link rel="icon" href="/favicon.ico" />
           <link
             rel="stylesheet"
             type="text/css"
@@ -48,14 +48,17 @@ export const Layout: FC = (props) => {
             }}
           />
         </head>
-        <body hx-ext="ws" ws-connect="/ws">
-          <Navigation />
+        <body>
           <aside
             id="toaster"
             x-data
             className="toast fixed z-10 top-0 left-0 pl-12 pt-24 pointer-events-none"
           />
-          <main id="root" className="p-4 bg-black h-screen w-screen">
+          <main
+            id="root"
+            className="p-4 bg-black h-screen w-screen retro-terminal"
+          >
+            <Navigation />
             {props.children}
           </main>
         </body>

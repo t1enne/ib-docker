@@ -16,4 +16,4 @@ node_modules
 
 gateway
 db.sqlite-*
-static/main.css
+hono/static/main.css

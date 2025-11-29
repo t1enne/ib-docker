@@ -8,7 +8,7 @@ services:
       - JAVA_OPTS=-Xmx512m -Djava.security.egd=file:/dev/./urandom
     volumes:
       # Optional: Mount directory for persistent session data
-      - ./data:/app/data
+      # - ./data:/app/data
       # Optional: Mount custom certificates
       - ./certs:/app/certs:ro
     restart: unless-stopped
@@ -21,20 +21,19 @@ services:
       retries: 3
       start_period: 40s
 
-  hono:
-    build: ./hono
-    command: bun run dev
-    container_name: hono
-    ports:
-      - "3000:3000"
-      - "5000:5000"
-    volumes:
-      - ./hono:/app
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - ib-network
-    restart: unless-stopped
+  # hono:
+  #   build: ./hono
+  #   command: bun run dev
+  #   container_name: hono
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./hono:/app
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   networks:
+  #     - ib-network
+  #   restart: unless-stopped
 
 networks:
   ib-network:

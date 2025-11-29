@@ -1,23 +1,106 @@
 import click
+import yaml
 
-from src.mx import matrix
-
+import src.mx as mx_mod
+import src.spread as spread_mod
+import src.nd as nd_mod
+import src.pnd as pnd_mod
+from src.bt import StrategyType, backtest, load_strategy, Strategy
 
 @click.group()
 def main():
     pass
 
 
-@main.command()
+@main.command(help="log correlation and cointegrations for the passed symbols")
 @click.argument("symbols", nargs=-1)
 def mx(symbols: list[str]):
-    matrix(symbols)
+    mx_mod.matrix(symbols)
 
 
 @main.command()
 @click.argument("symbols", nargs=2)
-def pair(symbols: tuple[str, str]):
-    print(symbols)
+@click.option("--fr")
+def spread(symbols: tuple[str, str], fr: str | None):
+    spread_mod.spread(symbols, fr)
+
+
+@main.command(help="plot normalized deviation between price/returns and relative MA")
+@click.argument("symbol")
+@click.argument("ma", default=10)
+def nd(symbol: str, ma: int):
+    nd_mod.nd(symbol, ma)
+
+
+@main.command(
+    help="plot normalized deviation between pairs prices/returns vs their MAs"
+)
+@click.argument("symbols", nargs=2)
+def pnd(symbols: list[str]):
+    pnd_mod.pnd(symbols)
+
+
+@main.command(help="create and save a strategy configuration")
+@click.argument("strategy_type", type=click.Choice([s.value for s in StrategyType]))
+@click.argument("symbols", nargs=-1)
+@click.option("--name", help="Strategy name")
+@click.option("--ma-period", default=20, help="Moving average period")
+@click.option("--entry-z", default=2.0, help="Entry z-score")
+@click.option("--stop-loss", default=0.05, help="Stop loss")
+@click.option("--take-profit", default=0.10, help="Take profit")
+@click.option("--initial-capital", default=100000, help="Initial capital")
+@click.option("--position-size", default=0.1, help="Position size")
+@click.option("--commission", default=0.001, help="Commission")
+@click.option("--start-date", help="Start date")
+@click.option("--end-date", help="End date")
+@click.option("--plot/--no-plot", default=True, help="Plot results")
+@click.option("--output", "-o", help="Output YAML file")
+def strategy(
+    strategy_type: str,
+    symbols: tuple[str],
+    name: str,
+    ma_period: int,
+    entry_z: float,
+    stop_loss: float,
+    take_profit: float,
+    initial_capital: float,
+    position_size: float,
+    commission: float,
+    start_date: str,
+    end_date: str,
+    plot: bool,
+    output: str,
+):
+    if not name:
+        name = f"{strategy_type}_{'_'.join(symbols)}"
+    if not output:
+        output = f"{name}.yaml"
+    strat = Strategy(
+        name=name,
+        strategy_type=strategy_type,
+        symbols=list(symbols),
+        ma_period=ma_period,
+        entry_z=entry_z,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        initial_capital=initial_capital,
+        position_size=position_size,
+        commission=commission,
+        start_date=start_date,
+        end_date=end_date,
+        plot=plot,
+    )
+
+    with open(output, "w") as f:
+        yaml.dump(strat.__dict__, f)
+    click.echo(f"Strategy saved to {output}")
+
+
+@main.command(help="run backtest from strategy file")
+@click.argument("strategy_file")
+def bt(strategy_file: str):
+    strategy = load_strategy(strategy_file)
+    backtest(strategy)
 
 
 if __name__ == "__main__":

@@ -35,12 +35,11 @@ main.post("/lookup", async (c) => {
 
 main.post("/download-candles", async (c) => {
   const fd = await c.req.formData();
-  const { conid, period, bar, startDate } = Object.fromEntries(fd.entries());
-  console.log(Object.fromEntries(fd.entries()));
+  const { conid, period, bar, startTime } = Object.fromEntries(fd.entries());
   await candles({
     conid: +conid!,
     period: period?.length ? period : undefined,
-    startDate: startDate?.length ? startDate : undefined,
+    startTime: startTime?.length ? startTime : undefined,
     bar: bar!,
   });
   return c.html(

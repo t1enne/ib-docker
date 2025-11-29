@@ -34,9 +34,9 @@ async function loginToIBKR(
       'button[type="submit"], input[type="submit"], .login-button',
     );
     page.getByText("Client login succeeds");
+    await page.waitForTimeout(1000);
     // Wait for navigation or success indicator
     console.log("Login attempt completed");
-    process.exit(0);
   } catch (error) {
     console.error("Login failed:", error);
   } finally {

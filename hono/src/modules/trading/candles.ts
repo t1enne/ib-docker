@@ -10,16 +10,16 @@ const ArgsSchema = v.object({
   conid: v.number(),
   bar: v.picklist(BAR_INTERVAL),
   period: v.optional(v.pipe(v.string(), v.endsWith("d"))),
-  startDate: v.optional(v.string()),
+  startTime: v.optional(v.string()),
 });
 
 export async function candles({
   conid,
   period,
   bar,
-  startDate,
+  startTime,
 }: v.InferInput<typeof ArgsSchema>) {
-  v.parse(ArgsSchema, { conid, period, bar, startDate });
+  v.parse(ArgsSchema, { conid, period, bar, startTime });
 
   const symbolInfo = await getContractInfo(+conid);
   invariant(symbolInfo, "Failed retrieving symbol");
@@ -31,8 +31,8 @@ export async function candles({
     conid,
     bar,
     period,
-    startDate: startDate
-      ? dayjs(startDate).format("YYYYMMDD-HH:mm:ss")
+    startTime: startTime
+      ? dayjs(startTime).format("YYYYMMDD-HH:mm:ss")
       : undefined,
   };
   console.debug(`Getting candles with p: ${JSON.stringify(params, null, 2)}`);
@@ -41,7 +41,7 @@ export async function candles({
     client.get("iserver/marketdata/history", { params }),
   );
   if (!!err) {
-    console.error(`Failed getting marketdata: ${err}`, err);
+    console.error(`Failed getting marketdata: ${err}`);
     return;
   }
   if (!r?.data?.data || r.data.data.length === 0) {

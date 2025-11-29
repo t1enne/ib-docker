@@ -1,7 +1,7 @@
 export interface DatabaseSchema {
   symbol: ISymbol;
-  watchlist: Watchlist;
-  watchlist_symbol: WatchlistSymbolsTable;
+  watchlist: IWatchlist;
+  watchlist_symbol: IWatchlistSymbol;
   ohlcv_1min: OhlcvTable;
   ohlcv_5min: OhlcvTable;
   ohlcv_15min: OhlcvTable;
@@ -23,14 +23,14 @@ export interface OhlcvTable {
   volume: number;
 }
 
-export interface Watchlist {
+export interface IWatchlist {
   id?: number;
   name: string;
   notes: string | null;
   strategy: string | null;
 }
 
-export interface WatchlistSymbolsTable {
+export interface IWatchlistSymbol {
   id?: number;
   watchlist_id: number;
   symbol_id: number;

@@ -9,27 +9,33 @@ import dayjs from "dayjs";
 const ArgsSchema = v.object({
   conid: v.number(),
   bar: v.picklist(BAR_INTERVAL),
-  period: v.pipe(v.string(), v.endsWith("d")),
+  period: v.optional(v.pipe(v.string(), v.endsWith("d"))),
+  startDate: v.optional(v.string()),
 });
 
 export async function candles({
   conid,
   period,
   bar,
+  startDate,
 }: v.InferInput<typeof ArgsSchema>) {
-  v.parse(ArgsSchema, { conid, period, bar });
+  v.parse(ArgsSchema, { conid, period, bar, startDate });
 
   const symbolInfo = await getContractInfo(+conid);
   invariant(symbolInfo, "Failed retrieving symbol");
   console.debug(`Getting candles for ${symbolInfo.ticker}`, symbolInfo);
 
   const tableName = `ohlcv_${bar}` as "ohlcv_1d";
-  await db
-    .deleteFrom(tableName)
-    .where("symbol_id", "=", symbolInfo.id)
-    .execute();
 
-  const params = { conid, bar, period };
+  const params = {
+    conid,
+    bar,
+    period,
+    startDate: startDate
+      ? dayjs(startDate).format("YYYYMMDD-HH:mm:ss")
+      : undefined,
+  };
+  console.debug(`Getting candles with p: ${JSON.stringify(params, null, 2)}`);
 
   const [err, r] = await attemptAsync(() =>
     client.get("iserver/marketdata/history", { params }),
@@ -50,7 +56,8 @@ export async function candles({
     v: number;
     t: number;
   }>;
-  console.log(data.slice(0, 10));
+
+  console.debug(`Inserting ${data.length} candles`);
   await db
     .insertInto(tableName)
     .values(
@@ -63,6 +70,15 @@ export async function candles({
         close: item.c,
         volume: item.v,
       })),
+    )
+    .onConflict((oc) =>
+      oc.columns(["timestamp", "symbol_id"]).doUpdateSet({
+        open: (eb) => eb.ref("excluded.open"),
+        high: (eb) => eb.ref("excluded.high"),
+        low: (eb) => eb.ref("excluded.low"),
+        close: (eb) => eb.ref("excluded.close"),
+        volume: (eb) => eb.ref("excluded.volume"),
+      }),
     )
     .execute();
 }

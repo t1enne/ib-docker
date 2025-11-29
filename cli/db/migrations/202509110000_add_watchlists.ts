@@ -10,15 +10,22 @@ export async function up(db: Kysely<any>) {
     .execute();
 
   await db.schema
-    .createTable("watchlist_symbols")
+    .createTable("watchlist_symbol")
     .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
-    .addColumn("watchlist_id", "integer", (col) => col.notNull().references("watchlist.id"))
-    .addColumn("symbol_id", "integer", (col) => col.notNull().references("symbols.id"))
-    .addUniqueConstraint("unique_watchlist_symbol", ["watchlist_id", "symbol_id"])
+    .addColumn("watchlist_id", "integer", (col) =>
+      col.notNull().references("watchlist.id"),
+    )
+    .addColumn("symbol_id", "integer", (col) =>
+      col.notNull().references("symbol.id"),
+    )
+    .addUniqueConstraint("unique_watchlist_symbol", [
+      "watchlist_id",
+      "symbol_id",
+    ])
     .execute();
 }
 
 export async function down(db: Kysely<any>) {
-  await db.schema.dropTable("watchlist_symbols").execute();
+  await db.schema.dropTable("watchlist_symbol").execute();
   await db.schema.dropTable("watchlist").execute();
 }

@@ -14,7 +14,6 @@ html {
   font-family: "Courier New", Courier, monospace;
   background-color: var(--bg-color);
   color: #00ff00;
-  padding: 20px;
   border-radius: 0;
   position: relative;
   overflow: auto;
@@ -37,9 +36,25 @@ html {
 }
 
 button {
-  border: 1px solid currentColor;
-  background: transparent;
-  font-weight: 800;
+  &:not(.link) {
+    @apply p-2;
+    border: 1px solid currentColor;
+    background: transparent;
+    font-weight: 800;
+  }
+  &.link {
+    font-weight: bold;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+a {
+  font-weight: bold;
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 input {

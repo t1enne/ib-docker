@@ -2,16 +2,6 @@ import { invariant } from "es-toolkit";
 import { db } from "../db/db";
 import type { Watchlist } from "../db/types";
 
-export interface WatchlistWithSymbols extends Watchlist {
-  symbols: {
-    id: number;
-    symbol: string;
-    name?: string | null;
-    market: string;
-    currency: string;
-  }[];
-}
-
 export async function createWatchlist(
   name: string,
   notes?: string,
@@ -55,7 +45,7 @@ export async function updateWatchlist(
 
 export async function deleteWatchlist(id: number): Promise<void> {
   await db
-    .deleteFrom("watchlist_symbols")
+    .deleteFrom("watchlist_symbol")
     .where("watchlist_id", "=", id)
     .execute();
   await db.deleteFrom("watchlist").where("id", "=", id).execute();
@@ -69,7 +59,7 @@ export async function addSymbolsToWatchlist(
     watchlist_id: watchlistId,
     symbol_id: symbolId,
   }));
-  await db.insertInto("watchlist_symbols").values(values).execute();
+  await db.insertInto("watchlist_symbol").values(values).execute();
 }
 
 export async function removeSymbolsFromWatchlist(
@@ -77,44 +67,28 @@ export async function removeSymbolsFromWatchlist(
   symbolIds: number[],
 ): Promise<void> {
   await db
-    .deleteFrom("watchlist_symbols")
+    .deleteFrom("watchlist_symbol")
     .where("watchlist_id", "=", watchlistId)
     .where("symbol_id", "in", symbolIds)
     .execute();
 }
 
-export async function getSymbolsInWatchlist(watchlistId: number): Promise<
-  {
-    id: number;
-    symbol: string;
-    name?: string | null;
-    market: string;
-    currency: string;
-  }[]
-> {
-  return (await db
-    .selectFrom("watchlist_symbols")
-    .innerJoin("symbols", "symbols.id", "watchlist_symbols.symbol_id")
-    .where("watchlist_symbols.watchlist_id", "=", watchlistId)
+export async function getSymbolsInWatchlist(watchlistId: number) {
+  return await db
+    .selectFrom("watchlist_symbol")
+    .innerJoin("symbol", "symbol.id", "watchlist_symbol.symbol_id")
+    .where("watchlist_symbol.watchlist_id", "=", watchlistId)
     .select([
-      "symbols.id",
-      "symbols.symbol",
-      "symbols.name",
-      "symbols.market",
-      "symbols.currency",
+      "symbol.id",
+      "symbol.ticker",
+      "symbol.name",
+      "symbol.market",
+      "symbol.currency",
     ])
-    .execute()) as {
-    id: number;
-    symbol: string;
-    name?: string | null;
-    market: string;
-    currency: string;
-  }[];
+    .execute();
 }
 
-export async function getWatchlistWithSymbols(
-  id: number,
-): Promise<WatchlistWithSymbols | undefined> {
+export async function getWatchlistWithSymbols(id: number) {
   const watchlist = await getWatchlist(id);
   if (!watchlist) return undefined;
   const symbols = await getSymbolsInWatchlist(id);
@@ -124,7 +98,7 @@ export async function getWatchlistWithSymbols(
 export async function getSymbolId(conid: string): Promise<number | undefined> {
   console.log({ conid });
   const result = await db
-    .selectFrom("symbols")
+    .selectFrom("symbol")
     .where("id", "=", +conid)
     .select("id")
     .executeTakeFirst();

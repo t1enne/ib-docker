@@ -3,11 +3,17 @@ import { db } from "../db/db";
 function getSymbols() {
   return db.selectFrom("symbol").select("ticker").execute();
 }
+
+function getWatchlists() {
+  return db.selectFrom("watchlist").select("id").execute();
+}
+
 export async function Navigation() {
-  const data = await Promise.all([getSymbols()]);
-  const [symbols] = data;
+  const data = await Promise.all([getSymbols(), getWatchlists()]);
+  const [symbols, watchlists] = data;
   const symbolRoutes = symbols.map((s) => `/symbols/${s.ticker}`);
-  const routes = ["/", "/symbols", "/symbols/add", ...symbolRoutes];
+  const watchlistRoutes = watchlists.map((w) => `/watchlists/${w.id}`);
+  const routes = ["/", "/symbols", "/symbols/add", "/watchlists", "/watchlists/add", ...symbolRoutes, ...watchlistRoutes];
 
   return (
     <div

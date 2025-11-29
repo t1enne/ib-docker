@@ -4,7 +4,7 @@ import path from "path";
 import type { DatabaseSchema } from "./types";
 import { BunSqliteDialect } from "kysely-bun-sqlite";
 
-const dbPath = path.join(process.cwd(), "db.sqlite");
+const dbPath = path.join(process.cwd(), "..", "data", "db.sqlite");
 const _db = new Database(dbPath);
 const dialect = new BunSqliteDialect({
   database: _db,
@@ -15,6 +15,7 @@ const dialect = new BunSqliteDialect({
 
 export const db = new Kysely<DatabaseSchema>({
   dialect,
+  log: ["query", "error"],
   plugins: [new CamelCasePlugin()],
 });
 

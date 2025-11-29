@@ -5,10 +5,12 @@ import { candles } from "./trading/candles";
 import { client } from "./shared/client";
 import { AddableSymbol } from "../components/addable-symbol";
 import symbols from "./symbols/";
+import watchlists from "./watchlists/";
 
 const main = new Hono();
 
 main.route("/symbols", symbols);
+main.route("/watchlists", watchlists);
 
 main.get("/", (c) => c.render(<Main />));
 
@@ -34,9 +36,11 @@ main.post("/lookup", async (c) => {
 main.post("/download-candles", async (c) => {
   const fd = await c.req.formData();
   const { conid, period, bar, startDate } = Object.fromEntries(fd.entries());
+  console.log(Object.fromEntries(fd.entries()));
   await candles({
     conid: +conid!,
-    period: period!,
+    period: period?.length ? period : undefined,
+    startDate: startDate?.length ? startDate : undefined,
     bar: bar!,
   });
   return c.html(

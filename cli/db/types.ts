@@ -15,7 +15,7 @@ export interface DatabaseSchema {
 export interface OhlcvTable {
   id?: number;
   symbol_id: number;
-  timestamp: number;
+  timestamp: number; //date;
   open: number;
   high: number;
   low: number;
@@ -38,7 +38,7 @@ export interface WatchlistSymbolsTable {
 
 export interface ISymbol {
   id: number;
-  symbol: string;
+  ticker: string;
   name: string | null;
   market: string;
   currency: string;

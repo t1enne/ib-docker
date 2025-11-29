@@ -44,6 +44,7 @@ export async function up(db: Kysely<any>) {
       .createIndex(`${tableName}_symbol_timestamp_idx`)
       .on(tableName)
       .columns(["symbol_id", "timestamp"])
+      .unique()
       .execute();
   }
 
@@ -51,7 +52,7 @@ export async function up(db: Kysely<any>) {
   await db.schema
     .createIndex("symbol_symbol_idx")
     .on("symbol")
-    .column("symbol")
+    .column("ticker")
     .execute();
 }
 

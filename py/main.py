@@ -7,6 +7,7 @@ import src.nd as nd_mod
 import src.pnd as pnd_mod
 from src.bt import StrategyType, backtest, load_strategy, Strategy
 
+
 @click.group()
 def main():
     pass
@@ -51,8 +52,13 @@ def pnd(symbols: list[str]):
 @click.option("--initial-capital", default=100000, help="Initial capital")
 @click.option("--position-size", default=0.1, help="Position size")
 @click.option("--commission", default=0.001, help="Commission")
-@click.option("--start-date", help="Start date")
-@click.option("--end-date", help="End date")
+@click.option("--training-start", required=True, help="Training start date")
+@click.option("--training-end", required=True, help="Training end date")
+@click.option("--trading-start", required=True, help="Trading start date")
+@click.option("--trading-end", required=True, help="Trading end date")
+@click.option(
+    "--retrain-interval-months", default=1, help="Retraining interval in months"
+)
 @click.option("--plot/--no-plot", default=True, help="Plot results")
 @click.option("--output", "-o", help="Output YAML file")
 def strategy(
@@ -66,8 +72,11 @@ def strategy(
     initial_capital: float,
     position_size: float,
     commission: float,
-    start_date: str,
-    end_date: str,
+    training_start: str,
+    training_end: str,
+    trading_start: str,
+    trading_end: str,
+    retrain_interval_months: int,
     plot: bool,
     output: str,
 ):
@@ -86,8 +95,11 @@ def strategy(
         initial_capital=initial_capital,
         position_size=position_size,
         commission=commission,
-        start_date=start_date,
-        end_date=end_date,
+        training_start=training_start,
+        training_end=training_end,
+        trading_start=trading_start,
+        trading_end=trading_end,
+        retrain_interval_months=retrain_interval_months,
         plot=plot,
     )
 

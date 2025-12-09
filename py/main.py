@@ -108,11 +108,12 @@ def strategy(
     click.echo(f"Strategy saved to {output}")
 
 
-@main.command(help="run backtest from strategy file")
+@main.command(help="run walk-forward backtest from strategy file")
 @click.argument("strategy_file")
 def bt(strategy_file: str):
     strategy = load_strategy(strategy_file)
     backtest(strategy)
+
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import pandas as pd
 from src.utils import get_ols_fit_model, read_candles
 
@@ -22,24 +21,3 @@ def pnd(symbols: list[str]):
         }
     )
 
-    # --- 4) Plot normalized series ---
-    fig, axes = plt.subplots(figsize=(12, 5), nrows=2)
-    axes[0].plot(s1, label=symbols[0])
-    axes[0].plot(df[f"{symbols[1]}_scaled"], label=f"{symbols[1]} scaled")
-    axes[0].legend()
-    axes[0].set_title("Cointegration-Based Normalization")
-    axes[0].set_xlabel("Time")
-    axes[0].set_ylabel("Close")
-    axes[0].grid()
-
-    # --- 5) Plot normalized spread ---
-    axes[1].plot(df["z_score"], label="Normalized Spread")
-    axes[1].axhline(0, color="black", linestyle="--")
-    axes[1].legend()
-    axes[1].set_title("Spread (Mean-Reverting Series)")
-    axes[1].set_xlabel("Time")
-    axes[1].set_ylabel("Z")
-    axes[1].grid()
-
-    fig.tight_layout()
-    plt.show()

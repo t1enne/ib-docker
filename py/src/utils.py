@@ -2,7 +2,6 @@ import pandas as pd
 import sqlite3
 import numpy as np
 import statsmodels.api as sm
-import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 from datetime import datetime
 
@@ -96,11 +95,3 @@ def symmetric_cointegration_p(price1, price2):
     return float((p1 + p2) / 2)
 
 
-def create_plot(x, y, title, xlabel, ylabel):
-    plt.figure(figsize=(10, 6))
-    plt.plot(x, y)
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.grid(True)
-    return plt

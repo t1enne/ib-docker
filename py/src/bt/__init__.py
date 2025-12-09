@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 import pandas as pd
 import numpy as np
@@ -5,20 +6,15 @@ from typing import Dict, List, Optional, cast
 from dataclasses import dataclass
 from enum import Enum
 import click
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import yaml
 import logging
-from zipline import run_algorithm
-from zipline.data.bundles import ingest
 
+from src.bt.engine.backtest_engine import BacktestEngine, DataFeed
+from src.bt.engine.walk_forward_engine import WalkForwardEngine
+from src.bt.algos.pairs_trading import PairsTradingStrategy
+from src.bt.portfolio.portfolio import Portfolio
+from src.bt.plotting.plotting import plot_results
 
-from src.utils import (
-    calculate_zscore_spread,
-    get_ols_fit_model,
-    get_returns,
-    read_candles,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +82,12 @@ class StrategyType(Enum):
 
 def backtest(strategy: Strategy):
     """
-    Backtest a trading strategy using Zipline.
+    Backtest a trading strategy using walk-forward analysis.
+
+    Walk-forward analysis provides more realistic backtesting by:
+    - Training on historical data (in-sample)
+    - Testing on future data (out-of-sample)
+    - Rolling forward through time with retraining at specified intervals
     """
     try:
         # Validate inputs
@@ -99,24 +100,46 @@ def backtest(strategy: Strategy):
                 f"{strategy.strategy_type.upper()} strategy requires exactly 2 symbols"
             )
 
-        # Ingest data into Zipline bundle
-        ingest("ibkr_bundle", bundle_kwargs={"symbols": strategy.symbols})
+        # Use walk-forward analysis as the default backtesting method
+        # The strategy defines the walk-forward parameters:
+        # - training_start: initial training period start
+        # - training_end: initial training period end
+        # - trading_end: end of the entire walk-forward period
+        # - retrain_interval_months: how often to retrain (step size)
 
-        # Import here to avoid import issues
-        from src.bt.algorithm import PairsTradingAlgorithm
+        # Calculate training window size from initial training period
+        train_start = pd.Timestamp(strategy.training_start)
+        train_end = pd.Timestamp(strategy.training_end)
+        train_window_months = int((train_end - train_start).days / 30)  # Approximate months
 
-        # Run the algorithm
-        perf = run_algorithm(
-            start=pd.Timestamp(strategy.trading_start),
-            end=pd.Timestamp(strategy.trading_end),
-            initialize=PairsTradingAlgorithm,
-            initialize_kwargs={"strategy": strategy},
-            bundle="ibkr_bundle",
-            capital_base=strategy.initial_capital,
+        wf_engine = WalkForwardEngine(
+            strategy_class=PairsTradingStrategy,
+            symbols=strategy.symbols,
+            initial_train_start=strategy.training_start,
+            initial_train_end=strategy.training_end,
+            walk_forward_end=strategy.trading_end,
+            train_window_months=train_window_months,
+            test_window_months=strategy.retrain_interval_months,  # Test window = retrain interval
+            step_months=strategy.retrain_interval_months,  # Retrain at specified intervals
+            # Strategy parameters
+            entry_z=strategy.entry_z,
+            stop_loss=strategy.stop_loss,
+            take_profit=strategy.take_profit,
+            retrain_interval_months=strategy.retrain_interval_months,
+            # Portfolio parameters
+            initial_capital=strategy.initial_capital,
+            position_size=strategy.position_size,
+            commission=strategy.commission,
         )
 
-        # Display results
-        display_zipline_results(perf, strategy.symbols, strategy.strategy_type)
+        # Run walk-forward analysis
+        asyncio.run(wf_engine.run_walk_forward())
+
+        # Display and plot results
+        aggregate_results = wf_engine.get_aggregate_results()
+        display_walk_forward_results(aggregate_results, strategy.symbols, strategy.strategy_type)
+        if strategy.plot:
+            plot_results(aggregate_results, is_walk_forward=True)
 
     except Exception as e:
         print(e)
@@ -124,28 +147,34 @@ def backtest(strategy: Strategy):
         raise click.Abort()
 
 
-def display_zipline_results(perf: pd.DataFrame, symbols: list[str], strategy: str):
-    """Display Zipline backtest results"""
+def display_results(results: Dict, symbols: list[str], strategy: str):
+    """Display backtest results"""
     click.echo("\n" + "=" * 50)
     click.echo(f"BACKTEST RESULTS - {strategy.upper()} Strategy")
     click.echo(f"Symbols: {', '.join(symbols)}")
     click.echo("=" * 50)
 
-    total_return = (perf.portfolio_value.iloc[-1] / perf.portfolio_value.iloc[0]) - 1
-    returns = perf.returns.dropna()
-    sharpe = returns.mean() / returns.std() * np.sqrt(252) if len(returns) > 0 else 0
-    max_dd = (perf.portfolio_value / perf.portfolio_value.expanding().max() - 1).min()
+    click.echo(f"Total Return: {results['total_return']:.2%}")
+    click.echo(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+    click.echo(f"Total Trades: {len(results['trades'])}")
 
-    click.echo(f"Total Return: {total_return:.2%}")
-    click.echo(f"Sharpe Ratio: {sharpe:.2f}")
-    click.echo(f"Max Drawdown: {max_dd:.2%}")
 
-    # Trades from perf.transactions
-    transactions = perf.transactions.dropna()
-    if not transactions.empty:
-        click.echo(f"Total Trades: {len(transactions)}")
-    else:
-        click.echo("No trades executed")
+def display_walk_forward_results(results: Dict, symbols: list[str], strategy: str):
+    """Display walk-forward analysis results"""
+    click.echo("\n" + "=" * 60)
+    click.echo(f"WALK-FORWARD ANALYSIS - {strategy.upper()} Strategy")
+    click.echo(f"Symbols: {', '.join(symbols)}")
+    click.echo("=" * 60)
+
+    click.echo(f"Total Return: {results['total_return']:.2%}")
+    click.echo(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+    click.echo(f"Max Drawdown: {results['max_drawdown']:.2%}")
+    click.echo(f"Total Trades: {results['total_trades']}")
+    click.echo(f"Number of Windows: {results['num_windows']}")
+    click.echo(f"Average Window Return: {results['avg_window_return']:.2%}")
+    click.echo(f"Window Return Std Dev: {results['std_window_return']:.2%}")
+    click.echo(f"Average Window Sharpe: {results['avg_window_sharpe']:.2f}")
+    click.echo("=" * 60)
 
 
 __all__ = ["backtest", "load_strategy", "Strategy"]

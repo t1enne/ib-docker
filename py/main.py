@@ -1,5 +1,6 @@
 import click
 import yaml
+import asyncio
 
 import src.mx as mx_mod
 import src.spread as spread_mod
@@ -57,7 +58,7 @@ def pnd(symbols: list[str]):
 @click.option("--trading-start", required=True, help="Trading start date")
 @click.option("--trading-end", required=True, help="Trading end date")
 @click.option(
-    "--retrain-interval-months", default=1, help="Retraining interval in months"
+    "--retrain-tick-interval", default=1000, help="Retraining interval in ticks"
 )
 @click.option("--plot/--no-plot", default=True, help="Plot results")
 @click.option("--output", "-o", help="Output YAML file")
@@ -76,7 +77,7 @@ def strategy(
     training_end: str,
     trading_start: str,
     trading_end: str,
-    retrain_interval_months: int,
+    retrain_tick_interval: int,
     plot: bool,
     output: str,
 ):
@@ -99,7 +100,7 @@ def strategy(
         training_end=training_end,
         trading_start=trading_start,
         trading_end=trading_end,
-        retrain_interval_months=retrain_interval_months,
+        retrain_tick_interval=retrain_tick_interval,
         plot=plot,
     )
 
@@ -111,9 +112,7 @@ def strategy(
 @main.command(help="run walk-forward backtest from strategy file")
 @click.argument("strategy_file")
 def bt(strategy_file: str):
-    strategy = load_strategy(strategy_file)
-    backtest(strategy)
-
+    asyncio.run(backtest(load_strategy(strategy_file)))
 
 
 if __name__ == "__main__":

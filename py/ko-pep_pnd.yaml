@@ -15,4 +15,3 @@ training_start: "2020-01-01"
 training_end: "2020-06-01"
 trading_start: "2020-06-01"
 trading_end: "2023-01-01"
-retrain_interval_months: 1

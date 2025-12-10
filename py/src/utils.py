@@ -1,3 +1,4 @@
+from typing import Any, Dict, List
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -25,7 +26,7 @@ def read_candles(
                 o.volume
             from ohlcv_1d o left join symbol s
             on o.symbol_id = s.id
-            where s.ticker = '{symbol}'
+            where s.ticker = UPPER('{symbol}')
             {from_filter}
             {to_filter}
             """
@@ -55,6 +56,9 @@ def get_returns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_ols_fit_model(y, x):
+    if y.empty or x.empty or len(y) != len(x):
+        # Return a dummy model or raise
+        raise ValueError("Empty or mismatched data for OLS")
     y = np.log(y).astype(float)
     x = np.log(x).astype(float)
     X = sm.add_constant(x)
@@ -70,10 +74,14 @@ def hedge_ratio_residuals(y: pd.Series, x: pd.Series) -> pd.DataFrame:
 
 def calculate_zscore_spread(s1, s2):
     """Calculate z-score normalized spread"""
+    if s1.empty or s2.empty or len(s1) != len(s2):
+        return pd.Series(dtype=float)
     model = get_ols_fit_model(s1, s2)
     alpha, beta = model.params
     scaled_s2 = alpha + beta * s2
     spread_series = s1 - scaled_s2
+    if spread_series.empty:
+        return pd.Series(dtype=float)
     return (spread_series - spread_series.mean()) / spread_series.std()
 
 
@@ -95,3 +103,9 @@ def symmetric_cointegration_p(price1, price2):
     return float((p1 + p2) / 2)
 
 
+def pick(d: Dict[str, Any], keys: List[str]):
+    return {k: v for k, v in d.items() if k in keys}
+
+
+def omit(d: Dict[str, Any], keys: List[str]):
+    return {k: v for k, v in d.items() if k not in keys}

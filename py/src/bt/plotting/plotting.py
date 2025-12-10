@@ -2,123 +2,180 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 from typing import Dict, List
+from src.bt.types import ActionType, BacktestResult, Trade
 
 
-def plot_equity_curve(equity_curve: List[float], title: str = "Equity Curve"):
-    """Plot the equity curve using plotly."""
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            y=equity_curve,
-            mode="lines",
-            name="Equity",
-            line=dict(color="blue", width=2),
-        )
-    )
-
-    fig.update_layout(
-        title=title,
-        xaxis_title="Time",
-        yaxis_title="Equity",
-        template="plotly_white",
-        showlegend=False,
-    )
-
-    fig.show()
-
-
-def plot_trades(trades: List[Dict], title: str = "Trades"):
-    """Plot trades over time using plotly."""
-    if not trades:
-        print("No trades to plot")
-        return
-
-    df = pd.DataFrame(trades)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-    # Create color mapping
-    colors = []
-    for action in df["action"]:
-        if action == "BUY":
-            colors.append("green")
-        elif action == "SELL":
-            colors.append("red")
-        else:
-            colors.append("blue")
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=df["timestamp"],
-            y=df["z_score"],
-            mode="markers",
-            marker=dict(color=colors, size=8, symbol="circle"),
-            name="Trades",
-        )
-    )
-
-    fig.update_layout(
-        title=title,
-        xaxis_title="Time",
-        yaxis_title="Z-Score",
-        template="plotly_white",
-        showlegend=False,
-    )
-
-    fig.show()
-
-
-def plot_walk_forward_results(wf_results: Dict):
-    """Plot walk-forward analysis results."""
-    # Plot equity curve
+def plot_backtest_results(
+    results: BacktestResult,
+    symbols: list[str],
+    strategy: str,
+    data: Dict[str, pd.DataFrame],
+):
+    """Plot backtest performance with price charts and entries/exits using Plotly"""
+    num_rows = len(symbols) + 2
+    subplot_titles = [f"{symbol} Price Chart" for symbol in symbols] + [
+        f"Equity Curve - {strategy.upper()} Strategy",
+        "Drawdown",
+    ]
     fig = make_subplots(
-        rows=2,
+        rows=num_rows,
         cols=1,
-        subplot_titles=("Equity Curve", "Window Returns"),
-        vertical_spacing=0.1,
+        shared_xaxes=True,
+        subplot_titles=subplot_titles,
+        vertical_spacing=0.05,  # Reduce vertical spacing
+        horizontal_spacing=0.05,  # Reduce horizontal spacing
     )
+
+    # Price charts for each symbol
+    for i, symbol in enumerate(symbols):
+        row = i + 1
+        price_data = data[symbol]["Close"]
+        print(len(price_data))
+        # Add price line
+        fig.add_trace(
+            go.Scatter(
+                x=price_data.index,
+                y=price_data.values,
+                mode="lines",
+                name=f"{symbol} Price",
+                line=dict(color="orange"),
+            ),
+            row=row,
+            col=1,
+        )
+
+        # Collect entry/exit points
+        long_entries = []
+        long_entries_text = []
+        long_exits = []
+        long_exits_text = []
+        short_entries = []
+        short_entries_text = []
+        short_exits = []
+        short_exits_text = []
+
+        for trade in results.trades:
+            if trade.symbol == symbol:
+                if trade.position == ActionType.long:
+                    long_entries.append((trade.entry_time, trade.entry_price))
+                    long_entries_text.append(f"Z: {trade.z_score:.2f}")
+                    if trade.exit_time:
+                        long_exits.append((trade.exit_time, trade.exit_price))
+                        long_exits_text.append(trade.close_reason or "")
+                else:  # short
+                    short_entries.append((trade.entry_time, trade.entry_price))
+                    short_entries_text.append(f"Z: {trade.z_score:.2f}")
+                    if trade.exit_time:
+                        short_exits.append((trade.exit_time, trade.exit_price))
+                        short_exits_text.append(trade.close_reason or "")
+
+        # Add markers
+        if long_entries:
+            times, prices = zip(*long_entries)
+            t = pd.DatetimeIndex(times)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(t),
+                    y=list(prices),
+                    mode="markers",
+                    name="Long Entry",
+                    marker=dict(symbol="triangle-up", color="green", size=8),
+                    text=long_entries_text,
+                    textposition="top center",
+                ),
+                row=row,
+                col=1,
+            )
+        if long_exits:
+            times, prices = zip(*long_exits)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(times),
+                    y=list(prices),
+                    mode="markers",
+                    name="Long Exit",
+                    marker=dict(symbol="triangle-down", color="red", size=8),
+                    text=long_exits_text,
+                    textposition="bottom center",
+                ),
+                row=row,
+                col=1,
+            )
+        if short_entries:
+            times, prices = zip(*short_entries)
+            t = pd.DatetimeIndex(times)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(t),
+                    y=list(prices),
+                    mode="markers",
+                    name="Short Entry",
+                    marker=dict(symbol="triangle-down", color="blue", size=8),
+                    text=short_entries_text,
+                    textposition="top center",
+                ),
+                row=row,
+                col=1,
+            )
+        if short_exits:
+            times, prices = zip(*short_exits)
+            t = pd.DatetimeIndex(times)
+            fig.add_trace(
+                go.Scatter(
+                    x=list(t),
+                    y=list(prices),
+                    mode="markers",
+                    name="Short Exit",
+                    marker=dict(symbol="triangle-up", color="orange", size=8),
+                    text=short_exits_text,
+                    textposition="bottom center",
+                ),
+                row=row,
+                col=1,
+            )
+
+        fig.update_yaxes(title_text="Price", row=row, col=1)
+        fig.update_xaxes(title_text="Date", row=row, col=1)
 
     # Equity curve
+    row_eq = len(symbols) + 1
     fig.add_trace(
         go.Scatter(
-            y=wf_results["equity_curve"],
+            x=results.equity_curve.index,
+            y=results.equity_curve.values,
             mode="lines",
-            name="Equity",
-            line=dict(color="blue", width=2),
+            name="Equity Curve",
+            line=dict(color="green"),
         ),
-        row=1,
+        row=row_eq,
         col=1,
     )
+    fig.update_yaxes(title_text="Portfolio Value ($)", row=row_eq, col=1)
 
-    # Window returns
-    window_returns = wf_results["window_results"]
-    window_nums = [r.window.window_id for r in window_returns]
-    returns = [r.performance_metrics["total_return"] for r in window_returns]
-
+    # Drawdown
+    row_dd = len(symbols) + 2
+    rolling_max = results.equity_curve.expanding().max()
+    drawdown = (results.equity_curve - rolling_max) / rolling_max
     fig.add_trace(
-        go.Bar(
-            x=window_nums, y=returns, name="Window Returns", marker_color="lightblue"
+        go.Scatter(
+            x=drawdown.index,
+            y=drawdown.values,
+            mode="lines",
+            name="Drawdown",
+            line=dict(color="red"),
+            fill="tozeroy",
         ),
-        row=2,
+        row=row_dd,
         col=1,
     )
+    fig.update_yaxes(title_text="Drawdown", row=row_dd, col=1)
+    fig.update_xaxes(title_text="Date", row=row_dd, col=1)
 
+    # Update layout
     fig.update_layout(
-        title="Walk-Forward Analysis Results", template="plotly_white", showlegend=False
+        height=300 * num_rows,
+        title_text=f"Backtest Results - {strategy.upper()} Strategy",
+        showlegend=False,
     )
-
-    fig.update_xaxes(title_text="Time", row=1, col=1)
-    fig.update_xaxes(title_text="Window", row=2, col=1)
-    fig.update_yaxes(title_text="Equity", row=1, col=1)
-    fig.update_yaxes(title_text="Return", row=2, col=1)
-
+    fig.update_xaxes(type="date")
     fig.show()
-
-
-def plot_results(results: Dict, is_walk_forward: bool = False):
-    """Plot comprehensive backtest results."""
-    if is_walk_forward:
-        plot_walk_forward_results(results)
-    else:
-        plot_equity_curve(results["equity_curve"], "Backtest Equity Curve")
-        plot_trades(results["trades"], "Trading Signals")

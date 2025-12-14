@@ -2,9 +2,10 @@ import asyncio
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Optional, cast
+from pandas._libs import NaTType
 
-from src.bt.types import ActionType, Trade, TradeSignal, PortfolioResult
+from src.bt.types import ActionType, Trade, TradeSignal, PortfolioResult, TradeStatus
 
 
 @dataclass
@@ -12,6 +13,7 @@ class PortfolioProps:
     initial_capital: float
     position_size: float
     commission: float
+    start_date: pd.Timestamp | NaTType
 
 
 class Portfolio:
@@ -24,7 +26,9 @@ class Portfolio:
         self.cash = props.initial_capital
         self.positions: Dict[str, float] = {}  # symbol: quantity
         self.trades: List[Trade] = []
-        self.equity_curve: List[float] = [props.initial_capital]
+        self.open_trades: Dict[str, Trade] = {}  # symbol: open trade
+        self.equity_curve: Dict[pd.Timestamp, float] = {}
+        self.equity_curve[cast(pd.Timestamp, props.start_date)] = props.initial_capital
 
     async def process_signals(self, order_queue: asyncio.Queue):
         """Process signals from order_queue and execute orders."""
@@ -35,18 +39,44 @@ class Portfolio:
 
             # Execute order
             trade = self._execute_order(signal)
-            print(f"Executed: {str(trade.entry_time.date())}")
+            if trade:
+                print("Executed:", trade)
 
-    def _execute_order(self, signal: TradeSignal) -> Trade:
+    def _execute_order(self, signal: TradeSignal) -> Optional[Trade]:
         """Execute order based on signal."""
-        qty = 0
+        if signal.action == ActionType.close:
+            # Close existing position
+            if signal.symbol not in self.open_trades:
+                return None  # No open trade to close
+
+            open_trade = self.open_trades[signal.symbol]
+            qty = abs(self.positions.get(signal.symbol, 0))
+            if qty <= 0:
+                return None
+            # Calculate P&L
+            is_long = open_trade.position == ActionType.long
+            pnl = (
+                (open_trade.entry_price - signal.price) * qty
+                if is_long
+                else (signal.price - open_trade.entry_price) * qty
+            )
+            self.cash += pnl - self.commission
+            self.positions[signal.symbol] = 0
+            # Update trade
+            open_trade.exit_time = signal.timestamp
+            open_trade.exit_price = signal.price
+            open_trade.pnl = pnl
+            open_trade.status = TradeStatus.closed
+            del self.open_trades[signal.symbol]
+            self._update_equity(signal.timestamp)
+            return open_trade
+
+        # Open position
+        qty = round(self.position_size * self.cash / signal.price, 4)
         if signal.action == ActionType.long:
-            qty = round(self.position_size * self.cash / signal.price, 4)
             self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) + qty
             self.cash -= qty * signal.price * (1 + self.commission)
         elif signal.action == ActionType.short:
-            # Short symbol1, long symbol2
-            qty = round(self.position_size * self.cash / signal.price, 4)
             self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) - qty
             self.cash -= qty * signal.price * (1 + self.commission)
 
@@ -61,18 +91,33 @@ class Portfolio:
             position=signal.action,
         )
         self.trades.append(trade)
-        self.equity_curve.append(
-            self.cash + sum(pos * 100 for pos in self.positions.values())
-        )  # Placeholder valuation
-
+        self.open_trades[signal.symbol] = trade
         return trade
+
+    def _update_equity(self, timestamp: pd.Timestamp):
+        """Update equity curve at given timestamp."""
+        current_equity = self.cash + sum(pos * 100 for pos in self.positions.values())
+        self.equity_curve[timestamp] = current_equity
+
+    def close_all_positions(self, timestamp: pd.Timestamp, prices: Dict[str, float]):
+        """Close all open positions at the given prices."""
+        for symbol, trade in list(self.open_trades.items()):
+            signal = TradeSignal(
+                action=ActionType.close,
+                symbol=symbol,
+                z_score=0.0,  # Neutral
+                timestamp=timestamp,
+                price=prices[symbol],
+            )
+            self._execute_order(signal)
 
     def get_results(self) -> PortfolioResult:
         """Get backtest results."""
+        equity_series = pd.Series(self.equity_curve).sort_index()
         total_return = (
-            self.equity_curve[-1] - self.initial_capital
+            equity_series.iloc[-1] - self.initial_capital
         ) / self.initial_capital
-        returns = pd.Series(self.equity_curve).pct_change().dropna()
+        returns = equity_series.pct_change().dropna()
         sharpe = (
             returns.mean() / returns.std() * np.sqrt(252) if len(returns) > 0 else 0
         )
@@ -80,5 +125,5 @@ class Portfolio:
             total_return=total_return,
             sharpe_ratio=sharpe,
             trades=self.trades,
-            equity_curve=self.equity_curve,
+            equity_curve=equity_series,
         )

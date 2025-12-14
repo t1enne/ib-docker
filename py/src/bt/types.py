@@ -7,6 +7,7 @@ from enum import Enum
 class ActionType(Enum):
     short = "short"
     long = "long"
+    close = "close"
 
 
 class TradeStatus(Enum):
@@ -34,7 +35,7 @@ class PortfolioResult:
     total_return: float
     sharpe_ratio: float
     trades: List[Trade]
-    equity_curve: List[float]
+    equity_curve: pd.Series
 
 
 @dataclass

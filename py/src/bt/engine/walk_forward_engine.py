@@ -4,7 +4,7 @@ import pandas as pd
 from src.bt.algos.pairs_trading import PairsTradingStrategy
 from src.bt.engine.backtest_engine import BacktestEngine, DataFeed
 from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
-from src.utils import pick, read_candles, get_ols_fit_model
+from src.utils import pick, read_candles
 from src.bt.plotting.plotting import plot_backtest_results
 
 
@@ -53,10 +53,12 @@ class WalkForwardEngine:
                 initial_capital=self.pf_params.get("initial_capital", 10000),
                 position_size=self.pf_params.get("position_size", 0.1),
                 commission=self.pf_params.get("commission", 0.001),
+                start_date=pd.Timestamp(self.trading_start),
             ),
         )
         strat = PairsTradingStrategy(symbols=self.symbols, **self.strategy_params)
-        self._initial_train(strat)
+        strat.populate_historical_data(self.historical_data)
+        # self._initial_train(strat)
         # Initial training to fit the model
         feed = DataFeed(
             self.symbols,
@@ -73,26 +75,3 @@ class WalkForwardEngine:
         if self.plot:
             plot_backtest_results(results, self.symbols, "Pairs Trading", data)
         return results
-
-    def _initial_train(self, strat: PairsTradingStrategy):
-        """Initial training to fit the OLS model on training data."""
-        # Load training data for both symbols
-
-        print(
-            f"initial traing; start: {self.initial_train_start}; end: {self.initial_train_end}"
-        )
-        df1 = self.historical_data[self.symbols[0]]
-        df2 = self.historical_data[self.symbols[1]]
-
-        if df1.empty or df2.empty:
-            raise ValueError(f"No data found for symbols {self.symbols}")
-        # Align data on common dates
-        common_dates = df1.index.intersection(df2.index)
-        s1 = df1.loc[common_dates, "Close"]
-        s2 = df2.loc[common_dates, "Close"]
-        if len(s1) < 30:
-            raise ValueError(f"Insufficient training data: {len(s1)} points")
-        # Fit model to get alpha, beta
-        model = get_ols_fit_model(s1, s2)
-        strat.alpha, strat.beta = model.params
-        # Rolling stats will be computed dynamically

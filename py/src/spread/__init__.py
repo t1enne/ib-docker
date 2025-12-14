@@ -5,11 +5,13 @@ from plotly.subplots import make_subplots
 from src.utils import calculate_zscore_spread, read_candles
 
 
-def spread(symbols: tuple[str, str], start_date: str | None = None):
+def spread(
+    symbols: tuple[str, str], start_date: str | None = None, end_date: str | None = None
+):
     sym1, sym2 = symbols
     ma_windows = [9, 14, 50]
-    df1 = read_candles(sym1.upper(), start_date)
-    df2 = read_candles(sym2.upper(), start_date)
+    df1 = read_candles(sym1.upper(), start_date, end_date)
+    df2 = read_candles(sym2.upper(), start_date, end_date)
     ratio = pd.DataFrame(
         {
             "ratio": df1["Close"] / df2["Close"],

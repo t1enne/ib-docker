@@ -1,13 +1,15 @@
 import asyncio
 import pandas as pd
-from typing import List
-from collections import defaultdict, deque
-from src.bt.types import ActionType, TradeSignal
-from src.utils import get_ols_fit_model
+from typing import Dict, List
+from collections import defaultdict
+from src.bt.types import ActionType, Tick, TradeSignal
+from src.utils import calculate_zscore_spread
 
 
 class PairsTradingStrategy:
     """Pairs trading strategy with z-score recalc at intervals."""
+
+    historical_data: Dict[str, pd.DataFrame]
 
     def __init__(
         self,
@@ -25,23 +27,28 @@ class PairsTradingStrategy:
         self.alpha = None
         self.beta = None
         # Buffers for historical data (for retraining)
-        self.historical_data = {symbol: [] for symbol in symbols}
-        # Buffer for recent prices (for z-score calc, last 100 points)
-        self.price_buffer = {symbol: deque(maxlen=100) for symbol in symbols}
+        self.historical_data = {symbol: pd.DataFrame() for symbol in self.symbols}
         # Pending ticks for current timestamp
         self.pending_ticks = defaultdict(dict)
-        # Rolling buffer for spreads to compute dynamic z-score
-        self.spread_buffer = deque(maxlen=100)  # Lookback window for rolling stats
         # Tick counter for retraining
         self.tick_count = 0
+        # Position tracking
+        self.has_position = False
+
+    def populate_historical_data(self, data: Dict[str, pd.DataFrame]):
+        for symbol in data:
+            df = data[symbol]
+            self.historical_data[symbol] = pd.DataFrame(
+                {"timestamp": df.index, "close": df["Close"]}
+            )
 
     async def process_data(
-        self, signal_queue: asyncio.Queue, order_queue: asyncio.Queue
+        self, ticks_queue: asyncio.Queue[Tick], order_queue: asyncio.Queue
     ):
         """Process data from signal_queue and put signals into order_queue."""
         while True:
-            tick = await signal_queue.get()
-            if tick is None:  # End of data
+            tick = await ticks_queue.get()
+            if tick is None:
                 await order_queue.put(None)
                 break
 
@@ -50,10 +57,7 @@ class PairsTradingStrategy:
             close = tick.close
 
             # Add to historical data
-            self.historical_data[symbol].append((timestamp, close))
-            # Add to price buffer
-            self.price_buffer[symbol].append(close)
-
+            self.historical_data[symbol].loc[timestamp] = close
             # Add to pending ticks
             self.pending_ticks[timestamp][symbol] = close
 
@@ -61,11 +65,6 @@ class PairsTradingStrategy:
             if len(self.pending_ticks[timestamp]) == 2:
                 # Increment tick count (per timestamp with both symbols)
                 self.tick_count += 1
-
-                # Check if retraining is needed (every N ticks)
-                if self.tick_count % self.retrain_tick_interval == 0:
-                    self._retrain_model(timestamp)
-
                 # Calculate z-score
                 z_score = self._calculate_zscore(timestamp)
                 if z_score is not None:
@@ -78,57 +77,49 @@ class PairsTradingStrategy:
                 # Clear pending for this timestamp
                 del self.pending_ticks[timestamp]
 
-    def _retrain_model(self, current_timestamp: pd.Timestamp):
-        """Retrain the OLS model using recent historical data."""
-        # Use last 12 months or 250 trading days for retraining
-        s1_data = self.historical_data[self.symbols[0]]
-        s2_data = self.historical_data[self.symbols[1]]
-        if len(s1_data) < 30 or len(s2_data) < 30:  # Minimum data
-            return
-        # Extract closes
-        s1_closes = [x[1] for x in s1_data]
-        s2_closes = [x[1] for x in s2_data]
-        if len(s1_closes) != len(s2_closes):
-            return  # Mismatched data
-        s1_series = pd.Series(s1_closes)
-        s2_series = pd.Series(s2_closes)
-        if s1_series.empty or s2_series.empty:
-            return
-        # Fit model
-        model = get_ols_fit_model(s1_series, s2_series)
-        self.alpha, self.beta = model.params
-        # Model is refit, rolling stats will update dynamically
+        # Process any remaining pending ticks (e.g., last incomplete timestamp)
+        for timestamp, symbols in list(self.pending_ticks.items()):
+            if len(symbols) == 2:
+                # Increment tick count
+                self.tick_count += 1
+                # Calculate z-score
+                z_score = self._calculate_zscore(timestamp)
+                if z_score is not None:
+                    # Generate signal
+                    signals = self._generate_signal(z_score, timestamp)
+                    if len(signals) > 0:
+                        for s in signals:
+                            await order_queue.put(s)
+                # Clear
+                del self.pending_ticks[timestamp]
 
     def _calculate_zscore(self, timestamp: pd.Timestamp) -> float | None:
-        """Calculate z-score for the current timestamp using rolling spread statistics."""
-        if self.alpha is None:
+        """Calculate z-score for the current timestamp using OLS on recent data, consistent with spread command."""
+        # Use recent closes for z-score calculation
+        s1_closes = self.historical_data[self.symbols[0]]["close"]
+        s2_closes = self.historical_data[self.symbols[1]]["close"]
+        # Calculate z-score series using same method as spread command
+        z_scores = calculate_zscore_spread(s1_closes, s2_closes)
+        if z_scores.empty:
             return None
-        # Use the closes from pending ticks
-        s1_close = self.pending_ticks[timestamp][self.symbols[0]]
-        s2_close = self.pending_ticks[timestamp][self.symbols[1]]
-        # Calculate spread using current model
-        spread = s1_close - (self.alpha + self.beta * s2_close)
-        # Add to rolling buffer
-        self.spread_buffer.append(spread)
-        # Need minimum data for rolling stats
-        if len(self.spread_buffer) < 30:
-            return None
-        # Compute rolling mean and std
-        spreads = list(self.spread_buffer)
-        rolling_mean = sum(spreads) / len(spreads)
-        rolling_std = (
-            sum((x - rolling_mean) ** 2 for x in spreads) / len(spreads)
-        ) ** 0.5
-        if rolling_std == 0:
-            return None
-        z_score = (spread - rolling_mean) / rolling_std
-        return round(z_score, 2)
+        # Return the latest z-score
+        return round(z_scores.iloc[-1], 2)
 
     def _generate_signal(
         self, z_score: float, timestamp: pd.Timestamp
     ) -> List[TradeSignal]:
-        """Generate buy/sell signal based on z-score."""
-        if abs(z_score) > self.entry_z:
+        """Generate buy/sell/close signal based on z-score."""
+        # Check for closing position if z-score reverts to neutral
+        if self.has_position and abs(z_score) < 0.5:
+            self.has_position = False
+            return [
+                self._close(self.symbols[0], z_score, timestamp),
+                self._close(self.symbols[1], z_score, timestamp),
+            ]
+
+        # Check for opening position if no position and z-score extreme
+        if not self.has_position and abs(z_score) > self.entry_z:
+            self.has_position = True
             if z_score < -self.entry_z:
                 return [
                     self._long(self.symbols[0], z_score, timestamp),
@@ -158,6 +149,17 @@ class PairsTradingStrategy:
     ) -> TradeSignal:
         return TradeSignal(
             action=ActionType.long,
+            symbol=symbol,
+            z_score=z_score,
+            timestamp=timestamp,
+            price=self.pending_ticks[timestamp][symbol],
+        )
+
+    def _close(
+        self, symbol: str, z_score: float, timestamp: pd.Timestamp
+    ) -> TradeSignal:
+        return TradeSignal(
+            action=ActionType.close,
             symbol=symbol,
             z_score=z_score,
             timestamp=timestamp,

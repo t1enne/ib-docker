@@ -19,7 +19,7 @@ class DataFeed:
         self.start_date = start_date
         self.end_date = end_date
 
-    async def get_data_stream(self) -> AsyncGenerator[Tick, None]:
+    async def get_data_stream(self) -> AsyncGenerator[Tick]:
         """Returns an async generator that yields market data ticks for all symbols."""
 
         # Load data for all symbols
@@ -74,13 +74,13 @@ class BacktestEngine:
     async def run(self):
         """Run the backtest simulation asynchronously."""
         # Create queues for communication
-        signal_queue = asyncio.Queue()
+        ticks_queue = asyncio.Queue()
         order_queue = asyncio.Queue()
 
         # Create tasks for each component
-        data_task = asyncio.create_task(self._run_data_feed(signal_queue))
+        data_task = asyncio.create_task(self._run_data_feed(ticks_queue))
         strategy_task = asyncio.create_task(
-            self.strategy.process_data(signal_queue, order_queue)
+            self.strategy.process_data(ticks_queue, order_queue)
         )
         portfolio_task = asyncio.create_task(
             self.portfolio.process_signals(order_queue)
@@ -101,6 +101,10 @@ class BacktestEngine:
 
     def _finalize_results(self):
         """Finalize and return results."""
+        # Close any open positions at the last prices
+        last_timestamp = max(df.index[-1] for df in self.data.values())
+        last_prices = {symbol: df["Close"].iloc[-1] for symbol, df in self.data.items()}
+        self.portfolio.close_all_positions(last_timestamp, last_prices)
 
         pf_results = self.portfolio.get_results()
         # Trades are already Trade objects from portfolio

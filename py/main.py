@@ -22,9 +22,10 @@ def mx(symbols: list[str]):
 
 @main.command()
 @click.argument("symbols", nargs=2)
-@click.option("--fr")
-def spread(symbols: tuple[str, str], fr: str | None):
-    spread_mod.spread(symbols, fr)
+@click.option("--start")
+@click.option("--end")
+def spread(symbols: tuple[str, str], start: str | None, end: str | None):
+    spread_mod.spread(symbols, start, end)
 
 
 @main.command(help="plot normalized deviation between price/returns and relative MA")

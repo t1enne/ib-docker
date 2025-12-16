@@ -131,3 +131,11 @@ def validate_schema(data, schema):
         return False
 
     return check_type(data, schema)
+
+
+def get_ts(ds: str) -> pd.Timestamp:
+    _ts = pd.Timestamp(ds)
+    if isinstance(_ts, pd.Timestamp):
+        return _ts
+
+    raise ValueError(f"Failed when creating timestamp for {ds}")

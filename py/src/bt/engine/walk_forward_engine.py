@@ -35,41 +35,45 @@ class WalkForwardEngine:
         self.trading_start = trading_start
         self.trading_end = trading_end
         self.plot = kwargs.get("plot")
-        self.historical_data = {
+        self.hdata = {
             symbol: read_candles(symbol, initial_train_start, initial_train_end)
             for symbol in self.symbols
         }
         # Separate strategy and portfolio parameters
-        self.strategy_params = pick(
-            kwargs, ["entry_z", "stop_loss", "take_profit", "rolling_window_size"]
-        )
+        self.strategy_params = pick(kwargs, ["entry_z", "rolling_window_size"])
         self.pf_params = pick(
-            kwargs, ["initial_capital", "position_size", "commission"]
+            kwargs,
+            [
+                "initial_capital",
+                "position_size",
+                "commission",
+                "stop_loss",
+                "take_profit",
+            ],
         )
 
     async def run(self):
         portfolio = Portfolio(
             PortfolioProps(
+                stop_loss=self.pf_params.get("stop_loss", 0.10),
+                take_profit=self.pf_params.get("take_profit", 1.0),
                 initial_capital=self.pf_params.get("initial_capital", 10000),
                 position_size=self.pf_params.get("position_size", 0.1),
                 commission=self.pf_params.get("commission", 0.001),
                 start_date=pd.Timestamp(self.trading_start),
             ),
         )
-        strat = PairsTradingStrategy(symbols=self.symbols, **self.strategy_params)
-        strat.populate_historical_data(self.historical_data)
-        # self._initial_train(strat)
-        # Initial training to fit the model
+        strat = PairsTradingStrategy(self.symbols, self.hdata, **self.strategy_params)
         feed = DataFeed(
             self.symbols,
-            self.trading_start,  # Start testing from end of training
-            self.trading_end,  # Run to end of data
+            self.trading_start,
+            self.trading_end,
         )
         ngn = BacktestEngine(strat, portfolio, feed)
         results, data = await ngn.run()
         # Merge training and trading data for plotting
         for symbol in self.symbols:
-            data[symbol] = pd.concat([self.historical_data[symbol], data[symbol]])
+            data[symbol] = pd.concat([self.hdata[symbol], data[symbol]])
 
         # Plot if requested
         if self.plot:

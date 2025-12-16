@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import pandas as pd
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Protocol
 from enum import Enum
 
 
@@ -25,6 +25,9 @@ class Trade:
     z_score: float
     symbol: str
     position: ActionType
+    qty: float
+    stop_loss: float
+    take_profit: float
     pnl: float = 0.0
     status: TradeStatus = TradeStatus.open
     close_reason: Optional[str] = None
@@ -68,3 +71,11 @@ class TradeSignal:
     z_score: float
     timestamp: pd.Timestamp
     price: float
+
+
+class StrategyProtocol(Protocol):
+    """Protocol for strategy classes."""
+
+    def on_tick(self, tick: Tick) -> List[TradeSignal]:
+        """Process a tick and return new state and signals."""
+        ...

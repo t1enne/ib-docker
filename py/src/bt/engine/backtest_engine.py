@@ -3,7 +3,7 @@ from typing import List, AsyncGenerator
 import pandas as pd
 
 from src.utils import read_candles
-from src.bt.types import Tick, BacktestResult, Trade
+from src.bt.types import Tick, BacktestResult, Trade, StrategyProtocol
 
 
 class DataFeed:
@@ -58,7 +58,7 @@ class DataFeed:
 class BacktestEngine:
     """Main backtesting engine using asyncio."""
 
-    def __init__(self, strategy, portfolio, data_feed: DataFeed):
+    def __init__(self, strategy: StrategyProtocol, portfolio, data_feed: DataFeed):
         self.strategy = strategy
         self.portfolio = portfolio
         self.data_feed = data_feed
@@ -73,21 +73,28 @@ class BacktestEngine:
 
     async def run(self):
         """Run the backtest simulation asynchronously."""
-        # Create queues for communication
+        # Create queue for ticks
         ticks_queue = asyncio.Queue()
-        order_queue = asyncio.Queue()
 
-        # Create tasks for each component
+        # Create task for data feed
         data_task = asyncio.create_task(self._run_data_feed(ticks_queue))
-        strategy_task = asyncio.create_task(
-            self.strategy.process_data(ticks_queue, order_queue)
-        )
-        portfolio_task = asyncio.create_task(
-            self.portfolio.process_signals(order_queue)
-        )
 
-        # Wait for all tasks to complete
-        await asyncio.gather(data_task, strategy_task, portfolio_task)
+        # Main processing loop
+        while True:
+            tick = await ticks_queue.get()
+            if tick is None:
+                break
+            # Process tick through strategy
+            signals = self.strategy.on_tick(tick)
+            # Send signals to portfolio
+            for signal in signals:
+                self.portfolio.on_signal(signal)
+
+            # Send tick to portfolio for SL/TP
+            self.portfolio.on_tick(tick)
+
+        # Wait for data feed to finish
+        await data_task
 
         # Finalize results
         return self._finalize_results()

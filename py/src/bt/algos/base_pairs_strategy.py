@@ -1,6 +1,4 @@
-from abc import ABC, abstractmethod
 from typing import List, Dict
-import asyncio
 import pandas as pd
 from collections import defaultdict
 
@@ -9,14 +7,11 @@ from src.utils import validate_schema
 
 props_schema = {
     "entry_threshold": float,
-    "exit_threshold": float,
     "rolling_window_size": int,
-    "stop_loss": float,
-    "take_profit": float,
 }
 
 
-class BasePairsStrategy(ABC):
+class BasePairsStrategy:
     """
     Abstract base class for pair trading strategies.
 
@@ -24,58 +19,17 @@ class BasePairsStrategy(ABC):
     managing positions, and generating trading signals.
     """
 
-    def __init__(self, symbols: List[str], **kwargs):
+    def __init__(self, symbols: List[str], hdata: dict[str, pd.DataFrame], **kwargs):
         if not validate_schema(kwargs, props_schema):
             raise ValueError("wrong parameters")
 
         self.symbols = symbols
-        self.entry_threshold = kwargs.get("entry_threshold")
-        self.exit_threshold = kwargs.get("exit_threshold")
-        self.rolling_window_size = kwargs.get("rolling_window_size")
-        self.stop_loss = kwargs.get("stop_loss")
-        self.take_profit = kwargs.get("take_profit")
-
+        self.entry_threshold: float = kwargs.get("entry_threshold", 2.0)
+        self.rolling_window_size: int = kwargs.get("rolling_window_size", 100)
         # Common buffers
         self.z_scores: Dict[pd.Timestamp, float] = dict()
         self.pending_ticks = defaultdict(dict)
-        self.historical_data: Dict[str, pd.DataFrame] = {
-            symbol: pd.DataFrame() for symbol in symbols
-        }
-        # Position tracking: positive for long, negative for short
-        self.positions: Dict[str, float] = {symbol: 0.0 for symbol in symbols}
-
-    @abstractmethod
-    async def process_data(
-        self, ticks_queue: asyncio.Queue, order_queue: asyncio.Queue
-    ):
-        """
-        Process incoming tick data and generate trading signals.
-
-        Args:
-            ticks_queue: Queue of incoming market ticks
-            order_queue: Queue for outgoing trading signals
-        """
-        pass
-
-    @abstractmethod
-    def _calculate_signal(self, timestamp: pd.Timestamp) -> List[TradeSignal]:
-        """
-        Calculate trading signals based on strategy logic.
-
-        Args:
-            timestamp: Current timestamp to process
-
-        Returns:
-            List of trading signals (can be empty)
-        """
-        pass
-
-    def populate_historical_data(self, data: Dict[str, pd.DataFrame]):
-        for symbol in data:
-            df = data[symbol]
-            self.historical_data[symbol] = pd.DataFrame(
-                {"timestamp": df.index, "close": df["Close"]}
-            )
+        self.hdata = hdata
 
     def _get_z(self, ts: pd.Timestamp) -> float:
         return self.z_scores[ts]

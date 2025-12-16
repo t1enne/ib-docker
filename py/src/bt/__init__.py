@@ -29,7 +29,7 @@ class Strategy:
     training_end: str
     trading_start: str
     trading_end: str
-    retrain_tick_interval: int
+    rolling_window_size: int
     plot: bool
 
 
@@ -83,7 +83,7 @@ async def backtest(strategy: Strategy):
         entry_z=strategy.entry_z,
         stop_loss=strategy.stop_loss,
         take_profit=strategy.take_profit,
-        retrain_tick_interval=strategy.retrain_tick_interval,
+        rolling_window_size=strategy.rolling_window_size,
         # Portfolio parameters
         initial_capital=strategy.initial_capital,
         position_size=strategy.position_size,

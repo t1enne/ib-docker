@@ -33,7 +33,6 @@ class PairsTradingStrategy:
         # Tick counter for retraining
         self.tick_count = 0
         # Position tracking
-        self.has_position = False
 
     def populate_historical_data(self, data: Dict[str, pd.DataFrame]):
         for symbol in data:
@@ -110,16 +109,14 @@ class PairsTradingStrategy:
     ) -> List[TradeSignal]:
         """Generate buy/sell/close signal based on z-score."""
         # Check for closing position if z-score reverts to neutral
-        if self.has_position and abs(z_score) < 0.5:
-            self.has_position = False
+        if abs(z_score) < 0.5:
             return [
                 self._close(self.symbols[0], z_score, timestamp),
                 self._close(self.symbols[1], z_score, timestamp),
             ]
 
         # Check for opening position if no position and z-score extreme
-        if not self.has_position and abs(z_score) > self.entry_z:
-            self.has_position = True
+        if abs(z_score) > self.entry_z:
             if z_score < -self.entry_z:
                 return [
                     self._long(self.symbols[0], z_score, timestamp),

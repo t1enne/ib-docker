@@ -78,7 +78,7 @@ def strategy(
     training_end: str,
     trading_start: str,
     trading_end: str,
-    retrain_tick_interval: int,
+    rolling_window_size: int,
     plot: bool,
     output: str,
 ):
@@ -101,7 +101,7 @@ def strategy(
         training_end=training_end,
         trading_start=trading_start,
         trading_end=trading_end,
-        retrain_tick_interval=retrain_tick_interval,
+        rolling_window_size=rolling_window_size,
         plot=plot,
     )
 

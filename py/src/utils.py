@@ -109,3 +109,25 @@ def pick(d: Dict[str, Any], keys: List[str]):
 
 def omit(d: Dict[str, Any], keys: List[str]):
     return {k: v for k, v in d.items() if k not in keys}
+
+
+def validate_schema(data, schema):
+    """
+    Validate complex nested data structures
+    """
+
+    def check_type(value, expected_type):
+        if isinstance(expected_type, type):
+            return isinstance(value, expected_type)
+
+        if isinstance(expected_type, dict):
+            if not isinstance(value, dict):
+                return False
+            return all(
+                key in value and check_type(value[key], type_check)
+                for key, type_check in expected_type.items()
+            )
+
+        return False
+
+    return check_type(data, schema)

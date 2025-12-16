@@ -41,7 +41,7 @@ class WalkForwardEngine:
         }
         # Separate strategy and portfolio parameters
         self.strategy_params = pick(
-            kwargs, ["entry_z", "stop_loss", "take_profit", "retrain_tick_interval"]
+            kwargs, ["entry_z", "stop_loss", "take_profit", "rolling_window_size"]
         )
         self.pf_params = pick(
             kwargs, ["initial_capital", "position_size", "commission"]

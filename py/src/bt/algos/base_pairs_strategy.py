@@ -2,8 +2,18 @@ from abc import ABC, abstractmethod
 from typing import List, Dict
 import asyncio
 import pandas as pd
+from collections import defaultdict
 
 from src.bt.types import TradeSignal, ActionType
+from src.utils import validate_schema
+
+props_schema = {
+    "entry_threshold": float,
+    "exit_threshold": float,
+    "rolling_window_size": int,
+    "stop_loss": float,
+    "take_profit": float,
+}
 
 
 class BasePairsStrategy(ABC):
@@ -15,13 +25,24 @@ class BasePairsStrategy(ABC):
     """
 
     def __init__(self, symbols: List[str], **kwargs):
+        if not validate_schema(kwargs, props_schema):
+            raise ValueError("wrong parameters")
+
         self.symbols = symbols
-        self.entry_threshold = kwargs.get("entry_threshold", 2.0)
-        self.exit_threshold = kwargs.get("exit_threshold", 0.5)
+        self.entry_threshold = kwargs.get("entry_threshold")
+        self.exit_threshold = kwargs.get("exit_threshold")
+        self.rolling_window_size = kwargs.get("rolling_window_size")
+        self.stop_loss = kwargs.get("stop_loss")
+        self.take_profit = kwargs.get("take_profit")
 
         # Common buffers
-        self.historical_data: Dict[str, List] = {symbol: [] for symbol in symbols}
-        self.pending_ticks: Dict[pd.Timestamp, Dict[str, float]] = dict()
+        self.z_scores: Dict[pd.Timestamp, float] = dict()
+        self.pending_ticks = defaultdict(dict)
+        self.historical_data: Dict[str, pd.DataFrame] = {
+            symbol: pd.DataFrame() for symbol in symbols
+        }
+        # Position tracking: positive for long, negative for short
+        self.positions: Dict[str, float] = {symbol: 0.0 for symbol in symbols}
 
     @abstractmethod
     async def process_data(
@@ -49,38 +70,42 @@ class BasePairsStrategy(ABC):
         """
         pass
 
-    def _long(
-        self, symbol: str, z_score: float, timestamp: pd.Timestamp
-    ) -> TradeSignal:
+    def populate_historical_data(self, data: Dict[str, pd.DataFrame]):
+        for symbol in data:
+            df = data[symbol]
+            self.historical_data[symbol] = pd.DataFrame(
+                {"timestamp": df.index, "close": df["Close"]}
+            )
+
+    def _get_z(self, ts: pd.Timestamp) -> float:
+        return self.z_scores[ts]
+
+    def _long(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
         """Create a long signal."""
         return TradeSignal(
             action=ActionType.long,
             symbol=symbol,
-            z_score=z_score,
+            z_score=self._get_z(timestamp),
             timestamp=timestamp,
             price=self.pending_ticks[timestamp][symbol],
         )
 
-    def _short(
-        self, symbol: str, z_score: float, timestamp: pd.Timestamp
-    ) -> TradeSignal:
+    def _short(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
         """Create a short signal."""
         return TradeSignal(
             action=ActionType.short,
             symbol=symbol,
-            z_score=z_score,
+            z_score=self._get_z(timestamp),
             timestamp=timestamp,
             price=self.pending_ticks[timestamp][symbol],
         )
 
-    def _close(
-        self, symbol: str, z_score: float, timestamp: pd.Timestamp
-    ) -> TradeSignal:
+    def _close(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
         """Create a close signal."""
         return TradeSignal(
             action=ActionType.close,
             symbol=symbol,
-            z_score=z_score,
+            z_score=self._get_z(timestamp),
             timestamp=timestamp,
             price=self.pending_ticks[timestamp][symbol],
         )

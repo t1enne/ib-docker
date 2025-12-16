@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -65,17 +65,57 @@ def get_ols_fit_model(y, x):
     return sm.OLS(y, X).fit()
 
 
-def hedge_ratio_residuals(y: pd.Series, x: pd.Series) -> pd.DataFrame:
+def hedge_ratio_residuals(y, x) -> pd.DataFrame:
     """Returns residuals from OLS(y ~ x) using log prices."""
     model = get_ols_fit_model(y, x)
     alpha, beta = model.params
     return y - (alpha + beta * x)
 
 
-def calculate_zscore_spread(s1, s2):
+def _calculate_rolling_zscore_spread(s1, s2, rolling_window: int):
+    if len(s1) < rolling_window:
+        return pd.Series(dtype=float)
+
+    # Calculate rolling spread using OLS
+    def calc_spread(window_idx):
+        idx = s1.index[window_idx]
+        if window_idx < rolling_window - 1:
+            return np.nan
+        start_idx = window_idx - rolling_window + 1
+        end_idx = window_idx + 1
+
+        s1_window = s1.iloc[start_idx:end_idx]
+        s2_window = s2.iloc[start_idx:end_idx]
+
+        if s1_window.empty or s2_window.empty:
+            return np.nan
+
+        X = sm.add_constant(s2_window)
+        model = sm.OLS(s1_window, X).fit()
+        alpha, beta = model.params
+        return s1.loc[idx] - (alpha + beta * s2.loc[idx])
+
+    # Calculate rolling spread
+    spread_series = pd.Series([calc_spread(i) for i in range(len(s1))], index=s1.index)
+
+    # Calculate rolling z-score
+    rolling_mean = spread_series.rolling(
+        window=rolling_window, min_periods=rolling_window
+    ).mean()
+    rolling_std = spread_series.rolling(
+        window=rolling_window, min_periods=rolling_window
+    ).std()
+
+    return (spread_series - rolling_mean) / rolling_std
+
+
+def calculate_zscore_spread(s1, s2, rolling_window: Optional[int] = None):
     """Calculate z-score normalized spread"""
     if s1.empty or s2.empty or len(s1) != len(s2):
         return pd.Series(dtype=float)
+    if rolling_window is not None and rolling_window > 0:
+        return _calculate_rolling_zscore_spread(s1, s2, rolling_window)
+
     model = get_ols_fit_model(s1, s2)
     alpha, beta = model.params
     scaled_s2 = alpha + beta * s2

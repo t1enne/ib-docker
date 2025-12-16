@@ -1,3 +1,4 @@
+from typing import Optional
 import click
 import yaml
 import asyncio
@@ -24,8 +25,14 @@ def mx(symbols: list[str]):
 @click.argument("symbols", nargs=2)
 @click.option("--start")
 @click.option("--end")
-def spread(symbols: tuple[str, str], start: str | None, end: str | None):
-    spread_mod.spread(symbols, start, end)
+@click.option("--rolling", "-r", type=int)
+def spread(
+    symbols: tuple[str, str],
+    start: Optional[str],
+    end: Optional[str],
+    rolling: Optional[int] = None,
+):
+    spread_mod.spread(symbols, start, end, rolling)
 
 
 @main.command(help="plot normalized deviation between price/returns and relative MA")

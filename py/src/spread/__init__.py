@@ -1,3 +1,4 @@
+from typing import Optional
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -6,7 +7,10 @@ from src.utils import calculate_zscore_spread, read_candles
 
 
 def spread(
-    symbols: tuple[str, str], start_date: str | None = None, end_date: str | None = None
+    symbols: tuple[str, str],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    rolling: Optional[int] = None,
 ):
     sym1, sym2 = symbols
     ma_windows = [9, 14, 50]
@@ -20,7 +24,7 @@ def spread(
         },
         index=df1.index,
     )
-    z_score = calculate_zscore_spread(df1["Close"], df2["Close"])
+    z_score = calculate_zscore_spread(df1["Close"], df2["Close"], rolling)
 
     fig = make_subplots(
         rows=2,

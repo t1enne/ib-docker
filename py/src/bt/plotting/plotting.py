@@ -61,13 +61,17 @@ def plot_backtest_results(
                     long_entries_text.append(f"Z: {trade.z_score:.2f}")
                     if trade.exit_time:
                         long_exits.append((trade.exit_time, trade.exit_price))
-                        long_exits_text.append(trade.close_reason or "")
+                        long_exits_text.append(
+                            f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
+                        )
                 else:  # short
                     short_entries.append((trade.entry_time, trade.entry_price))
                     short_entries_text.append(f"Z: {trade.z_score:.2f}")
                     if trade.exit_time:
                         short_exits.append((trade.exit_time, trade.exit_price))
-                        short_exits_text.append(trade.close_reason or "")
+                        short_exits_text.append(
+                            f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
+                        )
 
         # Add markers
         if long_entries:

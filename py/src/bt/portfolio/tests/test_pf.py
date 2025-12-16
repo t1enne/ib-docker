@@ -48,6 +48,7 @@ def test_on_signal(portfolio):
     assert closed_trade is not None
     assert closed_trade.exit_price == 110.0
     assert closed_trade.pnl > 0
+    assert closed_trade.close_reason == "signal"
     assert portfolio.positions["AAPL"] == 0
 
 
@@ -78,6 +79,7 @@ def test_sl(portfolio):
     assert portfolio.positions["AAPL"] == 0
     assert len(portfolio.trades) == 1
     assert portfolio.trades[0].exit_price == 85.0
+    assert portfolio.trades[0].close_reason == "stop_loss"
 
 
 def test_tp(portfolio):
@@ -107,6 +109,7 @@ def test_tp(portfolio):
     assert portfolio.positions["AAPL"] == 0
     assert len(portfolio.trades) == 1
     assert portfolio.trades[0].exit_price == 155.0
+    assert portfolio.trades[0].close_reason == "take_profit"
 
 
 def test_position_sizing(portfolio):

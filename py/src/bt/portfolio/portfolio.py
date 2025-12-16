@@ -55,7 +55,14 @@ class Portfolio:
         )
         should_close = should_close_long or should_close_short
         if should_close:
-            self._close_pos(tick.symbol, tick.close, tick.timestamp)
+            reason = (
+                "stop_loss"
+                if (should_close_long and tick.close <= open_pos.stop_loss)
+                or (should_close_short and tick.close >= open_pos.stop_loss)
+                else "take_profit"
+            )
+            print(f"Closing {tick.symbol} due to {reason} at price {tick.close}")
+            self._close_pos(tick.symbol, tick.close, tick.timestamp, reason)
 
     def on_signal(self, signal: TradeSignal) -> Optional[Trade]:
         """Execute order based on signal."""
@@ -82,8 +89,9 @@ class Portfolio:
             open_trade.exit_price = signal.price
             open_trade.pnl = pnl
             open_trade.status = TradeStatus.closed
+            open_trade.close_reason = "signal"
             print(
-                f"Closing position for {open_trade.symbol:>4} at $ {open_trade.pnl:>6} on {str(signal.timestamp)}"
+                f"Closing position for {open_trade.symbol:>4} at $ {open_trade.pnl:>6} on {str(signal.timestamp)} (reason: signal)"
             )
             del self.open_trades[signal.symbol]
             self._update_equity(signal.timestamp)
@@ -148,7 +156,13 @@ class Portfolio:
         current_equity = self.cash + sum(pos * 100 for pos in self.positions.values())
         self.equity_curve[timestamp] = current_equity
 
-    def _close_pos(self, symbol: str, price: float, timestamp: pd.Timestamp):
+    def _close_pos(
+        self,
+        symbol: str,
+        price: float,
+        timestamp: pd.Timestamp,
+        reason: str = "unknown",
+    ):
         signal = TradeSignal(
             action=ActionType.close,
             symbol=symbol,
@@ -156,4 +170,6 @@ class Portfolio:
             timestamp=timestamp,
             price=price,
         )
-        self.on_signal(signal)
+        closed_trade = self.on_signal(signal)
+        if closed_trade:
+            closed_trade.close_reason = reason

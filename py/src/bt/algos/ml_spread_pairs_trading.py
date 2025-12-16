@@ -2,7 +2,7 @@ import numpy as np
 from typing import List
 from collections import deque
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor  # Example ML model
+# from sklearn.ensemble import RandomForestRegressor  # Example ML model
 
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy
 from src.bt.types import TradeSignal

@@ -71,11 +71,11 @@ class Portfolio:
             # Calculate P&L
             is_long = open_trade.position == ActionType.long
             pnl = (
-                (open_trade.entry_price - signal.price) * qty
+                (signal.price - open_trade.entry_price) * qty
                 if is_long
-                else (signal.price - open_trade.entry_price) * qty
+                else (open_trade.entry_price - signal.price) * qty
             )
-            self.cash += pnl - self.commission
+            self.cash += pnl - (self.commission * qty * signal.price)
             self.positions[signal.symbol] = 0
             # Update trade
             open_trade.exit_time = signal.timestamp

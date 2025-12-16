@@ -10,6 +10,7 @@ dependencies = [
     "plotly-express>=0.4.1",
     "click>=8.3.1",
     "pyyaml>=6.0.3",
+    "pytest>=9.0.2",
 ]
 [tool.pyright]
 venvPath = "."

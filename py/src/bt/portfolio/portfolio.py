@@ -102,9 +102,7 @@ class Portfolio:
             open_trade.pnl = pnl
             open_trade.status = TradeStatus.closed
             open_trade.close_reason = signal.reason
-            print(
-                f"Closing {open_trade.position} trade with {round(open_trade.pnl, 2):>6} on {str(signal.timestamp)} (reason: {open_trade.close_reason}) sym: {open_trade.symbol:>4}"
-            )
+            # print(f"Closing {open_trade.position} trade with {round(open_trade.pnl, 2):>6} on {str(signal.timestamp)} (reason: {open_trade.close_reason}) sym: {open_trade.symbol:>4}")
             del self.open_trades[signal.symbol]
             self._update_equity(signal.timestamp)
             return open_trade
@@ -142,8 +140,6 @@ class Portfolio:
         )
         self.trades.append(trade)
         self.open_trades[signal.symbol] = trade
-        msg = f"Executed {trade.position:>5} trade at  {trade.entry_price:>6} / {trade.entry_time}. {trade.pnl:>6} sym:{trade.symbol:>4}"
-        print(msg, trade)
         return trade
 
     def close_all_positions(self, timestamp: pd.Timestamp, prices: Dict[str, float]):

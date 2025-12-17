@@ -88,9 +88,6 @@ class BacktestEngine:
             for signal in signals:
                 self.portfolio.on_signal(signal)
 
-        # Wait for data feed to finish
-        # await data_task
-
         # Finalize results
         return self._finalize_results()
 

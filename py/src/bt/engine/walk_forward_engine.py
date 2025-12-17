@@ -71,9 +71,6 @@ class WalkForwardEngine:
         )
         ngn = BacktestEngine(strat, portfolio, feed)
         results, data = await ngn.run()
-        # Merge training and trading data for plotting
-        for symbol in self.symbols:
-            data[symbol] = pd.concat([self.hdata[symbol], data[symbol]])
 
         # Plot if requested
         if self.plot:

@@ -1,8 +1,8 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-from typing import Dict, List
-from src.bt.types import ActionType, BacktestResult, Trade
+from typing import Dict
+from src.bt.types import ActionType, BacktestResult
 
 
 def plot_backtest_results(
@@ -30,7 +30,6 @@ def plot_backtest_results(
     for i, symbol in enumerate(symbols):
         row = i + 1
         price_data = data[symbol]["Close"]
-        print(len(price_data))
         # Add price line
         fig.add_trace(
             go.Scatter(

@@ -53,19 +53,6 @@ class PairsTradingStrategy(StrategyProtocol):
 
         return []
 
-        # Process any remaining pending ticks (e.g., last incomplete timestamp)
-        # for timestamp, symbols in list(self.bps.pending_ticks.items()):
-        #     if len(symbols) == 2:
-        #         del self.bps.pending_ticks[timestamp]
-        #         # Calculate z-score
-        #         z_score = self._calculate_zscore()
-        #         if z_score is not None:
-        #             # Generate signal
-        #             signals = self._calculate_signal(timestamp)
-        #             if len(signals) > 0:
-        #                 for s in signals:
-        #                     await order_queue.put(s)
-
     def _calculate_zscore(self) -> float | None:
         """Calculate z-score for the current timestamp using OLS on recent data, consistent with spread command."""
         # Use recent closes for z-score calculation, limited to rolling window

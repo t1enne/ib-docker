@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
@@ -48,11 +47,12 @@ class Portfolio:
         open_pos = self.open_trades[sym]
         is_long = open_pos.position == ActionType.long
         should_close_long = is_long and (
-            tick.close <= open_pos.stop_loss or open_pos.take_profit <= tick.close
+            tick.close < open_pos.stop_loss or open_pos.take_profit < tick.close
         )
         should_close_short = not is_long and (
-            open_pos.stop_loss <= tick.close and tick.close <= open_pos.take_profit
+            open_pos.stop_loss < tick.close or tick.close < open_pos.take_profit
         )
+
         should_close = should_close_long or should_close_short
         if should_close:
             reason = (
@@ -61,8 +61,20 @@ class Portfolio:
                 or (should_close_short and tick.close >= open_pos.stop_loss)
                 else "take_profit"
             )
-            print(f"Closing {tick.symbol} due to {reason} at price {tick.close}")
             self._close_pos(tick.symbol, tick.close, tick.timestamp, reason)
+
+        self._update_sl(open_pos, tick)
+
+    def _update_sl(self, trade: Trade, tick: Tick):
+        is_long = trade.position == ActionType.long
+
+        if is_long:
+            max_price = max(trade.entry_price, tick.close)
+            trade.stop_loss = max_price * (1 - self.stop_loss)
+            return
+        # short
+        min_price = min(trade.entry_price, tick.close)
+        trade.stop_loss = min_price * (1 - self.stop_loss)
 
     def on_signal(self, signal: TradeSignal) -> Optional[Trade]:
         """Execute order based on signal."""
@@ -89,9 +101,9 @@ class Portfolio:
             open_trade.exit_price = signal.price
             open_trade.pnl = pnl
             open_trade.status = TradeStatus.closed
-            open_trade.close_reason = "signal"
+            open_trade.close_reason = signal.reason
             print(
-                f"Closing position for {open_trade.symbol:>4} at $ {open_trade.pnl:>6} on {str(signal.timestamp)} (reason: signal)"
+                f"Closing {open_trade.position} trade with {round(open_trade.pnl, 2):>6} on {str(signal.timestamp)} (reason: {open_trade.close_reason}) sym: {open_trade.symbol:>4}"
             )
             del self.open_trades[signal.symbol]
             self._update_equity(signal.timestamp)
@@ -102,12 +114,18 @@ class Portfolio:
 
         # Open position
         qty = round(self.position_size * self.cash / signal.price, 4)
+        sl = 0.0
+        tp = 0.0
         if signal.action == ActionType.long:
             self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) + qty
             self.cash -= qty * signal.price * (1 + self.commission)
+            sl = signal.price * (1 - self.stop_loss)
+            tp = signal.price * self.take_profit
         elif signal.action == ActionType.short:
             self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) - qty
             self.cash -= qty * signal.price * (1 + self.commission)
+            sl = signal.price * (1 + self.stop_loss)
+            tp = signal.price * (1 - self.take_profit)
 
         # Record trade
         trade = Trade(
@@ -116,16 +134,16 @@ class Portfolio:
             qty=qty,
             z_score=signal.z_score,
             symbol=signal.symbol,
-            stop_loss=signal.price * (1 - self.stop_loss),
-            take_profit=signal.price * self.take_profit,
+            stop_loss=sl,
+            take_profit=tp,
             position=signal.action,
             exit_time=None,
             exit_price=None,
         )
         self.trades.append(trade)
         self.open_trades[signal.symbol] = trade
-        msg = f"Executed trade at  {trade.entry_price:>6} / {trade.entry_time}. {trade.status} {trade.pnl:>6} sym:{trade.symbol:>4}"
-        print(msg)
+        msg = f"Executed {trade.position:>5} trade at  {trade.entry_price:>6} / {trade.entry_time}. {trade.pnl:>6} sym:{trade.symbol:>4}"
+        print(msg, trade)
         return trade
 
     def close_all_positions(self, timestamp: pd.Timestamp, prices: Dict[str, float]):
@@ -169,7 +187,6 @@ class Portfolio:
             z_score=0.0,  # Neutral
             timestamp=timestamp,
             price=price,
+            reason=reason,
         )
-        closed_trade = self.on_signal(signal)
-        if closed_trade:
-            closed_trade.close_reason = reason
+        self.on_signal(signal)

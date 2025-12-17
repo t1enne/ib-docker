@@ -1,7 +1,7 @@
 name: ma_vma_v
 training_start: 2022-01-01
 training_end: 2024-01-01
-trading_start: 2024-01-02
+trading_start: 2023-06-01
 trading_end: 2025-12-01
 commission: 0.001
 entry_z: 2.0
@@ -9,10 +9,10 @@ initial_capital: 100000
 ma_period: 20
 plot: true
 position_size: 0.1
-stop_loss: 0.05
+stop_loss: 0.01
 strategy_type: pnd
 take_profit: 1.5
-rolling_window_size: 250
+rolling_window_size: 150
 symbols:
   - ma
   - v

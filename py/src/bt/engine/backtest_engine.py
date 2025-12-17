@@ -73,28 +73,23 @@ class BacktestEngine:
 
     async def run(self):
         """Run the backtest simulation asynchronously."""
-        # Create queue for ticks
-        ticks_queue = asyncio.Queue()
 
         # Create task for data feed
-        data_task = asyncio.create_task(self._run_data_feed(ticks_queue))
+        # data_task = asyncio.create_task(self._run_data_feed(ticks_queue))
 
-        # Main processing loop
-        while True:
-            tick = await ticks_queue.get()
+        async for tick in self.data_feed.get_data_stream():
             if tick is None:
                 break
             # Process tick through strategy
             signals = self.strategy.on_tick(tick)
+            # Send tick to portfolio for SL/TP
+            self.portfolio.on_tick(tick)
             # Send signals to portfolio
             for signal in signals:
                 self.portfolio.on_signal(signal)
 
-            # Send tick to portfolio for SL/TP
-            self.portfolio.on_tick(tick)
-
         # Wait for data feed to finish
-        await data_task
+        # await data_task
 
         # Finalize results
         return self._finalize_results()

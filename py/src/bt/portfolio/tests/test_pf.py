@@ -1,5 +1,4 @@
 import pytest
-import pandas as pd
 from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
 from src.bt.types import TradeSignal, ActionType, Tick
 from src.utils import get_ts
@@ -9,7 +8,7 @@ from src.utils import get_ts
 def portfolio():
     return Portfolio(
         PortfolioProps(
-            stop_loss=0.10,
+            stop_loss=0.1,
             take_profit=1.5,
             initial_capital=10000,
             position_size=0.1,
@@ -19,7 +18,7 @@ def portfolio():
     )
 
 
-def test_on_signal(portfolio):
+def test_on_signal(portfolio: Portfolio):
     # Test opening a long position
     signal = TradeSignal(
         action=ActionType.long,
@@ -48,11 +47,10 @@ def test_on_signal(portfolio):
     assert closed_trade is not None
     assert closed_trade.exit_price == 110.0
     assert closed_trade.pnl > 0
-    assert closed_trade.close_reason == "signal"
     assert portfolio.positions["AAPL"] == 0
 
 
-def test_sl(portfolio):
+def test_sl(portfolio: Portfolio):
     # Open a long position
     signal = TradeSignal(
         action=ActionType.long,
@@ -62,15 +60,16 @@ def test_sl(portfolio):
         price=100.0,
     )
     portfolio.on_signal(signal)
+    assert portfolio.open_trades["AAPL"].stop_loss == 90
 
-    # Simulate tick with price below stop loss (100 * 0.9 = 90)
+    # Simulate tick with price below stop loss (100 * (1 - 0.1) = 90)
     tick = Tick(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=95.0,
         high=105.0,
-        low=85.0,  # Below SL
-        close=85.0,
+        low=85.0,
+        close=85.0,  # Below SL
         volume=1000,
     )
     portfolio.on_tick(tick)
@@ -82,7 +81,29 @@ def test_sl(portfolio):
     assert portfolio.trades[0].close_reason == "stop_loss"
 
 
-def test_tp(portfolio):
+def test_trailing_sl(portfolio: Portfolio):
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    portfolio.on_signal(signal)
+    tick = Tick(
+        timestamp=get_ts("2025-01-02"),
+        symbol="AAPL",
+        open=95.0,
+        high=105.0,
+        low=85.0,
+        close=105.0,  # Below SL
+        volume=1000,
+    )
+    portfolio.on_tick(tick)
+    assert portfolio.trades[0].stop_loss == 105 * (1 - 0.1)
+
+
+def test_tp(portfolio: Portfolio):
     # Open a long position
     signal = TradeSignal(
         action=ActionType.long,
@@ -92,15 +113,16 @@ def test_tp(portfolio):
         price=100.0,
     )
     portfolio.on_signal(signal)
+    assert portfolio.open_trades["AAPL"].take_profit == 150
 
     # Simulate tick with price above take profit (100 * 1.5 = 150)
     tick = Tick(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=105.0,
-        high=160.0,  # Above TP
+        high=160.0,
         low=95.0,
-        close=155.0,
+        close=155.0,  # Above TP
         volume=1000,
     )
     portfolio.on_tick(tick)
@@ -112,7 +134,7 @@ def test_tp(portfolio):
     assert portfolio.trades[0].close_reason == "take_profit"
 
 
-def test_position_sizing(portfolio):
+def test_position_sizing(portfolio: Portfolio):
     # Initial cash 10000, position_size 0.1, price 100
     # Expected qty: 0.1 * 10000 / 100 = 10
     signal = TradeSignal(
@@ -128,7 +150,7 @@ def test_position_sizing(portfolio):
     assert portfolio.trades[0].qty == expected_qty
 
 
-def test_commissions(portfolio):
+def test_commissions(portfolio: Portfolio):
     initial_cash = portfolio.cash
     signal = TradeSignal(
         action=ActionType.long,

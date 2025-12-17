@@ -71,6 +71,7 @@ class TradeSignal:
     z_score: float
     timestamp: pd.Timestamp
     price: float
+    reason: str = ""
 
 
 class StrategyProtocol(Protocol):

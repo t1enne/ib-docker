@@ -17,7 +17,7 @@ def read_candles(
     _ed = end_date and datetime.strptime(end_date, "%Y-%m-%d").timestamp() or 0.0
     from_filter = f"and o.timestamp >= {int(_sd) * 1000}" if start_date else ""
     to_filter = f"and o.timestamp <= {int(_ed) * 1000}" if end_date else ""
-    q = f"""select s.ticker as symbol,                
+    q = f"""select s.ticker as symbol,
                 o.timestamp,
                 o.open,
                 o.high,

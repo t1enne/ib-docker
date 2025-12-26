@@ -2,7 +2,7 @@ from typing import List
 import pandas as pd
 
 from src.bt.algos.pairs_trading import PairsTradingStrategy
-from src.bt.engine.backtest_engine import BacktestEngine, DataFeed
+from src.bt.engine.bt_engine import BTEngine, DataFeed
 from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
 from src.utils import pick, read_candles
 from src.bt.plotting.plotting import plot_backtest_results
@@ -69,7 +69,7 @@ class WalkForwardEngine:
             self.trading_start,
             self.trading_end,
         )
-        ngn = BacktestEngine(strat, portfolio, feed)
+        ngn = BTEngine(strat, portfolio, feed)
         results, data = await ngn.run()
 
         # Plot if requested

@@ -55,7 +55,7 @@ class DataFeed:
             # await asyncio.sleep(0.001)
 
 
-class BacktestEngine:
+class BTEngine:
     """Main backtesting engine using asyncio."""
 
     def __init__(self, strategy: StrategyProtocol, portfolio, data_feed: DataFeed):

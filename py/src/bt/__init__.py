@@ -18,7 +18,6 @@ class Strategy:
     name: str
     strategy_type: str
     symbols: list[str]
-    ma_period: int
     entry_z: float
     stop_loss: float
     take_profit: float

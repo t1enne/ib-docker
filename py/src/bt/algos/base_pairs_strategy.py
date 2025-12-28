@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List
 import pandas as pd
 from collections import defaultdict
 
@@ -27,12 +27,14 @@ class BasePairsStrategy:
         self.entry_threshold: float = kwargs.get("entry_threshold", 2.0)
         self.rolling_window_size: int = kwargs.get("rolling_window_size", 100)
         # Common buffers
-        self.z_scores: Dict[pd.Timestamp, float] = dict()
+        self.z_scores = pd.DataFrame(
+            {"z": pd.Series(dtype="float64")}, index=pd.DatetimeIndex([])
+        )
         self.pending_ticks = defaultdict(dict)
         self.hdata = hdata
 
     def _get_z(self, ts: pd.Timestamp) -> float:
-        return self.z_scores[ts]
+        return self.z_scores.loc[ts, "z"]
 
     def _long(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
         """Create a long signal."""

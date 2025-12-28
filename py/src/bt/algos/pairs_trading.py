@@ -9,6 +9,7 @@ class PairsTradingStrategy(StrategyProtocol):
     """Pairs trading strategy with z-score recalc at intervals."""
 
     bps: BasePairsStrategy
+    ema9d: dict[pd.Timestamp, float] = dict()
 
     def __init__(
         self,
@@ -30,6 +31,7 @@ class PairsTradingStrategy(StrategyProtocol):
         symbol = tick.symbol
         timestamp = tick.timestamp
         close = tick.close
+        # .ewm(span=9, adjust=False).mean().iloc(-1))
 
         # Add to historical data
         self.bps.hdata[symbol].loc[timestamp, "Close"] = close
@@ -46,7 +48,8 @@ class PairsTradingStrategy(StrategyProtocol):
             del self.bps.pending_ticks[timestamp]
             return []
         # Generate signal
-        self.bps.z_scores[timestamp] = z_score
+        self.bps.z_scores.loc[timestamp, "z"] = z_score
+
         signals = self._calculate_signal(timestamp)
         if len(signals) > 0:
             return signals
@@ -74,15 +77,24 @@ class PairsTradingStrategy(StrategyProtocol):
     def _calculate_signal(self, timestamp: pd.Timestamp) -> List[TradeSignal]:
         """Generate buy/sell/close signal based on z-score."""
         z_score = self.bps._get_z(timestamp)
+        last_z_scores = self.bps.z_scores.tail(9)
+        ema9d = last_z_scores["z"].ewm(span=9).mean().loc[timestamp]
+        sym1 = self.bps.symbols[0]
+        sym2 = self.bps.symbols[1]
 
-        # Check for opening position if no position and z-score extreme
         if abs(z_score) > self.bps.entry_threshold:
-            if z_score < -self.bps.entry_threshold:
+            if z_score < -self.bps.entry_threshold and z_score >= ema9d:
+                print(
+                    f"ts: {timestamp.date()} long {sym1}, short {sym2}. z: {z_score}. ema: {ema9d}"
+                )
                 return [
                     self.bps._long(self.bps.symbols[0], timestamp),
                     self.bps._short(self.bps.symbols[1], timestamp),
                 ]
-            elif z_score > self.bps.entry_threshold:
+            elif z_score > self.bps.entry_threshold and z_score <= ema9d:
+                print(
+                    f"ts: {timestamp.date()} long {sym2}, short {sym1}. z: {z_score}. ema: {ema9d}"
+                )
                 return [
                     self.bps._long(self.bps.symbols[1], timestamp),
                     self.bps._short(self.bps.symbols[0], timestamp),

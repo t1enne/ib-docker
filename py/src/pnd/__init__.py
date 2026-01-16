@@ -12,7 +12,7 @@ def pnd(symbols: list[str]):
     scaled_s2 = alpha + beta * s2
     spread_series = s1 - scaled_s2
     z_score = (spread_series - spread_series.mean()) / spread_series.std()
-    df = pd.DataFrame(
+    pd.DataFrame(
         {
             symbols[0]: s1,
             f"{symbols[1]}_scaled": scaled_s2,
@@ -20,4 +20,3 @@ def pnd(symbols: list[str]):
             "z_score": z_score,
         }
     )
-

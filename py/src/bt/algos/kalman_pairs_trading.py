@@ -1,4 +1,3 @@
-import numpy as np
 from typing import List
 from collections import deque
 import pandas as pd

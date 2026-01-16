@@ -1,6 +1,4 @@
-import numpy as np
 from typing import List
-from collections import deque
 import pandas as pd
 
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy

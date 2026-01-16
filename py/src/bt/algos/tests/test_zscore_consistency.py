@@ -1,11 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import patch
-from src.spread import spread
-from src.bt.algos.pairs_trading import PairsTradingStrategy
-from src.utils import read_candles, calculate_zscore_spread
-from src.bt.types import Tick
+from src.utils import calculate_zscore_spread
 
 
 @pytest.fixture
@@ -46,7 +42,6 @@ def sample_data():
 def test_zscore_consistency_spread_vs_bt(sample_data):
     """Test that z_scores from spread command match those from bt strategy at same timestamps."""
     df1, df2 = sample_data
-    symbols = ["AAPL", "GOOGL"]
     rolling_window = 50
 
     # Calculate z_score using spread logic with rolling window

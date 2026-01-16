@@ -1,6 +1,7 @@
 from peewee import Model, IntegerField, CharField, FloatField
 from . import db
 
+
 class Symbol(Model):
     id = IntegerField(primary_key=True)
     ticker = CharField()
@@ -10,7 +11,8 @@ class Symbol(Model):
 
     class Meta:
         database = db
-        table_name = 'symbol'
+        table_name = "symbol"
+
 
 class OHLCVBase(Model):
     symbol_id = IntegerField()
@@ -24,9 +26,10 @@ class OHLCVBase(Model):
     class Meta:
         database = db
 
+
 def get_ohlcv_model(bar: str):
     class Meta:
         database = db
-        table_name = f'ohlcv_{bar}'
-    
-    return type(f'OHLCV{bar}', (OHLCVBase,), {'Meta': Meta})
+        table_name = f"ohlcv_{bar}"
+
+    return type(f"OHLCV{bar}", (OHLCVBase,), {"Meta": Meta})

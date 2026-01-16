@@ -1,12 +1,11 @@
 import httpx
 from typing import Dict, Any
-from ..db.models import Symbol
+from db.models import Symbol
 
 client = httpx.AsyncClient(
-    base_url="https://localhost:5000/v1/api/",
-    timeout=10.0,
-    verify=False
+    base_url="https://localhost:5000/v1/api/", timeout=10.0, verify=False
 )
+
 
 async def fetch_contract_info(conid: int) -> Dict[str, Any]:
     ep = f"iserver/contract/{conid}/info"
@@ -17,6 +16,7 @@ async def fetch_contract_info(conid: int) -> Dict[str, Any]:
     except Exception as e:
         raise ValueError(f"Failed call to {ep}: {e}")
 
+
 async def get_contract_info(conid: int) -> Symbol:
     # Query DB first
     try:
@@ -24,16 +24,16 @@ async def get_contract_info(conid: int) -> Symbol:
         return symbol
     except Symbol.DoesNotExist:
         pass
-    
+
     # Fetch from API
     cinfo = await fetch_contract_info(conid)
-    
+
     # Insert into DB
     symbol = Symbol.create(
         id=conid,
-        ticker=cinfo['symbol'],
-        name=cinfo.get('company_name'),
-        market=cinfo['exchange'],
-        currency=cinfo['currency']
+        ticker=cinfo["symbol"],
+        name=cinfo.get("company_name"),
+        market=cinfo["exchange"],
+        currency=cinfo["currency"],
     )
     return symbol

@@ -1,8 +1,10 @@
 import pandas as pd
+import numpy as np
 from typing import List
+from collections import deque
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy
 from src.bt.types import StrategyProtocol, Tick, TradeSignal
-from src.utils import calculate_zscore_spread
+from src.utils import get_ols_fit_model
 
 
 class PairsTradingStrategy(StrategyProtocol):
@@ -24,7 +26,13 @@ class PairsTradingStrategy(StrategyProtocol):
             entry_threshold=entry_z,
             rolling_window_size=rolling_window_size,
         )
-        # Tick counter for retraining (if needed)
+        # Initialize beta estimation
+        self.beta = self._estimate_beta()
+        self.spread_buffer = deque(maxlen=rolling_window_size)
+        self.retrain_counter = 0
+        self.retrain_interval = (
+            rolling_window_size  # re-estimate every rolling_window_size ticks
+        )
 
     def on_tick(self, tick: Tick) -> List[TradeSignal]:
         """Process data from signal_queue and put signals into order_queue."""
@@ -56,23 +64,57 @@ class PairsTradingStrategy(StrategyProtocol):
 
         return []
 
+    def _estimate_beta(self) -> float:
+        """Estimate beta from the last rolling_window_size points."""
+        s1_closes = self.bps.hdata[self.bps.symbols[0]]["Close"].dropna()
+        s2_closes = self.bps.hdata[self.bps.symbols[1]]["Close"].dropna()
+        if (
+            len(s1_closes) < self.bps.rolling_window_size
+            or len(s2_closes) < self.bps.rolling_window_size
+        ):
+            # Fallback to all data
+            tail1 = s1_closes
+            tail2 = s2_closes
+        else:
+            tail1 = s1_closes.tail(self.bps.rolling_window_size)
+            tail2 = s2_closes.tail(self.bps.rolling_window_size)
+        if len(tail1) < 2:
+            return 1.0  # default
+        model = get_ols_fit_model(tail1, tail2)
+        _, beta = model.params
+        return beta
+
     def _calculate_zscore(self) -> float | None:
-        """Calculate z-score for the current timestamp using OLS on recent data, consistent with spread command."""
-        # Use recent closes for z-score calculation, limited to rolling window
-        s1_closes = self.bps.hdata[self.bps.symbols[0]]["Close"]
-        s2_closes = self.bps.hdata[self.bps.symbols[1]]["Close"]
-        [tail1, tail2] = [
-            s.tail(self.bps.rolling_window_size).dropna()
-            for s in [s1_closes, s2_closes]
-        ]
-        if len(tail1) < 2 or len(tail2) < 2:
+        """Calculate z-score using fixed beta and rolling spread statistics."""
+        s1_closes = self.bps.hdata[self.bps.symbols[0]]["Close"].dropna()
+        s2_closes = self.bps.hdata[self.bps.symbols[1]]["Close"].dropna()
+        if len(s1_closes) != len(s2_closes) or len(s1_closes) < 2:
             return None
-        # Calculate z-score series using same method as spread command
-        z_scores = calculate_zscore_spread(tail1, tail2)
-        if z_scores.empty:
+
+        # Get latest prices
+        latest_s1 = s1_closes.iloc[-1]
+        latest_s2 = s2_closes.iloc[-1]
+
+        # Periodic beta re-estimation
+        self.retrain_counter += 1
+        if self.retrain_counter % self.retrain_interval == 0:
+            self.beta = self._estimate_beta()
+
+        # Calculate spread
+        spread = latest_s1 - self.beta * latest_s2
+        self.spread_buffer.append(spread)
+
+        if len(self.spread_buffer) < 2:
             return None
-        # Return the latest z-score
-        return round(z_scores.iloc[-1], 2)
+
+        # Calculate rolling z-score
+        spreads = np.array(self.spread_buffer)
+        mean = np.mean(spreads)
+        std = np.std(spreads, ddof=1)
+        if std == 0:
+            return 0.0
+        z_score = (spread - mean) / std
+        return round(z_score, 2)
 
     def _calculate_signal(self, timestamp: pd.Timestamp) -> List[TradeSignal]:
         """Generate buy/sell/close signal based on z-score."""

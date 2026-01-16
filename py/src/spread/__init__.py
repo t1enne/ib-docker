@@ -2,8 +2,7 @@ from typing import Optional
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-from src.utils import calculate_zscore_spread, read_candles
+from src.utils import read_candles, get_ols_fit_model
 
 
 def spread(
@@ -24,7 +23,26 @@ def spread(
         },
         index=df1.index,
     )
-    z_score = calculate_zscore_spread(df1["Close"], df2["Close"], rolling)
+
+    # Estimate beta from the last rolling points (or all if no rolling)
+    window_size = rolling if rolling else len(df1)
+    tail1 = df1["Close"].tail(window_size)
+    tail2 = df2["Close"].tail(window_size)
+    model = get_ols_fit_model(tail1, tail2)
+    _, beta = model.params
+
+    # Calculate spreads
+    spreads = df1["Close"] - beta * df2["Close"]
+
+    # Calculate rolling z-score on spreads
+    if rolling:
+        # Use fixed beta and rolling z-score on spreads
+        rolling_mean = spreads.rolling(window=rolling, min_periods=rolling).mean()
+        rolling_std = spreads.rolling(window=rolling, min_periods=rolling).std()
+        z_score = (spreads - rolling_mean) / rolling_std
+    else:
+        # For consistency, even without rolling, use fixed beta approach
+        z_score = (spreads - spreads.mean()) / spreads.std()
 
     fig = make_subplots(
         rows=2,

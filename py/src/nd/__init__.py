@@ -2,7 +2,7 @@ import plotly.express as px
 from src.utils import get_returns, read_candles
 
 
-def nd(symbol, ma):
+def nd(symbol: str, ma: int):
     df = get_returns(read_candles(symbol.upper()))
     col = "Close"
     series = df[col]

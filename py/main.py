@@ -7,6 +7,8 @@ import src.mx as mx_mod
 import src.spread as spread_mod
 import src.nd as nd_mod
 import src.pnd as pnd_mod
+import src.syncm as sync_mod
+
 from src.bt import StrategyType, backtest, load_strategy, Strategy
 
 
@@ -119,6 +121,13 @@ def strategy(
 @click.argument("strategy_file")
 def bt(strategy_file: str):
     asyncio.run(backtest(load_strategy(strategy_file)))
+
+
+@main.command(help="sync historical candle data for universe")
+@click.option("--universe", default="universe.yml", help="Path to universe config file")
+def sync(universe: str):
+    data = sync_mod.load_universe_config(universe)
+    asyncio.run(sync_mod.sync_data(data))
 
 
 if __name__ == "__main__":

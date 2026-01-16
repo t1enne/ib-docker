@@ -1,17 +1,23 @@
-from pydantic import BaseModel, Field
-from typing import Optional
 import datetime
-from consts.interval import BAR_INTERVAL
+import re
+from typing import Optional
+from src.consts import BAR_INTERVAL
+from src.db.models import get_ohlcv_model
+from src.db import db
+
 from .shared import client, get_contract_info
-from db.models import get_ohlcv_model
-from db import db
 
 
-class ArgsSchema(BaseModel):
-    conid: int
-    bar: str = Field(..., pattern="|".join(BAR_INTERVAL))
-    period: Optional[str] = Field(None, pattern=r"\d+d$")
-    startTime: Optional[str] = None
+def validate_candles_args(conid, period, bar, startTime):
+    if not isinstance(conid, int):
+        raise ValueError("conid must be int")
+    if bar not in BAR_INTERVAL:
+        raise ValueError(f"bar must be one of {BAR_INTERVAL}")
+    if period is not None:
+        if not isinstance(period, str) or not re.match(r"\d+d$", period):
+            raise ValueError(r"period must be string matching \d+d$")
+    if startTime is not None and not isinstance(startTime, str):
+        raise ValueError("startTime must be str or None")
 
 
 async def candles(
@@ -21,7 +27,7 @@ async def candles(
     startTime: Optional[str] = None,
 ):
     # Validate
-    ArgsSchema(conid=conid, period=period, bar=bar, startTime=startTime)
+    validate_candles_args(conid, period, bar, startTime)
 
     symbol_info = await get_contract_info(conid)
     print(f"Getting candles for {symbol_info.ticker}")

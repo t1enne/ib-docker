@@ -5,11 +5,11 @@ from dataclasses import dataclass
 
 import yaml
 
-from trading.candles import candles
-from trading.shared import get_contract_info, search_contract
-from db.models import get_ohlcv_model
+from src.trading.candles import candles
+from src.trading.shared import get_contract_info, search_contract
+from src.db.models import get_ohlcv_model
 
-from consts.interval import BAR_INTERVAL
+from src.consts import BAR_INTERVAL
 
 
 @dataclass

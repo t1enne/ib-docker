@@ -4,7 +4,7 @@ import numpy as np
 from typing import List, Dict, Optional
 from scipy import stats
 
-from src.bt.types import PortfolioResult
+from src.bt.types import PortfolioResult, ActionType
 
 
 @dataclass
@@ -300,8 +300,32 @@ def print_results_analysis(
             print(
                 f"{dd.net_drawdown_pct:<14.2f} {_safe_date_str(dd.peak_date):<15} {_safe_date_str(dd.valley_date):<15} {_safe_date_str(dd.recovery_date):<15} {dd.duration:<10}"
             )
+            
+    if len(trades) == 0:
+        print()
+        return
+    print(f"\n{'Trades':<75}")
+    print("-" * 120)
+    # Table header
+    print(
+        f"{'Entry Time':<20} {'Exit Time':<20} {'Entry':<10} {'Exit':<10} {'PnL':<10} {'Pos':<8} {'Reason':<15} {'SL/TP':<15}"
+    )
+    print("-" * 120)
 
-    print()
+    # Table rows
+    for i, t in enumerate(trades, 1):
+    # Format SL/TP column
+        sl_tp_str = f"{t.stop_loss:.2f}/{t.take_profit:.2f}"
+        print(
+            f"{_safe_date_str(t.entry_time):<20} "
+            f"{_safe_date_str(t.exit_time):<20} "
+            f"{t.entry_price:<10.2f} "
+            f"{t.exit_price:<10.2f} "
+            f"{t.pnl:<10.2f} "
+            f"{t.position == ActionType.long and 'L' or 'S' :<8} "
+            f"{str(t.close_reason):<15} "
+            f"{sl_tp_str:<15}"
+        )
 
 
 def exposure_and_turnover(

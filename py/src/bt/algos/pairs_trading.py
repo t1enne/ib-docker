@@ -126,13 +126,13 @@ class PairsTradingStrategy(StrategyProtocol):
 
         if abs(z_score) > self.bps.entry_threshold:
             if z_score < -self.bps.entry_threshold:  # and z_score >= ema9d:
-                print(f"ts: {timestamp.date()} long {sym1}, short {sym2}. z: {z_score}")
+                # print(f"ts: {timestamp.date()} long {sym1}, short {sym2}. z: {z_score}")
                 return [
                     self.bps._long(self.bps.symbols[0], timestamp),
                     self.bps._short(self.bps.symbols[1], timestamp),
                 ]
             elif z_score > self.bps.entry_threshold:  # and z_score <= ema9d:
-                print(f"ts: {timestamp.date()} long {sym2}, short {sym1}. z: {z_score}")
+                # print(f"ts: {timestamp.date()} long {sym2}, short {sym1}. z: {z_score}")
                 return [
                     self.bps._long(self.bps.symbols[1], timestamp),
                     self.bps._short(self.bps.symbols[0], timestamp),

@@ -40,7 +40,10 @@ class WalkForwardEngine:
             for symbol in self.symbols
         }
         # Separate strategy and portfolio parameters
-        self.strategy_params = pick(kwargs, ["entry_z", "rolling_window_size"])
+        self.strategy_params = pick(
+            kwargs,
+            ["entry_z", "rolling_window_size", "exit_threshold", "time_decay_bars"],
+        )
         self.pf_params = pick(
             kwargs,
             [

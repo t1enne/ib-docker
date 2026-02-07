@@ -4,7 +4,7 @@ import pandas as pd
 from typing import List, AsyncGenerator, Tuple, Dict
 from src.bt.portfolio.portfolio import Portfolio
 from src.utils import read_candles
-from src.bt.types import Tick, Trade, StrategyProtocol, PortfolioResult
+from src.bt.types import Tick, Trade, StrategyProtocol, PortfolioResult, TradeSignal
 
 
 class DataFeed:
@@ -58,7 +58,8 @@ class DataFeed:
 
 class BTEngine:
     """Main backtesting engine using asyncio."""
-
+    pending_signals:List[TradeSignal] = []
+    
     def __init__(
         self, strategy: StrategyProtocol, portfolio: Portfolio, data_feed: DataFeed
     ):
@@ -83,13 +84,14 @@ class BTEngine:
         async for tick in self.data_feed.get_data_stream():
             if tick is None:
                 break
+            
+            # Send signals to portfolio
+            for signal in self.pending_signals:
+                self.portfolio.on_signal(signal)
             # Process tick through strategy
-            signals = self.strategy.on_tick(tick)
+            self.pending_signals = self.strategy.on_tick(tick)
             # Send tick to portfolio for SL/TP
             self.portfolio.on_tick(tick)
-            # Send signals to portfolio
-            for signal in signals:
-                self.portfolio.on_signal(signal)
 
         # Finalize results
         return self._finalize_results()

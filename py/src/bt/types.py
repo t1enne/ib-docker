@@ -40,18 +40,17 @@ class PortfolioResult:
     sharpe_ratio: float
     trades: List[Trade]
     equity_curve: pd.Series
-
-
-@dataclass
-class BacktestResult:
-    total_return: float
-    sharpe_ratio: float
-    max_drawdown: float
-    win_rate: float
-    total_trades: int
-    profitable_trades: int
-    trades: List[Trade]
-    equity_curve: pd.Series
+    annual_return: float = 0.0
+    annual_volatility: float = 0.0
+    calmar_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    max_drawdown: float = 0.0
+    alpha: float = 0.0
+    beta: float = 0.0
+    skewness: float = 0.0
+    kurtosis: float = 0.0
+    stability: float = 0.0
+    omega_ratio: float = 0.0
 
 
 @dataclass

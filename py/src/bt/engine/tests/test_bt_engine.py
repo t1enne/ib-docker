@@ -2,12 +2,7 @@ import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
 from src.bt.engine.bt_engine import DataFeed, BTEngine
-from src.bt.types import (
-    Tick,
-    BacktestResult,
-    TradeSignal,
-    ActionType,
-)
+from src.bt.types import Tick, TradeSignal, ActionType, PortfolioResult
 from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
 from src.utils import get_ts
 
@@ -155,9 +150,6 @@ async def test_run(mock_strategy, portfolio, mock_data_feed):
         ),
     }
     results, data = await engine.run()
-    assert isinstance(results, BacktestResult)
-    assert results.total_trades == 1  # One trade opened and closed
-    assert results.profitable_trades == 1
     assert len(results.trades) == 1
     assert results.trades[0].symbol == "AAPL"
     assert results.trades[0].position == ActionType.long
@@ -166,8 +158,8 @@ async def test_run(mock_strategy, portfolio, mock_data_feed):
     assert portfolio.trades[0].symbol == "AAPL"
 
 
-def test_finalize_results(portfolio, mock_data_feed):
-    """Test BTEngine._finalize_results constructs BacktestResult."""
+def test_finalize_results(portfolio: Portfolio, mock_data_feed):
+    """Test BTEngine._finalize_results constructs PortfolioResult."""
     # Simulate a trade in portfolio
     signal = TradeSignal(
         action=ActionType.long,
@@ -191,10 +183,9 @@ def test_finalize_results(portfolio, mock_data_feed):
         ),
     }
     results, data = engine._finalize_results()
-    assert isinstance(results, BacktestResult)
-    assert results.total_trades == 1
-    assert results.profitable_trades == 1
+    assert isinstance(results, PortfolioResult)
     assert len(results.trades) == 1
+    assert results.trades[0].pnl > 1
     assert data == engine.data
     # Check that close_all_positions was called with correct args
     # Since portfolio is real, we can't check calls easily, but assert position is closed

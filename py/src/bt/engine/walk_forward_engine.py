@@ -75,4 +75,4 @@ class WalkForwardEngine:
         # Plot if requested
         if self.plot:
             plot_backtest_results(results, self.symbols, "Pairs Trading", data)
-        return results
+        return portfolio.get_results()

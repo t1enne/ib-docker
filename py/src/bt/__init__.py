@@ -1,3 +1,4 @@
+from src.bt.types import PortfolioResult
 from datetime import date
 from dataclasses import dataclass
 from enum import Enum
@@ -7,7 +8,7 @@ import logging
 
 from src.bt.engine.walk_forward_engine import WalkForwardEngine
 from src.bt.algos.pairs_trading import PairsTradingStrategy
-from src.bt.types import BacktestResult
+from src.bt.metrics import print_results_analysis
 
 
 logger = logging.getLogger(__name__)
@@ -92,12 +93,12 @@ async def backtest(strategy: Strategy):
 
     # Run walk-forward analysis
     results = await wf_engine.run()
-    # print(results.sharpe_ratio, results.total_return)
-    display_walk_forward_results(results, strategy.symbols, "pairsstrat")
+    print_results_analysis(results)
+    # display_walk_forward_results(results, strategy.symbols, "pairsstrat")
 
 
 def display_walk_forward_results(
-    results: BacktestResult, symbols: list[str], strategy: str
+    results: PortfolioResult, symbols: list[str], strategy: str
 ):
     """Display walk-forward analysis results"""
     separator = "=" * 60
@@ -109,7 +110,7 @@ Symbols: {", ".join([s.upper() for s in symbols])}
 Total Return: {results.total_return:.2%}
 Sharpe Ratio: {results.sharpe_ratio:.2f}
 Max Drawdown: {results.max_drawdown:.2%}
-Total Trades: {results.total_trades}
+Total Trades: {results.total_return}
 {separator}
 """
     click.echo(output.strip())

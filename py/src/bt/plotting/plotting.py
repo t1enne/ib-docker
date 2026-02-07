@@ -2,11 +2,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 from typing import Dict
-from src.bt.types import ActionType, BacktestResult
+from src.bt.types import ActionType, PortfolioResult
 
 
 def plot_backtest_results(
-    results: BacktestResult,
+    results: PortfolioResult,
     symbols: list[str],
     strategy: str,
     data: Dict[str, pd.DataFrame],

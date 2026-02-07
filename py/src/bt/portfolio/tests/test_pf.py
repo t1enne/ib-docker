@@ -152,15 +152,15 @@ def test_position_sizing(portfolio: Portfolio):
 
 
 def test_commissions(portfolio: Portfolio):
-    entry_price= 100
-    exit_price=120
+    entry_price = 100
+    exit_price = 120
     initial_cash = portfolio.cash
     signal = TradeSignal(
         action=ActionType.long,
         symbol="AAPL",
         z_score=2.0,
         timestamp=get_ts("2025-01-01"),
-        price=entry_price
+        price=entry_price,
     )
     portfolio.on_signal(signal)
     qty = portfolio.positions["AAPL"]
@@ -174,11 +174,11 @@ def test_commissions(portfolio: Portfolio):
         symbol="AAPL",
         z_score=0.0,
         timestamp=get_ts("2025-01-02"),
-        price=exit_price
+        price=exit_price,
     )
     portfolio.on_signal(close_signal)
     # Commission deducted again on close
-    pnl = (exit_price-entry_price) * qty 
+    pnl = (exit_price - entry_price) * qty
     assert portfolio.cash == updated_cash + pnl - portfolio.commission
 
 

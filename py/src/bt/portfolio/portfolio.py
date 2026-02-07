@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, cast
 from pandas._libs import NaTType
+import src.bt.metrics as metrics
 
 from src.bt.types import (
     ActionType,
@@ -101,11 +102,34 @@ class Portfolio:
         sharpe = (
             returns.mean() / returns.std() * np.sqrt(252) if len(returns) > 0 else 0
         )
+
+        annual_return = metrics.annual_return(equity_series)
+        annual_volatility = metrics.annual_volatility(equity_series)
+        max_drawdown = metrics.max_drawdown(equity_series)
+        calmar_ratio = metrics.calmar_ratio(equity_series)
+        sortino_ratio = metrics.sortino_ratio(equity_series)
+        omega_ratio = metrics.omega_ratio(equity_series)
+        skewness = metrics.skewness(equity_series)
+        kurtosis = metrics.kurtosis(equity_series)
+        stability = metrics.stability(equity_series)
+        alpha, beta = metrics.alpha_beta(equity_series)
+
         return PortfolioResult(
             total_return=total_return,
             sharpe_ratio=sharpe,
             trades=self.trades,
             equity_curve=equity_series,
+            annual_return=annual_return,
+            annual_volatility=annual_volatility,
+            calmar_ratio=calmar_ratio,
+            sortino_ratio=sortino_ratio,
+            max_drawdown=max_drawdown,
+            alpha=alpha,
+            beta=beta,
+            skewness=skewness,
+            kurtosis=kurtosis,
+            stability=stability,
+            omega_ratio=omega_ratio,
         )
 
     def _update_equity_on_tick(self, pos: Trade, tick: Tick):

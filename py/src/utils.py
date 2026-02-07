@@ -9,7 +9,7 @@ from datetime import datetime
 
 def read_candles(
     symbol: str, start_date: str | None = None, end_date: str | None = None
-):
+) -> pd.DataFrame:
     # return pd.read_csv(f"mdata/{symbol}.csv")
     con = sqlite3.connect("../data/db.sqlite")
     cur = con.cursor()

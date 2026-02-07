@@ -1,9 +1,10 @@
 import asyncio
-from typing import List, AsyncGenerator
 import pandas as pd
 
+from typing import List, AsyncGenerator, Tuple, Dict
+from src.bt.portfolio.portfolio import Portfolio
 from src.utils import read_candles
-from src.bt.types import Tick, BacktestResult, Trade, StrategyProtocol
+from src.bt.types import Tick, Trade, StrategyProtocol, PortfolioResult
 
 
 class DataFeed:
@@ -58,7 +59,9 @@ class DataFeed:
 class BTEngine:
     """Main backtesting engine using asyncio."""
 
-    def __init__(self, strategy: StrategyProtocol, portfolio, data_feed: DataFeed):
+    def __init__(
+        self, strategy: StrategyProtocol, portfolio: Portfolio, data_feed: DataFeed
+    ):
         self.strategy = strategy
         self.portfolio = portfolio
         self.data_feed = data_feed
@@ -71,7 +74,7 @@ class BTEngine:
             for symbol in data_feed.symbols
         }
 
-    async def run(self):
+    async def run(self) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame]]:
         """Run the backtest simulation asynchronously."""
 
         # Create task for data feed
@@ -98,7 +101,7 @@ class BTEngine:
         # Signal end of data
         await signal_queue.put(None)
 
-    def _finalize_results(self):
+    def _finalize_results(self) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame]]:
         """Finalize and return results."""
         # Close any open positions at the last prices
         last_timestamp = max(df.index[-1] for df in self.data.values())
@@ -110,14 +113,4 @@ class BTEngine:
         trades: List[Trade] = pf_results.trades
         # Create equity curve as pd.Series
         equity_curve = pd.Series(pf_results.equity_curve)
-        results = BacktestResult(
-            total_return=pf_results.total_return,
-            sharpe_ratio=pf_results.sharpe_ratio,
-            max_drawdown=0.0,  # Placeholder
-            win_rate=0.0,  # Placeholder
-            total_trades=len(trades),
-            profitable_trades=len(list(filter(lambda t: t.pnl > 0, trades))),
-            trades=trades,
-            equity_curve=equity_curve,
-        )
-        return results, self.data
+        return self.portfolio.get_results(), self.data

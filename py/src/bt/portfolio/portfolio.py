@@ -45,6 +45,10 @@ class Portfolio:
             return None  # No open trade to close
         sym = tick.symbol
         open_pos = self.open_trades[sym]
+        # udpate equity for the position
+        if open_pos:
+            self._update_equity_on_tick(open_pos, tick)
+
         is_long = open_pos.position == ActionType.long
         should_close_long = is_long and (
             tick.close < open_pos.stop_loss or open_pos.take_profit < tick.close
@@ -61,92 +65,31 @@ class Portfolio:
                 or (should_close_short and tick.close >= open_pos.stop_loss)
                 else "take_profit"
             )
-            self._close_pos(tick.symbol, tick.close, tick.timestamp, reason)
+            self._send_close_signal(tick.symbol, tick.close, tick.timestamp, reason)
 
         self._update_sl(open_pos, tick)
 
-    def _update_sl(self, trade: Trade, tick: Tick):
-        is_long = trade.position == ActionType.long
-
-        if is_long:
-            max_price = max(trade.entry_price, tick.close)
-            trade.stop_loss = max_price * (1 - self.stop_loss)
-            return
-        # short
-        min_price = min(trade.entry_price, tick.close)
-        trade.stop_loss = min_price * (1 - self.stop_loss)
-
     def on_signal(self, signal: TradeSignal) -> Optional[Trade]:
         """Execute order based on signal."""
+        # CLOSE
         if signal.action == ActionType.close:
-            # Close existing position
             if signal.symbol not in self.open_trades:
                 return None  # No open trade to close
 
             open_trade = self.open_trades[signal.symbol]
-            qty = abs(self.positions.get(signal.symbol, 0))
-            if qty <= 0:
-                return None
-            # Calculate P&L
-            is_long = open_trade.position == ActionType.long
-            pnl = (
-                (signal.price - open_trade.entry_price) * qty
-                if is_long
-                else (open_trade.entry_price - signal.price) * qty
-            )
-            self.cash += pnl - (self.commission * qty * signal.price)
-            self.positions[signal.symbol] = 0
-            # Update trade
-            open_trade.exit_time = signal.timestamp
-            open_trade.exit_price = signal.price
-            open_trade.pnl = pnl
-            open_trade.status = TradeStatus.closed
-            open_trade.close_reason = signal.reason
-            # print(f"Closing {open_trade.position} trade with {round(open_trade.pnl, 2):>6} on {str(signal.timestamp)} (reason: {open_trade.close_reason}) sym: {open_trade.symbol:>4}")
-            del self.open_trades[signal.symbol]
-            self._update_equity(signal.timestamp)
-            return open_trade
-
+            return self._close_trade(open_trade, signal)
         if signal.symbol in self.open_trades:
             return None  # Already have position
 
-        # Open position
+        # OPEN
         qty = round(self.position_size * self.cash / signal.price, 4)
-        sl = 0.0
-        tp = 0.0
-        if signal.action == ActionType.long:
-            self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) + qty
-            self.cash -= qty * signal.price * (1 + self.commission)
-            sl = signal.price * (1 - self.stop_loss)
-            tp = signal.price * self.take_profit
-        elif signal.action == ActionType.short:
-            self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) - qty
-            self.cash -= qty * signal.price * (1 + self.commission)
-            sl = signal.price * (1 + self.stop_loss)
-            tp = signal.price * (1 - self.take_profit)
-
-        # Record trade
-        trade = Trade(
-            entry_time=signal.timestamp,
-            entry_price=signal.price,
-            qty=qty,
-            z_score=signal.z_score,
-            symbol=signal.symbol,
-            stop_loss=sl,
-            take_profit=tp,
-            position=signal.action,
-            exit_time=None,
-            exit_price=None,
-        )
-        self.trades.append(trade)
-        self.open_trades[signal.symbol] = trade
-        return trade
+        return self._open_trade(signal, qty)
 
     def close_all_positions(self, timestamp: pd.Timestamp, prices: Dict[str, float]):
         """Close all open positions at the given prices."""
         for symbol, _ in list(self.open_trades.items()):
             p = prices[symbol]
-            self._close_pos(symbol, p, timestamp)
+            self._send_close_signal(symbol, p, timestamp)
 
     def get_results(self) -> PortfolioResult:
         """Get backtest results."""
@@ -165,12 +108,17 @@ class Portfolio:
             equity_curve=equity_series,
         )
 
-    def _update_equity(self, timestamp: pd.Timestamp):
-        """Update equity curve at given timestamp."""
-        current_equity = self.cash + sum(pos * 100 for pos in self.positions.values())
-        self.equity_curve[timestamp] = current_equity
+    def _update_equity_on_tick(self, pos: Trade, tick: Tick):
+        assert pos and tick
+        self.open_trades[pos.symbol].last_price = tick.close
+        self.equity_curve[tick.timestamp] = self._calc_current_equity()
 
-    def _close_pos(
+    def _calc_current_equity(self):
+        return self.cash + sum(
+            [t.qty * t.last_price for t in self.open_trades.values()]
+        )
+
+    def _send_close_signal(
         self,
         symbol: str,
         price: float,
@@ -186,3 +134,79 @@ class Portfolio:
             reason=reason,
         )
         self.on_signal(signal)
+
+    def _open_trade(self, signal: TradeSignal, qty: float):
+        """Open position, deduct fees from cash and updates equity curve"""
+        is_long = signal.action == ActionType.long
+        sl = 0.0
+        tp = 0.0
+        if is_long:
+            sl = round(signal.price * (1 - self.stop_loss), 2)
+            tp = round(signal.price * (1 + self.take_profit), 2)
+        else:
+            sl = signal.price * (1 + self.stop_loss)
+            tp = signal.price * (1 - self.take_profit)
+        # Record trade
+        trade = Trade(
+            entry_time=signal.timestamp,
+            entry_price=signal.price,
+            last_price=signal.price,
+            qty=qty,
+            z_score=signal.z_score,
+            symbol=signal.symbol,
+            stop_loss=sl,
+            take_profit=tp,
+            position=signal.action,
+            exit_time=None,
+            exit_price=None,
+        )
+        self.trades.append(trade)
+        self.open_trades[signal.symbol] = trade
+
+        direction = 1 if is_long else -1
+        self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) + (
+            qty * direction
+        )
+        self.cash -= qty * signal.price + self.commission
+        self.equity_curve[signal.timestamp] = self._calc_current_equity()
+        # update equity curve
+        return trade
+
+    def _close_trade(self, trade: Trade, signal: TradeSignal):
+        """Closes position, adds pnl to cash, updates equity curve"""
+        qty = abs(self.positions.get(signal.symbol, 0))
+        assert qty > 0
+        is_long = trade.position == ActionType.long
+        # Calculate P&L
+        pnl = (
+            (signal.price - trade.entry_price) * qty
+            if is_long
+            else (trade.entry_price - signal.price) * qty
+        )
+
+        self.positions[signal.symbol] = 0
+        # Update trade
+        trade.exit_time = signal.timestamp
+        trade.exit_price = signal.price
+        trade.pnl = pnl
+        trade.status = TradeStatus.closed
+        trade.close_reason = signal.reason
+
+        # Update cash and equity
+        self.cash += pnl - self.commission
+        self.equity_curve[signal.timestamp] = self._calc_current_equity()
+
+        # print(f"Closing {trade.position} trade with {round(open_trade.pnl, 2):>6} on {str(signal.timestamp)} (reason: {open_trade.close_reason}) sym: {open_trade.symbol:>4}")
+        del self.open_trades[signal.symbol]
+        return trade
+
+    def _update_sl(self, trade: Trade, tick: Tick):
+        is_long = trade.position == ActionType.long
+
+        if is_long:
+            max_price = max(trade.entry_price, tick.close)
+            trade.stop_loss = max_price * (1 - self.stop_loss)
+            return
+        # short
+        min_price = min(trade.entry_price, tick.close)
+        trade.stop_loss = min_price * (1 - self.stop_loss)

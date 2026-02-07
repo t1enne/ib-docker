@@ -92,24 +92,27 @@ async def backtest(strategy: Strategy):
 
     # Run walk-forward analysis
     results = await wf_engine.run()
-    print(results.sharpe_ratio, results.total_return)
-    # display_walk_forward_results(results, strategy.symbols, "pairsstrat")
+    # print(results.sharpe_ratio, results.total_return)
+    display_walk_forward_results(results, strategy.symbols, "pairsstrat")
 
 
 def display_walk_forward_results(
     results: BacktestResult, symbols: list[str], strategy: str
 ):
     """Display walk-forward analysis results"""
-    click.echo("\n" + "=" * 60)
-    click.echo(f"WALK-FORWARD ANALYSIS - {strategy.upper()} Strategy")
-    click.echo(f"Symbols: {', '.join(symbols)}")
-    click.echo("=" * 60)
-
-    click.echo(f"Total Return: {results.total_return:.2%}")
-    click.echo(f"Sharpe Ratio: {results.sharpe_ratio:.2f}")
-    click.echo(f"Max Drawdown: {results.max_drawdown:.2%}")
-    click.echo(f"Total Trades: {results.total_trades}")
-    click.echo("=" * 60)
+    separator = "=" * 60
+    output = f"""
+{separator}
+WALK-FORWARD ANALYSIS - {strategy.upper()} Strategy
+Symbols: {", ".join([s.upper() for s in symbols])}
+{separator}
+Total Return: {results.total_return:.2%}
+Sharpe Ratio: {results.sharpe_ratio:.2f}
+Max Drawdown: {results.max_drawdown:.2%}
+Total Trades: {results.total_trades}
+{separator}
+"""
+    click.echo(output.strip())
 
 
 __all__ = ["backtest", "load_strategy", "Strategy"]

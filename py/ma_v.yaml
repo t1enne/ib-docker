@@ -3,10 +3,10 @@ training_start: 2022-01-01
 training_end: 2022-12-31
 trading_start: 2023-01-01
 trading_end: 2025-01-01
-commission: 0.001
+commission: 0.5
 entry_z: 2.0
 initial_capital: 100000
-plot: true
+plot: false
 position_size: 0.1
 stop_loss: 0.01
 strategy_type: pnd

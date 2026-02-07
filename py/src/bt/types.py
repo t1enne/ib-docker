@@ -22,6 +22,7 @@ class Trade:
     entry_price: float
     exit_time: Optional[pd.Timestamp]
     exit_price: Optional[float]
+    last_price: float
     z_score: float
     symbol: str
     position: ActionType

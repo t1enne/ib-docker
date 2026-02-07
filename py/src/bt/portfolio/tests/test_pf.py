@@ -9,11 +9,11 @@ def portfolio():
     return Portfolio(
         PortfolioProps(
             stop_loss=0.1,
-            take_profit=1.5,
+            take_profit=0.5,
             initial_capital=10000,
             position_size=0.1,
-            commission=0.0001,
-            start_date=get_ts("2025-01-01"),
+            commission=1,
+            start_date=get_ts("2024-12-31"),
         )
     )
 
@@ -51,6 +51,7 @@ def test_on_signal(portfolio: Portfolio):
 
 
 def test_sl(portfolio: Portfolio):
+    print(portfolio.open_trades)
     # Open a long position
     signal = TradeSignal(
         action=ActionType.long,
@@ -151,33 +152,109 @@ def test_position_sizing(portfolio: Portfolio):
 
 
 def test_commissions(portfolio: Portfolio):
+    entry_price= 100
+    exit_price=120
     initial_cash = portfolio.cash
     signal = TradeSignal(
         action=ActionType.long,
         symbol="AAPL",
         z_score=2.0,
         timestamp=get_ts("2025-01-01"),
-        price=100.0,
+        price=entry_price
     )
     portfolio.on_signal(signal)
     qty = portfolio.positions["AAPL"]
-    expected_cost = qty * 100.0 * (1 + 0.0001)
-    assert portfolio.cash == initial_cash - expected_cost
+    cost = qty * entry_price
+    assert portfolio.cash == initial_cash - cost - portfolio.commission
 
+    updated_cash = portfolio.cash
     # Close and check commission on exit
     close_signal = TradeSignal(
         action=ActionType.close,
         symbol="AAPL",
         z_score=0.0,
         timestamp=get_ts("2025-01-02"),
-        price=120.0,  # Higher price for profit
+        price=exit_price
     )
     portfolio.on_signal(close_signal)
     # Commission deducted again on close
-    final_cash = portfolio.cash
-    expected_pnl = (120 - 100) * qty
-    expected_commission_exit = 0.0001 * qty * 120
-    expected_final = (
-        initial_cash - expected_cost + expected_pnl - expected_commission_exit
+    pnl = (exit_price-entry_price) * qty 
+    assert portfolio.cash == updated_cash + pnl - portfolio.commission
+
+
+def test_equity_updates_on_every_tick(portfolio: Portfolio):
+    commission = portfolio.commission
+
+    portfolio.on_signal(
+        TradeSignal(
+            timestamp=get_ts("2025-01-01 10:00"),
+            action=ActionType.long,
+            symbol="AAPL",
+            z_score=2.0,
+            price=100.0,
+        )
     )
-    assert abs(final_cash - expected_final) < 0.01
+
+    qty = portfolio.positions["AAPL"]
+    expected_cash = portfolio.initial_capital - (qty * 100.0) - commission
+    # assert abs(portfolio.cash - expected_cash) < 0.01
+
+    ticks = [
+        Tick(
+            timestamp=get_ts("2025-01-01 10:00"),
+            symbol="AAPL",
+            open=102.0,
+            high=103.0,
+            low=101.0,
+            close=102.0,
+            volume=1000,
+        ),
+        Tick(
+            timestamp=get_ts("2025-01-01 11:00"),
+            symbol="AAPL",
+            open=102.0,
+            high=105.0,
+            low=101.0,
+            close=104.0,
+            volume=1000,
+        ),
+        Tick(
+            timestamp=get_ts("2025-01-01 12:00"),
+            symbol="AAPL",
+            open=104.0,
+            high=106.0,
+            low=103.0,
+            close=103.0,
+            volume=1000,
+        ),
+    ]
+
+    for tick in ticks:
+        portfolio.on_tick(tick)
+
+    equity_curve = portfolio.get_results().equity_curve
+    assert len(equity_curve) == 4
+
+    expected_equities = [
+        10000.0,
+        expected_cash + qty * 102.0,
+        expected_cash + qty * 104.0,
+        expected_cash + qty * 103.0,
+    ]
+    for i, expected_eq in enumerate(expected_equities):
+        assert abs(equity_curve.iloc[i] - expected_eq) < 1, f"Tick {i}"
+
+    # portfolio.on_signal(
+    #     TradeSignal(
+    #         timestamp=get_ts("2025-01-01 13:00"),
+    #         action=ActionType.close,
+    #         symbol="AAPL",
+    #         z_score=0.0,
+    #         price=110.0,
+    #     )
+    # )
+    # expected_final_cash = expected_cash + (qty * 110.0 - qty * 100.0)
+    # assert abs(portfolio.cash - expected_final_cash) < 0.01
+    # assert (
+    #     abs(portfolio.get_results().equity_curve.iloc[-1] - expected_final_cash) < 0.01
+    # )

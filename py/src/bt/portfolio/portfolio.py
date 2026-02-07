@@ -12,6 +12,7 @@ from src.bt.types import (
     TradeSignal,
     PortfolioResult,
     TradeStatus,
+    FillEvent,
 )
 
 
@@ -85,6 +86,18 @@ class Portfolio:
         # OPEN
         qty = round(self.position_size * self.cash / signal.price, 4)
         return self._open_trade(signal, qty)
+
+    def on_fill(self, fill: FillEvent) -> Optional[Trade]:
+        """Execute order based on fill event from execution handler."""
+        signal = fill.signal
+        if signal.action == ActionType.close:
+            if signal.symbol not in self.open_trades:
+                return None
+            open_trade = self.open_trades[signal.symbol]
+            return self._close_trade_from_fill(open_trade, fill)
+        if signal.symbol in self.open_trades:
+            return None
+        return self._open_trade_from_fill(signal, fill)
 
     def close_all_positions(self, timestamp: pd.Timestamp, prices: Dict[str, float]):
         """Close all open positions at the given prices."""
@@ -234,3 +247,63 @@ class Portfolio:
         # short
         min_price = min(trade.entry_price, tick.close)
         trade.stop_loss = min_price * (1 - self.stop_loss)
+
+    def _open_trade_from_fill(self, signal: TradeSignal, fill: FillEvent):
+        """Open position from fill event with execution pricing."""
+        is_long = signal.action == ActionType.long
+        qty = round(self.position_size * self.cash / fill.executed_price, 4)
+        sl = 0.0
+        tp = 0.0
+        if is_long:
+            sl = round(fill.executed_price * (1 - self.stop_loss), 2)
+            tp = round(fill.executed_price * (1 + self.take_profit), 2)
+        else:
+            sl = fill.executed_price * (1 + self.stop_loss)
+            tp = fill.executed_price * (1 - self.take_profit)
+
+        trade = Trade(
+            entry_time=signal.timestamp,
+            entry_price=fill.executed_price,
+            last_price=fill.executed_price,
+            qty=qty,
+            z_score=signal.z_score,
+            symbol=signal.symbol,
+            stop_loss=sl,
+            take_profit=tp,
+            position=signal.action,
+            exit_time=None,
+            exit_price=None,
+        )
+        self.trades.append(trade)
+        self.open_trades[signal.symbol] = trade
+
+        direction = 1 if is_long else -1
+        self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) + (
+            qty * direction
+        )
+        self.cash -= (qty * fill.executed_price) + fill.commission
+        self.equity_curve[signal.timestamp] = self._calc_current_equity()
+        return trade
+
+    def _close_trade_from_fill(self, trade: Trade, fill: FillEvent):
+        """Close position from fill event with execution pricing."""
+        qty = abs(self.positions.get(fill.signal.symbol, 0))
+        is_long = trade.position == ActionType.long
+        pnl = (
+            (fill.executed_price - trade.entry_price) * qty
+            if is_long
+            else (trade.entry_price - fill.executed_price) * qty
+        )
+
+        self.positions[fill.signal.symbol] = 0
+        trade.exit_time = fill.signal.timestamp
+        trade.exit_price = fill.executed_price
+        trade.pnl = pnl
+        trade.status = TradeStatus.closed
+        trade.close_reason = fill.signal.reason
+
+        self.cash += pnl - fill.commission
+        self.equity_curve[fill.signal.timestamp] = self._calc_current_equity()
+
+        del self.open_trades[fill.signal.symbol]
+        return trade

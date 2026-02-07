@@ -4,6 +4,7 @@ import pandas as pd
 from src.bt.algos.pairs_trading import PairsTradingStrategy
 from src.bt.engine.bt_engine import BTEngine, DataFeed
 from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
+from src.bt.types import ExecutionParams
 from src.utils import pick, read_candles
 from src.bt.plotting.plotting import plot_backtest_results
 
@@ -54,6 +55,14 @@ class WalkForwardEngine:
                 "take_profit",
             ],
         )
+        # Execution parameters
+        if "spread_bps" in kwargs or "slippage_bps" in kwargs:
+            self.execution_params = ExecutionParams(
+                spread_bps=kwargs.get("spread_bps", 5.0),
+                slippage_bps=kwargs.get("slippage_bps", 2.0),
+            )
+        else:
+            self.execution_params = None
 
     async def run(self):
         portfolio = Portfolio(
@@ -72,7 +81,7 @@ class WalkForwardEngine:
             self.trading_start,
             self.trading_end,
         )
-        ngn = BTEngine(strat, portfolio, feed)
+        ngn = BTEngine(strat, portfolio, feed, execution_params=self.execution_params)
         results, data = await ngn.run()
 
         # Plot if requested

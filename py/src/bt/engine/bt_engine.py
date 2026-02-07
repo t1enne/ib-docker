@@ -1,10 +1,18 @@
 import asyncio
 import pandas as pd
 
-from typing import List, AsyncGenerator, Tuple, Dict
+from typing import List, AsyncGenerator, Tuple, Dict, Optional
 from src.bt.portfolio.portfolio import Portfolio
 from src.utils import read_candles
-from src.bt.types import Tick, Trade, StrategyProtocol, PortfolioResult, TradeSignal
+from src.bt.types import (
+    Tick,
+    Trade,
+    StrategyProtocol,
+    PortfolioResult,
+    TradeSignal,
+    ExecutionParams,
+)
+from src.bt.execution import ExecutionHandler
 
 
 class DataFeed:
@@ -58,15 +66,22 @@ class DataFeed:
 
 class BTEngine:
     """Main backtesting engine using asyncio."""
-    pending_signals:List[TradeSignal] = []
-    
+
+    pending_signals: List[TradeSignal] = []
+
     def __init__(
-        self, strategy: StrategyProtocol, portfolio: Portfolio, data_feed: DataFeed
+        self,
+        strategy: StrategyProtocol,
+        portfolio: Portfolio,
+        data_feed: DataFeed,
+        execution_params: Optional[ExecutionParams] = None,
     ):
         self.strategy = strategy
         self.portfolio = portfolio
         self.data_feed = data_feed
-        # Load data for plotting
+        self.execution_handler = (
+            ExecutionHandler(execution_params) if execution_params else None
+        )
         print(
             f"datafeed start: {data_feed.start_date}, datafeed end: {data_feed.end_date}"
         )
@@ -78,16 +93,18 @@ class BTEngine:
     async def run(self) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame]]:
         """Run the backtest simulation asynchronously."""
 
-        # Create task for data feed
-        # data_task = asyncio.create_task(self._run_data_feed(ticks_queue))
-
         async for tick in self.data_feed.get_data_stream():
             if tick is None:
                 break
-            
-            # Send signals to portfolio
+
+            # Execute pending signals through execution handler (if present)
             for signal in self.pending_signals:
-                self.portfolio.on_signal(signal)
+                if self.execution_handler:
+                    fill = self.execution_handler.execute(signal, tick)
+                    self.portfolio.on_fill(fill)
+                else:
+                    self.portfolio.on_signal(signal)
+
             # Process tick through strategy
             self.pending_signals = self.strategy.on_tick(tick)
             # Send tick to portfolio for SL/TP

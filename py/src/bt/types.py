@@ -65,6 +65,21 @@ class Tick:
 
 
 @dataclass
+class ExecutionParams:
+    spread_bps: float = 5.0
+    slippage_bps: float = 2.0
+
+
+@dataclass
+class FillEvent:
+    signal: "TradeSignal"
+    filled_qty: float
+    executed_price: float
+    commission: float
+    slippage: float
+
+
+@dataclass
 class TradeSignal:
     action: ActionType
     symbol: str

@@ -4,13 +4,13 @@ training_end: 2022-12-31
 trading_start: 2023-01-01
 trading_end: 2025-01-01
 commission: 0.5
-entry_z: 2.0
+entry_z: 2.5
 initial_capital: 100000
 plot: false
 position_size: 0.1
-stop_loss: 0.01
+stop_loss: 1
 strategy_type: pnd
-take_profit: 1.5
+take_profit: 5
 rolling_window_size: 150
 symbols:
   - ma

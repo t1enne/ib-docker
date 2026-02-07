@@ -1,5 +1,5 @@
 import pytest
-from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
+from src.bt.portfolio import Portfolio, PortfolioProps
 from src.bt.types import TradeSignal, ActionType, Tick
 from src.utils import get_ts
 

@@ -3,7 +3,7 @@ import pandas as pd
 from unittest.mock import MagicMock, patch
 from src.bt.engine.bt_engine import DataFeed, BTEngine
 from src.bt.types import Tick, TradeSignal, ActionType, PortfolioResult
-from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
+from src.bt.portfolio import Portfolio, PortfolioProps
 from src.utils import get_ts
 
 

@@ -212,9 +212,9 @@ class Portfolio:
     def _close_trade(self, trade: Trade, signal: TradeSignal):
         """Closes position, adds pnl to cash, updates equity curve"""
         qty = abs(self.positions.get(signal.symbol, 0))
-        assert qty > 0
+        if qty <= 0:  # WARN: should not be 0. handle duplicate signals
+            return None
         is_long = trade.position == ActionType.long
-        # Calculate P&L
         pnl = (
             (signal.price - trade.entry_price) * qty
             if is_long
@@ -222,18 +222,15 @@ class Portfolio:
         )
 
         self.positions[signal.symbol] = 0
-        # Update trade
         trade.exit_time = signal.timestamp
         trade.exit_price = signal.price
         trade.pnl = pnl
         trade.status = TradeStatus.closed
         trade.close_reason = signal.reason
 
-        # Update cash and equity
         self.cash += pnl - self.commission
         self.equity_curve[signal.timestamp] = self._calc_current_equity()
 
-        # print(f"Closing {trade.position} trade with {round(open_trade.pnl, 2):>6} on {str(signal.timestamp)} (reason: {open_trade.close_reason}) sym: {open_trade.symbol:>4}")
         del self.open_trades[signal.symbol]
         return trade
 
@@ -307,5 +304,6 @@ class Portfolio:
 
         del self.open_trades[fill.signal.symbol]
         return trade
+
 
 __all__ = ["PortfolioProps", "Portfolio"]

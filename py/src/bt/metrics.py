@@ -300,7 +300,7 @@ def print_results_analysis(
             print(
                 f"{dd.net_drawdown_pct:<14.2f} {_safe_date_str(dd.peak_date):<15} {_safe_date_str(dd.valley_date):<15} {_safe_date_str(dd.recovery_date):<15} {dd.duration:<10}"
             )
-            
+
     if len(trades) == 0:
         print()
         return
@@ -314,15 +314,16 @@ def print_results_analysis(
 
     # Table rows
     for i, t in enumerate(trades, 1):
-    # Format SL/TP column
+        # Format SL/TP column
         sl_tp_str = f"{t.stop_loss:.2f}/{t.take_profit:.2f}"
+        exit_price_str = f"{t.exit_price:.2f}" if t.exit_price is not None else "N/A"
         print(
             f"{_safe_date_str(t.entry_time):<20} "
             f"{_safe_date_str(t.exit_time):<20} "
             f"{t.entry_price:<10.2f} "
-            f"{t.exit_price:<10.2f} "
+            f"{exit_price_str:<10} "
             f"{t.pnl:<10.2f} "
-            f"{t.position == ActionType.long and 'L' or 'S' :<8} "
+            f"{t.position == ActionType.long and 'L' or 'S':<8} "
             f"{str(t.close_reason):<15} "
             f"{sl_tp_str:<15}"
         )

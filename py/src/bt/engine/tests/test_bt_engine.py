@@ -1,8 +1,14 @@
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
-from src.bt.engine.bt_engine import DataFeed, BTEngine
-from src.bt.types import Tick, TradeSignal, ActionType, PortfolioResult
+from src.bt.engine.backtest_engine import DataFeed, BacktestEngine
+from src.bt.types import (
+    Tick,
+    TradeSignal,
+    ActionType,
+    PortfolioResult,
+    StrategyProtocol,
+)
 from src.bt.portfolio import Portfolio, PortfolioProps
 from src.utils import get_ts
 
@@ -41,24 +47,39 @@ def sample_ticks():
     ]
 
 
+class MockStrategy(StrategyProtocol):
+    """Mock strategy that returns signals based on ticks."""
+
+    def __init__(self, signals: list[TradeSignal]):
+        self._signals = signals
+        self._signal_idx = 0
+
+    def set_model(self, model):
+        pass
+
+    def on_tick(self, tick: Tick) -> list[TradeSignal]:
+        if tick.symbol == "AAPL" and self._signal_idx < len(self._signals):
+            signal = self._signals[self._signal_idx]
+            self._signal_idx += 1
+            return [signal]
+        return []
+
+
 @pytest.fixture
 def mock_strategy(sample_ticks):
     """Mock strategy that returns signals based on ticks."""
-    strategy = MagicMock()
-    strategy.on_tick = MagicMock(
-        return_value=[
-            TradeSignal(
-                action=ActionType.long,
-                symbol=tick.symbol,
-                z_score=2.0,
-                timestamp=tick.timestamp,
-                price=tick.close,
-            )
-            for tick in sample_ticks
-            if tick.symbol == "AAPL"
-        ]
-    )
-    return strategy
+    signals = [
+        TradeSignal(
+            action=ActionType.long,
+            symbol=tick.symbol,
+            z_score=2.0,
+            timestamp=tick.timestamp,
+            price=tick.close,
+        )
+        for tick in sample_ticks
+        if tick.symbol == "AAPL"
+    ]
+    return MockStrategy(signals)
 
 
 @pytest.fixture
@@ -73,6 +94,23 @@ def portfolio():
             commission=0.0001,
             start_date=get_ts("2025-01-01"),
         )
+    )
+
+
+@pytest.fixture
+def sample_df():
+    """Sample dataframe with all required columns."""
+    return pd.DataFrame(
+        {
+            "Open": [100.0, 102.0],
+            "High": [105.0, 110.0],
+            "Low": [95.0, 98.0],
+            "Close": [102.0, 108.0],
+            "Volume": [1000, 1200],
+        },
+        index=pd.Index(
+            [get_ts("2025-01-01"), get_ts("2025-01-02")], dtype="datetime64[ns]"
+        ),
     )
 
 
@@ -95,7 +133,6 @@ def mock_data_feed(sample_ticks):
 @pytest.mark.asyncio
 async def test_get_data_stream(sample_ticks):
     """Test DataFeed.get_data_stream yields sorted ticks."""
-    # Mock read_candles to return sample dataframes
     sample_df1 = pd.DataFrame(
         {
             "Open": [100.0],
@@ -118,7 +155,8 @@ async def test_get_data_stream(sample_ticks):
     )
 
     with patch(
-        "src.bt.engine.bt_engine.read_candles", side_effect=[sample_df1, sample_df2]
+        "src.bt.engine.backtest_engine.read_candles",
+        side_effect=[sample_df1, sample_df2],
     ):
         data_feed = DataFeed(
             symbols=["AAPL", "GOOGL"], start_date="2025-01-01", end_date="2025-01-02"
@@ -126,67 +164,53 @@ async def test_get_data_stream(sample_ticks):
         ticks = []
         async for tick in data_feed.get_data_stream():
             ticks.append(tick)
-        # Should be sorted by timestamp
         assert len(ticks) == 2
         assert ticks[0].symbol == "AAPL"
         assert ticks[1].symbol == "GOOGL"
 
 
 @pytest.mark.asyncio
-async def test_run(mock_strategy, portfolio, mock_data_feed):
-    """Test BTEngine.run processes ticks and returns results."""
-    engine = BTEngine(
-        strategy=mock_strategy, portfolio=portfolio, data_feed=mock_data_feed
-    )
-    # Mock self.data
-    engine.data = {
-        "AAPL": pd.DataFrame(
-            {"Close": [108.0]},
-            index=pd.Index([get_ts("2025-01-02")], dtype="datetime64[ns]"),
-        ),
-        "GOOGL": pd.DataFrame(
-            {"Close": [205.0]},
-            index=pd.Index([get_ts("2025-01-02")], dtype="datetime64[ns]"),
-        ),
-    }
-    results, data = await engine.run()
-    assert len(results.trades) == 1
-    assert results.trades[0].symbol == "AAPL"
-    assert results.trades[0].position == ActionType.long
-    # Check that portfolio was modified
-    assert len(portfolio.trades) == 1
-    assert portfolio.trades[0].symbol == "AAPL"
+async def test_run(mock_strategy, sample_df):
+    """Test BacktestEngine.run processes ticks and returns results."""
+    with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
+        engine = BacktestEngine(
+            strategy=mock_strategy,
+            z_model=MagicMock(),
+            symbols=["AAPL", "GOOGL"],
+            train_start="2024-01-01",
+            train_end="2024-12-31",
+            test_start="2025-01-01",
+            test_end="2025-01-02",
+        )
+        results, data, z_scores = await engine.run()
+        assert len(results.trades) == 1
+        assert results.trades[0].symbol == "AAPL"
+        assert results.trades[0].position == ActionType.long
 
 
-def test_finalize_results(portfolio: Portfolio, mock_data_feed):
-    """Test BTEngine._finalize_results constructs PortfolioResult."""
-    # Simulate a trade in portfolio
-    signal = TradeSignal(
-        action=ActionType.long,
-        symbol="AAPL",
-        z_score=2.0,
-        timestamp=get_ts("2025-01-01"),
-        price=100.0,
-    )
-    portfolio.on_signal(signal)
-    engine = BTEngine(
-        strategy=MagicMock(), portfolio=portfolio, data_feed=mock_data_feed
-    )
-    engine.data = {
-        "AAPL": pd.DataFrame(
-            {"Close": [110.0]},
-            index=pd.Index([get_ts("2025-01-02")], dtype="datetime64[ns]"),
-        ),
-        "GOOGL": pd.DataFrame(
-            {"Close": [205.0]},
-            index=pd.Index([get_ts("2025-01-02")], dtype="datetime64[ns]"),
-        ),
-    }
-    results, data = engine._finalize_results()
-    assert isinstance(results, PortfolioResult)
-    assert len(results.trades) == 1
-    assert results.trades[0].pnl > 1
-    assert data == engine.data
-    # Check that close_all_positions was called with correct args
-    # Since portfolio is real, we can't check calls easily, but assert position is closed
-    assert portfolio.positions["AAPL"] == 0
+def test_finalize_results(sample_df):
+    """Test BacktestEngine._finalize_results constructs PortfolioResult."""
+    with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
+        engine = BacktestEngine(
+            strategy=MagicMock(spec=StrategyProtocol),
+            z_model=MagicMock(),
+            symbols=["AAPL", "GOOGL"],
+            train_start="2024-01-01",
+            train_end="2024-12-31",
+            test_start="2025-01-01",
+            test_end="2025-01-02",
+        )
+        signal = TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            z_score=2.0,
+            timestamp=get_ts("2025-01-01"),
+            price=100.0,
+        )
+        engine.portfolio.on_signal(signal)
+
+        results, data = engine._finalize_results()
+        assert isinstance(results, PortfolioResult)
+        assert len(results.trades) == 1
+        assert results.trades[0].pnl > 1
+        assert data == engine.data

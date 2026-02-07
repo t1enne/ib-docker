@@ -13,8 +13,8 @@ def read_candles(
     # return pd.read_csv(f"mdata/{symbol}.csv")
     con = sqlite3.connect("../data/db.sqlite")
     cur = con.cursor()
-    _sd = start_date and datetime.strptime(start_date, "%Y-%m-%d").timestamp() or 0.0
-    _ed = end_date and datetime.strptime(end_date, "%Y-%m-%d").timestamp() or 0.0
+    _sd = start_date and _parse_date(start_date).timestamp() or 0.0
+    _ed = end_date and _parse_date(end_date).timestamp() or 0.0
     from_filter = f"and o.timestamp >= {int(_sd) * 1000}" if start_date else ""
     to_filter = f"and o.timestamp <= {int(_ed) * 1000}" if end_date else ""
     q = f"""select s.ticker as symbol,
@@ -48,6 +48,16 @@ def read_candles(
     df = df.assign(Date=pd.to_datetime(df["Timestamp"], unit="ms"))
     df = df.set_index("Date").drop(columns=["Timestamp"])
     return df
+
+
+def _parse_date(date_str: str) -> datetime:
+    """Parse date string, handling both YYYY-MM-DD and YYYY-MM-DD HH:MM:SS formats."""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Unable to parse date: {date_str}")
 
 
 def get_returns(df: pd.DataFrame) -> pd.DataFrame:

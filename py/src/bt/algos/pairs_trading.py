@@ -1,11 +1,16 @@
-import pandas as pd
-import numpy as np
-from typing import List, Optional, Tuple
-from collections import deque
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
+import pandas as pd
+
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy
-from src.bt.types import StrategyProtocol, Tick, TradeSignal
-from src.utils import get_ols_fit_model
+from src.bt.algos.z_model import ZModel, TrainedZModel
+from src.bt.types import Tick, TradeSignal, StrategyProtocol
+
+
+@dataclass
+class StrategyParams:
+    entry_z: float
+    exit_z: float
 
 
 @dataclass
@@ -18,121 +23,65 @@ class PositionState:
 
 
 class PairsTradingStrategy(StrategyProtocol):
-    """Pairs trading strategy with z-score recalc at intervals."""
+    """Stateless pairs trading strategy that generates signals from trained model."""
 
     bps: BasePairsStrategy
-    ema9d: dict[pd.Timestamp, float] = dict()
 
     def __init__(
         self,
         symbols: List[str],
-        hdata: dict[str, pd.DataFrame],
-        entry_z: float,
-        rolling_window_size: int,
-        exit_threshold: float = 0.5,
-        time_decay_bars: int = 20,
+        # hdata: dict[str, pd.DataFrame],
+        strategy_params: StrategyParams,
+        rolling_window_size: int = 20,
     ):
-        self.bps = BasePairsStrategy(
-            symbols,
-            hdata,
-            entry_threshold=entry_z,
-            rolling_window_size=rolling_window_size,
-        )
-        self.beta = self._estimate_beta()
-        self.spread_buffer = deque(maxlen=rolling_window_size)
-        self.retrain_counter = 0
-        self.retrain_interval = rolling_window_size
-        self.exit_threshold = exit_threshold
-        self.time_decay_bars = time_decay_bars
+        self.bps = BasePairsStrategy(symbols)
+        self.params = strategy_params
         self.position: Optional[PositionState] = None
+        self.current_model: Optional[TrainedZModel] = None
+        self.z_model = ZModel(symbols, rolling_window_size=rolling_window_size)
+
+    def set_model(self, model: TrainedZModel) -> None:
+        """Set the trained model from the engine."""
+        self.current_model = model
+
+    def get_z_scores(self) -> pd.DataFrame:
+        return self.bps.z_scores
 
     def on_tick(self, tick: Tick) -> List[TradeSignal]:
-        """Process data from signal_queue and put signals into order_queue."""
+        """Process tick and generate signals using trained model."""
         symbol = tick.symbol
         timestamp = tick.timestamp
         close = tick.close
-        # .ewm(span=9, adjust=False).mean().iloc(-1))
 
         # Add to historical data
-        self.bps.hdata[symbol].loc[timestamp, "Close"] = close
-        # Add to pending ticks
+        # self.bps.hdata[symbol].loc[timestamp, "Close"] = close
         self.bps.pending_ticks[timestamp][symbol] = close
 
-        # If we have data for both symbols at this timestamp, process
+        # Need both symbols to process
         if len(self.bps.pending_ticks[timestamp]) != 2:
             return []
-        # Calculate z-score
-        z_score = self._calculate_zscore()
-        if z_score is None:
-            # Clear pending for this timestamp
+
+        # Get current prices
+        prices = dict(self.bps.pending_ticks[timestamp])
+
+        # Calculate z-score using trained model
+        if self.current_model is None:
             del self.bps.pending_ticks[timestamp]
             return []
-        # Generate signal
+
+        z_score = self.z_model.calculate_z(prices, self.current_model)
         self.bps.z_scores.loc[timestamp, "z"] = z_score
 
-        signals = self._calculate_signal(timestamp)
-        if len(signals) > 0:
-            return signals
+        signals = self._calculate_signal(timestamp, z_score, prices)
+        del self.bps.pending_ticks[timestamp]
 
-        return []
+        return signals
 
-    def _estimate_beta(self) -> float:
-        """Estimate beta from the last rolling_window_size points."""
-        s1_closes = self.bps.hdata[self.bps.symbols[0]]["Close"].dropna()
-        s2_closes = self.bps.hdata[self.bps.symbols[1]]["Close"].dropna()
-        if (
-            len(s1_closes) < self.bps.rolling_window_size
-            or len(s2_closes) < self.bps.rolling_window_size
-        ):
-            # Fallback to all data
-            tail1 = s1_closes
-            tail2 = s2_closes
-        else:
-            tail1 = s1_closes.tail(self.bps.rolling_window_size)
-            tail2 = s2_closes.tail(self.bps.rolling_window_size)
-        if len(tail1) < 2:
-            return 1.0  # default
-        model = get_ols_fit_model(tail1, tail2)
-        _, beta = model.params
-        return beta
-
-    def _calculate_zscore(self) -> float | None:
-        """Calculate z-score using fixed beta and rolling spread statistics."""
-        s1_closes = self.bps.hdata[self.bps.symbols[0]]["Close"].dropna()
-        s2_closes = self.bps.hdata[self.bps.symbols[1]]["Close"].dropna()
-        if len(s1_closes) != len(s2_closes) or len(s1_closes) < 2:
-            return None
-
-        # Get latest prices
-        latest_s1 = s1_closes.iloc[-1]
-        latest_s2 = s2_closes.iloc[-1]
-
-        # Periodic beta re-estimation
-        self.retrain_counter += 1
-        if self.retrain_counter % self.retrain_interval == 0:
-            self.beta = self._estimate_beta()
-
-        # Calculate spread
-        spread = latest_s1 - self.beta * latest_s2
-        self.spread_buffer.append(spread)
-
-        if len(self.spread_buffer) < 2:
-            return None
-
-        # Calculate rolling z-score
-        spreads = np.array(self.spread_buffer)
-        mean = np.mean(spreads)
-        std = np.std(spreads, ddof=1)
-        if std == 0:
-            return 0.0
-        z_score = (spread - mean) / std
-        return round(z_score, 2)
-
-    def _calculate_signal(self, timestamp: pd.Timestamp) -> List[TradeSignal]:
-        """Generate buy/sell/close signal based on z-score."""
-        z_score = self.bps._get_z(timestamp)
-        sym1 = self.bps.symbols[0]
-        sym2 = self.bps.symbols[1]
+    def _calculate_signal(
+        self, timestamp: pd.Timestamp, z_score: float, prices: dict[str, float]
+    ) -> List[TradeSignal]:
+        """Generate signals based on z-score."""
+        sym1, sym2 = self.bps.symbols
 
         if self.position is not None:
             self.position.bars_held += 1
@@ -141,8 +90,8 @@ class PairsTradingStrategy(StrategyProtocol):
             if exit_signals:
                 return exit_signals
 
-        if abs(z_score) > self.bps.entry_threshold:
-            if z_score < -self.bps.entry_threshold:
+        if abs(z_score) > self.params.entry_z:
+            if z_score < -self.params.entry_z:
                 self.position = PositionState(
                     entry_timestamp=timestamp,
                     entry_z=z_score,
@@ -154,7 +103,7 @@ class PairsTradingStrategy(StrategyProtocol):
                     self.bps._long(sym1, timestamp),
                     self.bps._short(sym2, timestamp),
                 ]
-            elif z_score > self.bps.entry_threshold:
+            elif z_score > self.params.entry_z:
                 self.position = PositionState(
                     entry_timestamp=timestamp,
                     entry_z=z_score,
@@ -172,22 +121,22 @@ class PairsTradingStrategy(StrategyProtocol):
     def _check_exit_conditions(
         self, timestamp: pd.Timestamp, z_score: float
     ) -> List[TradeSignal]:
-        """Check if position should exit via z-score reversion or time decay."""
+        """Check exit conditions based on z-score reversion or time decay."""
         if self.position is None:
             return []
 
-        if self.position.side == "long_spread" and z_score > -self.exit_threshold:
+        if self.position.side == "long_spread" and z_score > -self.params.exit_z:
             return self._close_position(timestamp)
-        elif self.position.side == "short_spread" and z_score < self.exit_threshold:
+        elif self.position.side == "short_spread" and z_score < self.params.exit_z:
             return self._close_position(timestamp)
 
-        if self.position.bars_held >= self.time_decay_bars:
-            return self._close_position(timestamp)
+        # if self.position.bars_held >= self.params.time_decay_bars:
+        #     return self._close_position(timestamp)
 
         return []
 
     def _close_position(self, timestamp: pd.Timestamp) -> List[TradeSignal]:
-        """Generate close signals for both legs of the spread."""
+        """Generate close signals for both legs."""
         if self.position is None:
             return []
 

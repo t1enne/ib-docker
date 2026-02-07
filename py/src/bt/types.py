@@ -1,3 +1,4 @@
+from src.bt.algos.z_model import TrainedZModel
 from dataclasses import dataclass
 import pandas as pd
 from typing import List, Optional, Any, Protocol
@@ -90,8 +91,13 @@ class TradeSignal:
 
 
 class StrategyProtocol(Protocol):
-    """Protocol for strategy classes."""
+    """Protocol for strategy classes that receive trained models."""
 
+    def set_model(self, model: TrainedZModel) -> None: ...
     def on_tick(self, tick: Tick) -> List[TradeSignal]:
         """Process a tick and return new state and signals."""
+        ...
+
+    def get_z_scores(self) -> Optional[pd.DataFrame]:
+        """Return DataFrame with 'z' column indexed by timestamp, or None if no z-scores."""
         ...

@@ -1,12 +1,10 @@
-from typing import List
-import pandas as pd
+from typing import List, Optional
 
-from src.bt.algos.pairs_trading import PairsTradingStrategy
-from src.bt.engine.bt_engine import BTEngine, DataFeed
-from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
+from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
+from src.bt.algos.z_model import ZModel
+from src.bt.engine.backtest_engine import BacktestEngine
 from src.bt.types import ExecutionParams
-from src.utils import pick, read_candles
-from src.bt.plotting.plotting import plot_backtest_results
+from src.utils import pick
 
 
 class WalkForwardEngine:
@@ -29,22 +27,23 @@ class WalkForwardEngine:
         trading_end: str,
         **kwargs,
     ):
-        self.strategy_class = strategy_class
         self.symbols = symbols
-        self.initial_train_start = pd.Timestamp(initial_train_start)
-        self.initial_train_end = pd.Timestamp(initial_train_end)
+        self.initial_train_start = initial_train_start
+        self.initial_train_end = initial_train_end
         self.trading_start = trading_start
         self.trading_end = trading_end
         self.plot = kwargs.get("plot")
-        self.hdata = {
-            symbol: read_candles(symbol, initial_train_start, initial_train_end)
-            for symbol in self.symbols
-        }
-        # Separate strategy and portfolio parameters
-        self.strategy_params = pick(
-            kwargs,
-            ["entry_z", "rolling_window_size", "exit_threshold", "time_decay_bars"],
+
+        # Strategy parameters
+        self.strategy_params = StrategyParams(
+            entry_z=kwargs.get("entry_z", 2.0),
+            exit_z=kwargs.get("exit_threshold", 0.5),
         )
+
+        # ZModel parameters
+        self.rolling_window_size = kwargs.get("rolling_window_size", 20)
+
+        # Portfolio parameters
         self.pf_params = pick(
             kwargs,
             [
@@ -55,6 +54,7 @@ class WalkForwardEngine:
                 "take_profit",
             ],
         )
+
         # Execution parameters
         if "spread_bps" in kwargs or "slippage_bps" in kwargs:
             self.execution_params = ExecutionParams(
@@ -65,26 +65,44 @@ class WalkForwardEngine:
             self.execution_params = None
 
     async def run(self):
-        portfolio = Portfolio(
-            PortfolioProps(
-                stop_loss=self.pf_params.get("stop_loss", 0.10),
-                take_profit=self.pf_params.get("take_profit", 1.0),
-                initial_capital=self.pf_params.get("initial_capital", 10000),
-                position_size=self.pf_params.get("position_size", 0.1),
-                commission=self.pf_params.get("commission", 0.001),
-                start_date=pd.Timestamp(self.trading_start),
-            ),
+        # Create strategy and model
+        z_model = ZModel(self.symbols, self.rolling_window_size)
+        strategy = PairsTradingStrategy(
+            symbols=self.symbols,
+            strategy_params=self.strategy_params,
         )
-        strat = PairsTradingStrategy(self.symbols, self.hdata, **self.strategy_params)
-        feed = DataFeed(
-            self.symbols,
-            self.trading_start,
-            self.trading_end,
+
+        # Create unified engine
+        engine = BacktestEngine(
+            strategy=strategy,
+            z_model=z_model,
+            symbols=self.symbols,
+            train_start=self.initial_train_start,
+            train_end=self.initial_train_end,
+            test_start=self.trading_start,
+            test_end=self.trading_end,
+            initial_capital=self.pf_params.get("initial_capital", 10000),
+            position_size=self.pf_params.get("position_size", 0.1),
+            commission=self.pf_params.get("commission", 0.001),
+            stop_loss=self.pf_params.get("stop_loss", 0.10),
+            take_profit=self.pf_params.get("take_profit", 1.0),
+            execution_params=self.execution_params,
         )
-        ngn = BTEngine(strat, portfolio, feed, execution_params=self.execution_params)
-        results, data = await ngn.run()
+
+        results, data, z_scores = await engine.run()
 
         # Plot if requested
         if self.plot:
-            plot_backtest_results(results, self.symbols, "Pairs Trading", data)
-        return portfolio.get_results()
+            from src.bt.plotting.plotting import plot_backtest_results
+
+            plot_backtest_results(
+                results,
+                self.symbols,
+                "Pairs Trading",
+                data,
+                z_scores=z_scores,
+                entry_z=self.strategy_params.entry_z,
+                exit_z=self.strategy_params.exit_z,
+            )
+
+        return results

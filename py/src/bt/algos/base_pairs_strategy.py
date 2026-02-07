@@ -3,12 +3,6 @@ import pandas as pd
 from collections import defaultdict
 
 from src.bt.types import TradeSignal, ActionType
-from src.utils import validate_schema
-
-props_schema = {
-    "entry_threshold": float,
-    "rolling_window_size": int,
-}
 
 
 class BasePairsStrategy:
@@ -19,19 +13,12 @@ class BasePairsStrategy:
     managing positions, and generating trading signals.
     """
 
-    def __init__(self, symbols: List[str], hdata: dict[str, pd.DataFrame], **kwargs):
-        if not validate_schema(kwargs, props_schema):
-            raise ValueError("wrong parameters")
-
+    def __init__(self, symbols: List[str]):
         self.symbols = symbols
-        self.entry_threshold: float = kwargs.get("entry_threshold", 2.0)
-        self.rolling_window_size: int = kwargs.get("rolling_window_size", 100)
-        # Common buffers
         self.z_scores = pd.DataFrame(
             {"z": pd.Series(dtype="float64")}, index=pd.DatetimeIndex([])
         )
         self.pending_ticks = defaultdict(dict)
-        self.hdata = hdata
 
     def _get_z(self, ts: pd.Timestamp) -> float:
         return self.z_scores.loc[ts, "z"]

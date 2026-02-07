@@ -1,6 +1,7 @@
 import pytest
+from unittest.mock import patch, MagicMock
 from src.bt.execution import ExecutionHandler, ExecutionParams
-from src.bt.types import TradeSignal, Tick, ActionType
+from src.bt.types import TradeSignal, Tick, ActionType, StrategyProtocol
 from src.utils import get_ts
 
 
@@ -96,23 +97,10 @@ def test_commission_applied(execution_handler, long_signal, tick_bullish):
 
 
 def test_no_execution_handler_backwards_compat():
-    from src.bt.engine.bt_engine import BTEngine
-    from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
-    from src.bt.engine.bt_engine import DataFeed
-    from src.bt.algos.pairs_trading import PairsTradingStrategy
+    from src.bt.engine.backtest_engine import BacktestEngine
+    from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
     from src.utils import get_ts
     import pandas as pd
-
-    portfolio = Portfolio(
-        PortfolioProps(
-            stop_loss=0.1,
-            take_profit=0.5,
-            initial_capital=10000,
-            position_size=0.1,
-            commission=0.001,
-            start_date=get_ts("2024-12-31"),
-        )
-    )
 
     aapl_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
     msft_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
@@ -123,12 +111,14 @@ def test_no_execution_handler_backwards_compat():
 
     strat = PairsTradingStrategy(
         symbols=["AAPL", "MSFT"],
-        hdata=hdata,
-        entry_z=2.0,
-        rolling_window_size=20,
+        # hdata=hdata,
+        strategy_params=StrategyParams(
+            entry_z=2.0,
+            exit_z=0.5,
+        ),
     )
 
-    hdata = {
+    hdata_train = {
         "AAPL": pd.DataFrame(
             {"Close": [100.0]}, index=pd.DatetimeIndex([get_ts("2024-12-31")])
         ),
@@ -137,30 +127,27 @@ def test_no_execution_handler_backwards_compat():
         ),
     }
 
-    feed = DataFeed(["AAPL", "MSFT"], "2024-12-31", "2025-01-01")
-
-    engine = BTEngine(strat, portfolio, feed)
-    assert engine.execution_handler is None
+    with patch(
+        "src.bt.engine.backtest_engine.read_candles", return_value=hdata_train["AAPL"]
+    ):
+        engine = BacktestEngine(
+            strategy=strat,
+            z_model=MagicMock(spec=StrategyProtocol),
+            symbols=["AAPL", "MSFT"],
+            train_start="2024-12-01",
+            train_end="2024-12-31",
+            test_start="2025-01-01",
+            test_end="2025-01-02",
+        )
+        assert engine.execution_handler is None
 
 
 def test_with_execution_params():
-    from src.bt.engine.bt_engine import BTEngine
-    from src.bt.portfolio.portfolio import Portfolio, PortfolioProps
-    from src.bt.engine.bt_engine import DataFeed
-    from src.bt.algos.pairs_trading import PairsTradingStrategy
+    from src.bt.engine.backtest_engine import BacktestEngine
+    from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
+    from src.bt.types import ExecutionParams
     from src.utils import get_ts
     import pandas as pd
-
-    portfolio = Portfolio(
-        PortfolioProps(
-            stop_loss=0.1,
-            take_profit=0.5,
-            initial_capital=10000,
-            position_size=0.1,
-            commission=0.001,
-            start_date=get_ts("2024-12-31"),
-        )
-    )
 
     aapl_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
     msft_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
@@ -171,12 +158,15 @@ def test_with_execution_params():
 
     strat = PairsTradingStrategy(
         symbols=["AAPL", "MSFT"],
-        hdata=hdata,
-        entry_z=2.0,
+        # hdata=hdata,
         rolling_window_size=20,
+        strategy_params=StrategyParams(
+            entry_z=2.0,
+            exit_z=0.5,
+        ),
     )
 
-    hdata = {
+    hdata_train = {
         "AAPL": pd.DataFrame(
             {"Close": [100.0]}, index=pd.DatetimeIndex([get_ts("2024-12-31")])
         ),
@@ -185,11 +175,21 @@ def test_with_execution_params():
         ),
     }
 
-    feed = DataFeed(["AAPL", "MSFT"], "2024-12-31", "2025-01-01")
+    with patch(
+        "src.bt.engine.backtest_engine.read_candles", return_value=hdata_train["AAPL"]
+    ):
+        exec_params = ExecutionParams(spread_bps=5.0, slippage_bps=2.0)
+        engine = BacktestEngine(
+            strategy=strat,
+            z_model=MagicMock(spec=StrategyProtocol),
+            symbols=["AAPL", "MSFT"],
+            train_start="2024-12-01",
+            train_end="2024-12-31",
+            test_start="2025-01-01",
+            test_end="2025-01-02",
+            execution_params=exec_params,
+        )
 
-    exec_params = ExecutionParams(spread_bps=5.0, slippage_bps=2.0)
-    engine = BTEngine(strat, portfolio, feed, execution_params=exec_params)
-
-    assert engine.execution_handler is not None
-    assert engine.execution_handler.params.spread_bps == 5.0
-    assert engine.execution_handler.params.slippage_bps == 2.0
+        assert engine.execution_handler is not None
+        assert engine.execution_handler.params.spread_bps == 5.0
+        assert engine.execution_handler.params.slippage_bps == 2.0

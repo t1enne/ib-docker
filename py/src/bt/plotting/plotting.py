@@ -10,27 +10,37 @@ def plot_backtest_results(
     symbols: list[str],
     strategy: str,
     data: Dict[str, pd.DataFrame],
+    z_scores: pd.DataFrame,
+    entry_z: float = 2.0,
+    exit_z: float = 0.5,
 ):
-    """Plot backtest performance with price charts and entries/exits using Plotly"""
-    num_rows = len(symbols) + 2
-    subplot_titles = [f"{symbol} Price Chart" for symbol in symbols] + [
-        f"Equity Curve - {strategy.upper()} Strategy",
-        "Drawdown",
-    ]
+    """Plot backtest performance with price charts, z-score, and entries/exits using Plotly"""
+    num_rows = len(symbols) + 3  # +1 for z-score, +1 for equity, +1 for drawdown
+    has_z_scores = z_scores is not None and not z_scores.empty
+
+    subplot_titles = [f"{symbol} Price Chart" for symbol in symbols]
+    if has_z_scores:
+        subplot_titles.append(f"Z-Score (Entry: ±{entry_z}, Exit: ±{exit_z})")
+    subplot_titles.extend(
+        [
+            f"Equity Curve - {strategy.upper()} Strategy",
+            "Drawdown",
+        ]
+    )
+
     fig = make_subplots(
         rows=num_rows,
         cols=1,
         shared_xaxes=True,
         subplot_titles=subplot_titles,
-        vertical_spacing=0.05,  # Reduce vertical spacing
-        horizontal_spacing=0.05,  # Reduce horizontal spacing
+        vertical_spacing=0.04,
+        horizontal_spacing=0.05,
     )
 
     # Price charts for each symbol
     for i, symbol in enumerate(symbols):
         row = i + 1
         price_data = data[symbol]["Close"]
-        # Add price line
         fig.add_trace(
             go.Scatter(
                 x=price_data.index,
@@ -43,7 +53,6 @@ def plot_backtest_results(
             col=1,
         )
 
-        # Collect entry/exit points
         long_entries = []
         long_entries_text = []
         long_exits = []
@@ -63,7 +72,7 @@ def plot_backtest_results(
                         long_exits_text.append(
                             f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
                         )
-                else:  # short
+                else:
                     short_entries.append((trade.entry_time, trade.entry_price))
                     short_entries_text.append(f"Z: {trade.z_score:.2f}")
                     if trade.exit_time:
@@ -72,7 +81,6 @@ def plot_backtest_results(
                             f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
                         )
 
-        # Add markers
         if long_entries:
             times, prices = zip(*long_entries)
             t = pd.DatetimeIndex(times)
@@ -140,12 +148,69 @@ def plot_backtest_results(
         fig.update_yaxes(title_text="Price", row=row, col=1)
         fig.update_xaxes(title_text="Date", row=row, col=1)
 
+    # Z-Score subplot
+    if has_z_scores:
+        row_z = len(symbols) + 1
+        fig.add_trace(
+            go.Scatter(
+                x=z_scores.index,
+                y=z_scores["z"].values,
+                mode="lines",
+                name="Z-Score",
+                line=dict(color="blue"),
+            ),
+            row=row_z,
+            col=1,
+        )
+        # Entry threshold lines (solid)
+        fig.add_hline(
+            y=entry_z,
+            line_dash="solid",
+            line_color="green",
+            row=row_z,
+            col=1,
+            annotation_text=f"+{entry_z} entry",
+        )
+        fig.add_hline(
+            y=-entry_z,
+            line_dash="solid",
+            line_color="red",
+            row=row_z,
+            col=1,
+            annotation_text=f"-{entry_z} entry",
+        )
+        # Exit threshold lines (dashed)
+        fig.add_hline(
+            y=exit_z,
+            line_dash="dash",
+            line_color="lightgreen",
+            row=row_z,
+            col=1,
+            annotation_text=f"+{exit_z} exit",
+        )
+        fig.add_hline(
+            y=-exit_z,
+            line_dash="dash",
+            line_color="lightcoral",
+            row=row_z,
+            col=1,
+            annotation_text=f"-{exit_z} exit",
+        )
+        # Zero line
+        fig.add_hline(y=0, line_dash="dot", line_color="gray", row=row_z, col=1)
+        fig.update_yaxes(title_text="Z-Score", row=row_z, col=1)
+
     # Equity curve
-    row_eq = len(symbols) + 1
+    row_eq = len(symbols) + 2 if has_z_scores else len(symbols) + 1
+    equity_data = results.equity_curve
+    if isinstance(equity_data, dict):
+        equity_series = pd.Series(equity_data)
+    else:
+        equity_series = equity_data
     fig.add_trace(
         go.Scatter(
-            x=results.equity_curve.index,
-            y=results.equity_curve.values,
+            x=equity_series.index,
+            y=equity_series.values,
             mode="lines",
             name="Equity Curve",
             line=dict(color="green"),
@@ -156,9 +221,9 @@ def plot_backtest_results(
     fig.update_yaxes(title_text="Portfolio Value ($)", row=row_eq, col=1)
 
     # Drawdown
-    row_dd = len(symbols) + 2
-    rolling_max = results.equity_curve.expanding().max()
-    drawdown = (results.equity_curve - rolling_max) / rolling_max
+    row_dd = len(symbols) + 3 if has_z_scores else len(symbols) + 2
+    rolling_max = equity_series.expanding().max()
+    drawdown = (equity_series - rolling_max) / rolling_max
     fig.add_trace(
         go.Scatter(
             x=drawdown.index,
@@ -181,4 +246,7 @@ def plot_backtest_results(
         showlegend=False,
     )
     fig.update_xaxes(type="date")
-    fig.show()
+
+    output_file = f"backtest_results_{strategy.lower().replace(' ', '_')}.html"
+    fig.write_html(output_file)
+    print(f"Plot saved to {output_file}")

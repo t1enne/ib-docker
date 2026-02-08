@@ -61,6 +61,38 @@ def test_on_fill(pf: Portfolio):
     assert pf.positions["AAPL"] == 0
 
 
+def test_close(pf: Portfolio):
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade
+
+    qty = trade.qty
+
+    s = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=120.0,
+    )
+    fe = FillEvent(
+        signal=s,
+        filled_qty=1,
+        executed_price=s.price,
+        commission=pf.commission,
+        slippage=0,
+    )
+    pf._close_trade_from_fill(trade, fe)
+
+    assert pf.cash > pf.initial_capital  # cash should be above initial capital
+
+
 # def test_sl(pf: Portfolio):
 #     # Open a long position
 #     signal = TradeSignal(

@@ -185,7 +185,7 @@ class Portfolio:
         trade.close_reason = fill.signal.reason
 
         del self.open_trades[fill.signal.symbol]
-        self.cash += pnl - fill.commission
+        self.cash += qty * trade.exit_price - fill.commission
         self._record_equity(fill.signal.timestamp)
 
         return trade

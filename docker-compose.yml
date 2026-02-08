@@ -21,13 +21,13 @@ services:
       retries: 3
       start_period: 40s
 
-  py:
-    build: ./py
-    container_name: py
-    volumes:
-      - ./data:/app/data
-    networks:
-      - ib-network
+  # py:
+  #   build: ./py
+  #   container_name: py
+  #   volumes:
+  #     - ./data:/app/data
+  #   networks:
+  #     - ib-network
 
   # hono:
   #   build: ./hono

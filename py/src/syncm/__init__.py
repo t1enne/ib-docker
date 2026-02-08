@@ -4,7 +4,7 @@ import asyncio
 import datetime
 
 import yaml
-from src.trading import candles, get_contract_info, search_contract
+from src.syncm.ibkr_layer import candles, get_contract_info, search_contract
 from src.db.models import get_ohlcv_model
 
 

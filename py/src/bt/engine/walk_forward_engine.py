@@ -58,13 +58,9 @@ class WalkForwardEngine:
         )
 
     async def run(self):
-        strategy = PairsTradingStrategy(
-            symbols=self.symbols,
-            strategy_params=self.strategy_params,
-        )
 
         engine = BacktestEngine(
-            strategy=strategy,
+            strategy=self.strategy_params,
             symbols=self.symbols,
             train_start=self.initial_train_start,
             train_end=self.initial_train_end,

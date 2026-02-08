@@ -1,3 +1,4 @@
+from src.bt.algos.pairs_trading import StrategyParams
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
@@ -186,14 +187,23 @@ async def test_run(mock_strategy, sample_df):
     """Test BacktestEngine.run processes ticks and returns results."""
     with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
         engine = BacktestEngine(
-            strategy=mock_strategy,
+            strategy=StrategyParams(entry_z=2.0, exit_z=0.0),
             symbols=["AAPL", "GOOGL"],
             train_start="2024-01-01",
             train_end="2024-12-31",
             test_start="2025-01-01",
             test_end="2025-01-02",
         )
-        results, data, z_scores = await engine.run()
+
+        signal = TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            z_score=2.0,
+            timestamp=get_ts("2025-01-01"),
+            price=100.0,
+        )
+        engine.portfolio.on_fill(get_fill(signal, engine.portfolio))
+        results, _, _ = await engine.run()
         assert len(results.trades) == 1
         assert results.trades[0].symbol == "AAPL"
         assert results.trades[0].position == ActionType.long
@@ -203,7 +213,7 @@ def test_finalize_results(sample_df):
     """Test BacktestEngine._finalize_results constructs PortfolioResult."""
     with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
         engine = BacktestEngine(
-            strategy=MagicMock(spec=StrategyProtocol),
+            strategy=StrategyParams(entry_z=2.0, exit_z=0.0),
             symbols=["AAPL", "GOOGL"],
             train_start="2024-01-01",
             train_end="2024-12-31",

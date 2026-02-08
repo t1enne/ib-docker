@@ -48,16 +48,16 @@ class PairsTradingStrategy(StrategyProtocol):
         """Generate signals based on z-score."""
         sym1, sym2 = self.bps.symbols
 
-        if abs(z_score) > self.params.entry_z:
-            if z_score < -self.params.entry_z:
-                return [
-                    self.bps._long(sym1, timestamp, prices[sym1], z_score),
-                    self.bps._short(sym2, timestamp, prices[sym2], z_score),
-                ]
-            elif z_score > self.params.entry_z:
-                return [
-                    self.bps._long(sym2, timestamp, prices[sym2], z_score),
-                    self.bps._short(sym1, timestamp, prices[sym1], z_score),
-                ]
+        if z_score < -self.params.entry_z:
+            return [
+                self.bps._long(sym1, timestamp, prices[sym1], z_score),
+                self.bps._short(sym2, timestamp, prices[sym2], z_score),
+            ]
+
+        if z_score > self.params.entry_z:
+            return [
+                self.bps._long(sym2, timestamp, prices[sym2], z_score),
+                self.bps._short(sym1, timestamp, prices[sym1], z_score),
+            ]
 
         return []

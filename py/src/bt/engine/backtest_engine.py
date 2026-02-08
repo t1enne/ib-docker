@@ -1,3 +1,4 @@
+from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
 from collections import defaultdict
 from src.bt.algos.z_model import ZModel
 import pandas as pd
@@ -77,7 +78,7 @@ class BacktestEngine:
 
     def __init__(
         self,
-        strategy: StrategyProtocol,
+        strategy: StrategyParams,
         symbols: List[str],
         train_start: str,
         train_end: str,
@@ -91,7 +92,11 @@ class BacktestEngine:
         take_profit: float = 1.0,
         execution_params: ExecutionParams = ExecutionParams(),
     ):
-        self.strategy = strategy
+        self.strategy = PairsTradingStrategy(
+            symbols=symbols,
+            strategy_params=strategy,
+        )
+
         self.symbols = symbols
         self.rolling_window_size = rolling_window_size
         self.execution_handler = ExecutionHandler(execution_params)

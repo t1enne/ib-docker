@@ -20,6 +20,7 @@ class Strategy:
     strategy_type: str
     symbols: list[str]
     entry_z: float
+    exit_z: float
     stop_loss: float
     take_profit: float
     initial_capital: float

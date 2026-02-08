@@ -2,7 +2,7 @@ from typing import List
 import pandas as pd
 from collections import defaultdict
 
-from src.bt.types import TradeSignal, ActionType
+from src.bt.types import TradeSignal, ActionType, TradeExitReason
 
 
 class BasePairsStrategy:
@@ -50,4 +50,5 @@ class BasePairsStrategy:
             z_score=z_score,
             timestamp=timestamp,
             price=price,
+            reason=TradeExitReason.regression,
         )

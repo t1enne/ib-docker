@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 import pandas as pd
 
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy
-from src.bt.types import Tick, TradeSignal, StrategyProtocol
+from src.bt.types import Tick, TradeSignal, StrategyProtocol, Trade
 
 
 @dataclass
@@ -17,19 +17,21 @@ class PairsTradingStrategy(StrategyProtocol):
 
     bps: BasePairsStrategy
 
-    def __init__(
-        self,
-        symbols: List[str],
-        strategy_params: StrategyParams,
-    ):
+    def __init__(self, symbols: List[str], strategy_params: StrategyParams):
         self.bps = BasePairsStrategy(symbols)
         self.params = strategy_params
 
-    def on_tick(self, tick: Tick, z_score: float) -> List[TradeSignal]:
+    def on_tick(
+        self, tick: Tick, z_score: float, open_trade: Optional[Trade]
+    ) -> List[TradeSignal]:
         """Process tick with z-score and generate signals."""
         symbol = tick.symbol
         timestamp = tick.timestamp
         close = tick.close
+
+        if open_trade and abs(z_score) < self.params.exit_z:
+            # z regression
+            return self._calculate_exit_signal(tick, open_trade, z_score)
 
         self.bps.pending_ticks[timestamp][symbol] = close
 
@@ -61,3 +63,6 @@ class PairsTradingStrategy(StrategyProtocol):
             ]
 
         return []
+
+    def _calculate_exit_signal(self, tick: Tick, trade: Trade, z_score: int | float):
+        return [self.bps._close(trade.symbol, tick.timestamp, tick.close, z_score)]

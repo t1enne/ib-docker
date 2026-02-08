@@ -235,7 +235,8 @@ class BacktestEngine:
                 fill = self.execution_handler.close_order(event, tick)
                 self.portfolio.on_fill(fill)
 
-            self.pending_signals = self.strategy.on_tick(tick, current_z)
+            open_trade = self.portfolio.open_trades.get(tick.symbol)
+            self.pending_signals = self.strategy.on_tick(tick, current_z, open_trade)
             self.portfolio.update_market_value(tick)
 
     def _close_open_position(self, tick: Tick):

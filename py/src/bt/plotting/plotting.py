@@ -121,7 +121,7 @@ def plot_backtest_results(
                     y=list(prices),
                     mode="markers",
                     name="Short Entry",
-                    marker=dict(symbol="triangle-down", color="magenta", size=8),
+                    marker=dict(symbol="triangle-down", color="yellow", size=8),
                     text=short_entries_text,
                     textposition="top center",
                 ),

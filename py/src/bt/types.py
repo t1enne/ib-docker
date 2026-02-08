@@ -118,7 +118,9 @@ class StrategyProtocol(Protocol):
     """Protocol for strategy classes."""
 
     def set_model(self, model: Any) -> None: ...
-    def on_tick(self, tick: Tick, z_score: float) -> List[TradeSignal]:
+    def on_tick(
+        self, tick: Tick, z_score: float, open_trade: Optional[Trade]
+    ) -> List[TradeSignal]:
         """Process a tick with z-score and return signals."""
         ...
 

@@ -8,6 +8,7 @@ from src.bt.types import (
     ExecutionParams,
     StopLossEvent,
     TakeProfitEvent,
+    TradeExitReason,
 )
 
 
@@ -78,13 +79,18 @@ class ExecutionHandler:
         executed_price = base_price + slippage_price
         commission = self._calculate_commission_for_close(executed_price)
 
+        reason = (
+            TradeExitReason.tp
+            if isinstance(event, TakeProfitEvent)
+            else TradeExitReason.sl
+        )
         signal = TradeSignal(
             action=ActionType.close,
             symbol=event.symbol,
             z_score=0.0,
             timestamp=event.timestamp,
             price=event.trigger_price,
-            reason=None,
+            reason=reason,
         )
 
         return FillEvent(
@@ -122,11 +128,11 @@ class ExecutionHandler:
         self, signal: TradeSignal, executed_price: float
     ) -> float:
         """Calculate commission based on notional value."""
-        return executed_price * 0.0001
+        return self.params.fixed_commission
 
     def _calculate_commission_for_close(self, executed_price: float) -> float:
         """Calculate commission for close orders."""
-        return executed_price * 0.0001
+        return self.params.fixed_commission
 
 
 __all__ = ["ExecutionHandler"]

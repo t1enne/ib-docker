@@ -35,7 +35,7 @@ class WalkForwardEngine:
 
         self.strategy_params = StrategyParams(
             entry_z=kwargs.get("entry_z", 2.0),
-            exit_z=kwargs.get("exit_threshold", 0.5),
+            exit_z=kwargs.get("exit_z", 0.5),
         )
 
         self.rolling_window_size = kwargs.get("rolling_window_size", 20)

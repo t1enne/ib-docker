@@ -8,9 +8,21 @@ from src.bt.types import (
     ActionType,
     PortfolioResult,
     StrategyProtocol,
+    FillEvent,
+    ExecutionParams,
 )
 from src.bt.portfolio import Portfolio, PortfolioProps
 from src.utils import get_ts
+
+
+def get_fill(s: TradeSignal, pf: Portfolio):
+    return FillEvent(
+        signal=s,
+        filled_qty=1,  # full
+        executed_price=s.price,
+        commission=pf.commission,
+        slippage=0.0,
+    )
 
 
 @pytest.fixture
@@ -205,10 +217,22 @@ def test_finalize_results(sample_df):
             timestamp=get_ts("2025-01-01"),
             price=100.0,
         )
-        engine.portfolio.on_signal(signal)
+        tick = Tick(
+            symbol="AAPL",
+            timestamp=get_ts("2025-01-02"),
+            open=0.0,
+            high=0.0,
+            low=0.0,
+            close=120.0,
+            volume=0.0,
+        )
+
+        engine.portfolio.on_fill(get_fill(signal, engine.portfolio))
+        engine.portfolio.update_market_value(tick)
+
+        assert len(engine.portfolio.open_trades) == 1
 
         results, data, z_scores = engine._finalize_results()
-        assert isinstance(results, PortfolioResult)
         assert len(results.trades) == 1
         assert results.trades[0].pnl > 1
         assert data == engine.data

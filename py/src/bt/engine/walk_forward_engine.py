@@ -51,13 +51,11 @@ class WalkForwardEngine:
             ],
         )
 
-        if "spread_bps" in kwargs or "slippage_bps" in kwargs:
-            self.execution_params = ExecutionParams(
-                spread_bps=kwargs.get("spread_bps", 5.0),
-                slippage_bps=kwargs.get("slippage_bps", 2.0),
-            )
-        else:
-            self.execution_params = None
+        self.execution_params = ExecutionParams(
+            spread_bps=kwargs.get("spread_bps", 5.0),
+            slippage_bps=kwargs.get("slippage_bps", 2.0),
+            fixed_commission=kwargs.get("commission", 0.5),
+        )
 
     async def run(self):
         strategy = PairsTradingStrategy(

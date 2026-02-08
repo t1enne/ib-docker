@@ -7,7 +7,7 @@ from src.utils import get_ts
 
 @pytest.fixture
 def execution_handler():
-    params = ExecutionParams(spread_bps=10.0, slippage_bps=2.0)
+    params = ExecutionParams(spread_bps=10.0, slippage_bps=2.0, fixed_commission=0.5)
     return ExecutionHandler(params)
 
 
@@ -94,97 +94,3 @@ def test_adverse_selection_short(execution_handler, short_signal, tick_bullish):
 def test_commission_applied(execution_handler, long_signal, tick_bullish):
     fill = execution_handler.execute(long_signal, tick_bullish)
     assert fill.commission > 0
-
-
-def test_no_execution_handler_backwards_compat():
-    from src.bt.engine.backtest_engine import BacktestEngine
-    from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
-    from src.utils import get_ts
-    import pandas as pd
-
-    aapl_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
-    msft_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
-    hdata = {
-        "AAPL": pd.DataFrame({"Close": [100.0]}, index=aapl_idx),
-        "MSFT": pd.DataFrame({"Close": [200.0]}, index=msft_idx),
-    }
-
-    strat = PairsTradingStrategy(
-        symbols=["AAPL", "MSFT"],
-        strategy_params=StrategyParams(
-            entry_z=2.0,
-            exit_z=0.5,
-        ),
-    )
-
-    hdata_train = {
-        "AAPL": pd.DataFrame(
-            {"Close": [100.0]}, index=pd.DatetimeIndex([get_ts("2024-12-31")])
-        ),
-        "MSFT": pd.DataFrame(
-            {"Close": [200.0]}, index=pd.DatetimeIndex([get_ts("2024-12-31")])
-        ),
-    }
-
-    with patch(
-        "src.bt.engine.backtest_engine.read_candles", return_value=hdata_train["AAPL"]
-    ):
-        engine = BacktestEngine(
-            strategy=strat,
-            symbols=["AAPL", "MSFT"],
-            train_start="2024-12-01",
-            train_end="2024-12-31",
-            test_start="2025-01-01",
-            test_end="2025-01-02",
-        )
-        assert engine.execution_handler is None
-
-
-def test_with_execution_params():
-    from src.bt.engine.backtest_engine import BacktestEngine
-    from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
-    from src.bt.types import ExecutionParams
-    from src.utils import get_ts
-    import pandas as pd
-
-    aapl_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
-    msft_idx = pd.DatetimeIndex([get_ts("2025-01-01")])
-    hdata = {
-        "AAPL": pd.DataFrame({"Close": [100.0]}, index=aapl_idx),
-        "MSFT": pd.DataFrame({"Close": [200.0]}, index=msft_idx),
-    }
-
-    strat = PairsTradingStrategy(
-        symbols=["AAPL", "MSFT"],
-        strategy_params=StrategyParams(
-            entry_z=2.0,
-            exit_z=0.5,
-        ),
-    )
-
-    hdata_train = {
-        "AAPL": pd.DataFrame(
-            {"Close": [100.0]}, index=pd.DatetimeIndex([get_ts("2024-12-31")])
-        ),
-        "MSFT": pd.DataFrame(
-            {"Close": [200.0]}, index=pd.DatetimeIndex([get_ts("2024-12-31")])
-        ),
-    }
-
-    with patch(
-        "src.bt.engine.backtest_engine.read_candles", return_value=hdata_train["AAPL"]
-    ):
-        exec_params = ExecutionParams(spread_bps=5.0, slippage_bps=2.0)
-        engine = BacktestEngine(
-            strategy=strat,
-            symbols=["AAPL", "MSFT"],
-            train_start="2024-12-01",
-            train_end="2024-12-31",
-            test_start="2025-01-01",
-            test_end="2025-01-02",
-            execution_params=exec_params,
-        )
-
-        assert engine.execution_handler is not None
-        assert engine.execution_handler.params.spread_bps == 5.0
-        assert engine.execution_handler.params.slippage_bps == 2.0

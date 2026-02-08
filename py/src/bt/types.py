@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import pandas as pd
-from typing import List, Optional, Any, Protocol
+from typing import List, Optional, Any, Protocol, Union
 from enum import Enum
 
 
@@ -43,6 +43,22 @@ class Trade:
 
 
 @dataclass
+class StopLossEvent:
+    symbol: str
+    timestamp: pd.Timestamp
+    trigger_price: float
+    reason: str = "sl"
+
+
+@dataclass
+class TakeProfitEvent:
+    symbol: str
+    timestamp: pd.Timestamp
+    trigger_price: float
+    reason: str = "tp"
+
+
+@dataclass
 class PortfolioResult:
     total_return: float
     sharpe_ratio: float
@@ -76,11 +92,12 @@ class Tick:
 class ExecutionParams:
     spread_bps: float = 5.0
     slippage_bps: float = 2.0
+    fixed_commission: float = 0.5
 
 
 @dataclass
 class FillEvent:
-    signal: TradeSignal
+    signal: "TradeSignal"
     filled_qty: float
     executed_price: float
     commission: float
@@ -104,3 +121,6 @@ class StrategyProtocol(Protocol):
     def on_tick(self, tick: Tick, z_score: float) -> List[TradeSignal]:
         """Process a tick with z-score and return signals."""
         ...
+
+
+RiskEvent = Union[StopLossEvent, TakeProfitEvent]

@@ -1,7 +1,6 @@
 from typing import List, Optional
 
 from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
-from src.bt.algos.z_model import ZModel
 from src.bt.engine.backtest_engine import BacktestEngine
 from src.bt.types import ExecutionParams
 from src.utils import pick
@@ -34,16 +33,13 @@ class WalkForwardEngine:
         self.trading_end = trading_end
         self.plot = kwargs.get("plot")
 
-        # Strategy parameters
         self.strategy_params = StrategyParams(
             entry_z=kwargs.get("entry_z", 2.0),
             exit_z=kwargs.get("exit_threshold", 0.5),
         )
 
-        # ZModel parameters
         self.rolling_window_size = kwargs.get("rolling_window_size", 20)
 
-        # Portfolio parameters
         self.pf_params = pick(
             kwargs,
             [
@@ -55,7 +51,6 @@ class WalkForwardEngine:
             ],
         )
 
-        # Execution parameters
         if "spread_bps" in kwargs or "slippage_bps" in kwargs:
             self.execution_params = ExecutionParams(
                 spread_bps=kwargs.get("spread_bps", 5.0),
@@ -65,22 +60,19 @@ class WalkForwardEngine:
             self.execution_params = None
 
     async def run(self):
-        # Create strategy and model
-        z_model = ZModel(self.symbols, self.rolling_window_size)
         strategy = PairsTradingStrategy(
             symbols=self.symbols,
             strategy_params=self.strategy_params,
         )
 
-        # Create unified engine
         engine = BacktestEngine(
             strategy=strategy,
-            z_model=z_model,
             symbols=self.symbols,
             train_start=self.initial_train_start,
             train_end=self.initial_train_end,
             test_start=self.trading_start,
             test_end=self.trading_end,
+            rolling_window_size=self.rolling_window_size,
             initial_capital=self.pf_params.get("initial_capital", 10000),
             position_size=self.pf_params.get("position_size", 0.1),
             commission=self.pf_params.get("commission", 0.001),
@@ -91,7 +83,6 @@ class WalkForwardEngine:
 
         results, data, z_scores = await engine.run()
 
-        # Plot if requested
         if self.plot:
             from src.bt.plotting.plotting import plot_backtest_results
 

@@ -1,8 +1,10 @@
 from typing import Optional
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from src.utils import read_candles, get_ols_fit_model
+from src.utils import read_candles
+from src.bt.zscore import calculate_rolling_z
 
 
 def spread(
@@ -15,46 +17,46 @@ def spread(
     ma_windows = [9, 14, 50]
     df1 = read_candles(sym1.upper(), start_date, end_date)
     df2 = read_candles(sym2.upper(), start_date, end_date)
+
+    prices1 = df1["Close"].tolist()
+    prices2 = df2["Close"].tolist()
+    dates = df1.index
+
     ratio = pd.DataFrame(
         {
             "ratio": df1["Close"] / df2["Close"],
             f"{sym1}": df1["Close"],
             f"{sym2}": df2["Close"],
         },
-        index=df1.index,
+        index=dates,
     )
 
-    # Estimate beta from the last rolling points (or all if no rolling)
-    window_size = rolling if rolling else len(df1)
-    tail1 = df1["Close"].tail(window_size)
-    tail2 = df2["Close"].tail(window_size)
-    model = get_ols_fit_model(tail1, tail2)
-    _, beta = model.params
-
-    # Calculate spreads
-    spreads = df1["Close"] - beta * df2["Close"]
-
-    # Calculate rolling z-score on spreads
     if rolling:
-        # Use fixed beta and rolling z-score on spreads
-        rolling_mean = spreads.rolling(window=rolling, min_periods=rolling).mean()
-        rolling_std = spreads.rolling(window=rolling, min_periods=rolling).std()
-        z_score = (spreads - rolling_mean) / rolling_std
+        window = rolling
+
+        z_scores: list[float] = []
+        for i in range(len(prices1)):
+            s1 = prices1[: i + 1]
+            s2 = prices2[: i + 1]
+            z = calculate_rolling_z(s1, s2, window)
+            z_scores.append(z)
+
+        z_score = pd.Series(z_scores, index=dates)
     else:
-        # For consistency, even without rolling, use fixed beta approach
-        z_score = (spreads - spreads.mean()) / spreads.std()
+        z = calculate_rolling_z(prices1, prices2, len(prices1))
+        z_score = pd.Series([z], index=[dates[-1]])
 
     fig = make_subplots(
         rows=2,
         cols=1,
         shared_xaxes=True,
         subplot_titles=["z", "ratio"],
-        vertical_spacing=0.05,  # Reduce vertical spacing
-        horizontal_spacing=0.05,  # Reduce horizontal spacing
+        vertical_spacing=0.05,
+        horizontal_spacing=0.05,
     )
     fig.add_trace(
         go.Scatter(
-            x=df1.index,
+            x=dates,
             y=z_score,
             mode="lines",
             name=f"z-score {sym1}-{sym2}",
@@ -80,7 +82,7 @@ def spread(
         ratio_ema = ratio["ratio"].ewm(span=window).mean()
         fig.add_trace(
             go.Scatter(
-                x=df1.index,
+                x=dates,
                 y=z_score_ema,
                 mode="lines",
                 name=f"z-score EMA {window}",
@@ -102,4 +104,7 @@ def spread(
         )
 
     fig.update_xaxes(type="date")
-    fig.show()
+
+    output_file = f"spread_{sym1}_{sym2}.html"
+    fig.write_html(output_file)
+    print(f"Saved to {output_file}")

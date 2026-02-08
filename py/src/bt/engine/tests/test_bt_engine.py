@@ -57,7 +57,7 @@ class MockStrategy(StrategyProtocol):
     def set_model(self, model):
         pass
 
-    def on_tick(self, tick: Tick) -> list[TradeSignal]:
+    def on_tick(self, tick: Tick, z_score: float) -> list[TradeSignal]:
         if tick.symbol == "AAPL" and self._signal_idx < len(self._signals):
             signal = self._signals[self._signal_idx]
             self._signal_idx += 1
@@ -175,7 +175,6 @@ async def test_run(mock_strategy, sample_df):
     with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
         engine = BacktestEngine(
             strategy=mock_strategy,
-            z_model=MagicMock(),
             symbols=["AAPL", "GOOGL"],
             train_start="2024-01-01",
             train_end="2024-12-31",
@@ -193,7 +192,6 @@ def test_finalize_results(sample_df):
     with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
         engine = BacktestEngine(
             strategy=MagicMock(spec=StrategyProtocol),
-            z_model=MagicMock(),
             symbols=["AAPL", "GOOGL"],
             train_start="2024-01-01",
             train_end="2024-12-31",
@@ -209,7 +207,7 @@ def test_finalize_results(sample_df):
         )
         engine.portfolio.on_signal(signal)
 
-        results, data = engine._finalize_results()
+        results, data, z_scores = engine._finalize_results()
         assert isinstance(results, PortfolioResult)
         assert len(results.trades) == 1
         assert results.trades[0].pnl > 1

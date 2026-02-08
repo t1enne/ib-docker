@@ -90,7 +90,6 @@ async def backtest(strategy: Strategy):
         commission=strategy.commission,
         plot=strategy.plot,
     )
-
     # Run walk-forward analysis
     results = await wf_engine.run()
     print_results_analysis(results)

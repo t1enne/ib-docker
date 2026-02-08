@@ -9,46 +9,45 @@ class BasePairsStrategy:
     """
     Abstract base class for pair trading strategies.
 
-    Provides common interface and utilities for processing tick data,
-    managing positions, and generating trading signals.
+    Provides common utilities for generating trading signals.
     """
 
     def __init__(self, symbols: List[str]):
         self.symbols = symbols
-        self.z_scores = pd.DataFrame(
-            {"z": pd.Series(dtype="float64")}, index=pd.DatetimeIndex([])
-        )
         self.pending_ticks = defaultdict(dict)
 
-    def _get_z(self, ts: pd.Timestamp) -> float:
-        return self.z_scores.loc[ts, "z"]
-
-    def _long(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
+    def _long(
+        self, symbol: str, timestamp: pd.Timestamp, price: float, z_score: float
+    ) -> TradeSignal:
         """Create a long signal."""
         return TradeSignal(
             action=ActionType.long,
             symbol=symbol,
-            z_score=self._get_z(timestamp),
+            z_score=z_score,
             timestamp=timestamp,
-            price=self.pending_ticks[timestamp][symbol],
+            price=price,
         )
 
-    def _short(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
+    def _short(
+        self, symbol: str, timestamp: pd.Timestamp, price: float, z_score: float
+    ) -> TradeSignal:
         """Create a short signal."""
         return TradeSignal(
             action=ActionType.short,
             symbol=symbol,
-            z_score=self._get_z(timestamp),
+            z_score=z_score,
             timestamp=timestamp,
-            price=self.pending_ticks[timestamp][symbol],
+            price=price,
         )
 
-    def _close(self, symbol: str, timestamp: pd.Timestamp) -> TradeSignal:
+    def _close(
+        self, symbol: str, timestamp: pd.Timestamp, price: float, z_score: float
+    ) -> TradeSignal:
         """Create a close signal."""
         return TradeSignal(
             action=ActionType.close,
             symbol=symbol,
-            z_score=self._get_z(timestamp),
+            z_score=z_score,
             timestamp=timestamp,
-            price=self.pending_ticks[timestamp][symbol],
+            price=price,
         )

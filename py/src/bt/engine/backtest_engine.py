@@ -1,7 +1,9 @@
-from src.bt.algos.z_model import ZModel, TrainedZModel
+from collections import defaultdict
+from src.bt.algos.z_model import ZModel
 import pandas as pd
+import numpy as np
 from dataclasses import dataclass
-from typing import List, AsyncGenerator, Tuple, Dict, Optional, cast
+from typing import List, AsyncGenerator, Tuple, Dict, Optional
 from src.bt.portfolio import Portfolio, PortfolioProps
 from src.utils import read_candles
 from src.bt.types import (
@@ -67,30 +69,27 @@ class WalkForwardWindow:
 
 
 class BacktestEngine:
-    """Unified backtesting engine with walk-forward and execution support."""
+    """Unified backtesting engine with rolling z-score calculation."""
 
     def __init__(
         self,
         strategy: StrategyProtocol,
-        z_model: ZModel,
         symbols: List[str],
-        # Walk-forward parameters
         train_start: str,
         train_end: str,
         test_start: str,
         test_end: str,
-        # Portfolio parameters
+        rolling_window_size: int = 20,
         initial_capital: float = 10000,
         position_size: float = 0.1,
         commission: float = 0.001,
         stop_loss: float = 0.10,
         take_profit: float = 1.0,
-        # Execution parameters
         execution_params: Optional[ExecutionParams] = None,
     ):
         self.strategy = strategy
-        self.z_model = z_model
         self.symbols = symbols
+        self.rolling_window_size = rolling_window_size
         self.execution_handler = (
             ExecutionHandler(execution_params) if execution_params else None
         )
@@ -122,6 +121,45 @@ class BacktestEngine:
 
         self.pending_signals: List[TradeSignal] = []
 
+        self.z_model = ZModel(symbols, rolling_window_size)
+        self.price_buffers: List[dict[str, float]] = []
+        self.pending_prices: dict[pd.Timestamp, dict[str, float]] = defaultdict(dict)
+        self.z_scores: List[float] = []
+        self.z_timestamps: List[pd.Timestamp] = []
+        self.z_scores_synchronized: List[float] = []
+        self.z_timestamps_synchronized: List[pd.Timestamp] = []
+
+    def calculate_zscores_synchronized(self) -> Tuple[pd.Series, List[Dict]]:
+        """Calculate z-scores using synchronized DataFrames (matches spread module).
+
+        Returns:
+            z_scores: pd.Series with datetime index
+            raw_values: List of dicts with timestamp, z, s1, s2 for comparison
+        """
+        prices1 = self.data[self.symbols[0]]["Close"].tolist()
+        prices2 = self.data[self.symbols[1]]["Close"].tolist()
+        dates = self.data[self.symbols[0]].index
+
+        z_scores = []
+        raw_values = []
+
+        for i in range(len(prices1)):
+            s1 = prices1[: i + 1]
+            s2 = prices2[: i + 1]
+            z = self.z_model.calculate_z_by_index(s1, s2, self.rolling_window_size)
+            z_scores.append(z)
+            raw_values.append(
+                {
+                    "timestamp": dates[i],
+                    "z": z,
+                    "s1": prices1[i],
+                    "s2": prices2[i],
+                    "data_points": i + 1,
+                }
+            )
+
+        return pd.Series(z_scores, index=dates), raw_values
+
     def _compute_windows(self) -> List[WalkForwardWindow]:
         """Compute walk-forward windows."""
         train_data = {
@@ -152,56 +190,35 @@ class BacktestEngine:
             )
         ]
 
-    def _train_model(self, train_data: Dict[str, pd.DataFrame]) -> TrainedZModel:
-        """Train the model on training data."""
-        return self.z_model.train(train_data)
-
     async def run(
         self,
     ) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame], pd.DataFrame]:
-        """Run the backtest with walk-forward windows."""
+        """Run the backtest with rolling z-score calculation."""
         windows = self._compute_windows()
-        print(windows)
-
-        all_z_scores: List[pd.DataFrame] = []
-        z_scores_df = pd.DataFrame()
 
         for window in windows:
-            trained_model = self._train_model(window.train_data)
-            self.strategy.set_model(trained_model)
-
             await self._run_backtest(window.test_data)
 
-            strat = cast(StrategyProtocol, self.strategy)
-            z = strat.get_z_scores()
-            if isinstance(z, pd.DataFrame):
-                if not z.empty:
-                    all_z_scores.append(z.copy())
-
-        if all_z_scores:
-            z_scores_df = pd.concat(all_z_scores)
-            z_scores_df = z_scores_df[~z_scores_df.index.duplicated(keep="first")]
-            z_scores_df = pd.DataFrame({"z": z_scores_df["z"]})
-
-        results, data = self._finalize_results()
+        results, data, _ = self._finalize_results()
+        z_scores_df = pd.DataFrame(
+            {"z": self.z_scores},
+            index=pd.Index(self.z_timestamps),
+        )
         return results, data, z_scores_df
 
     async def _run_backtest(self, test_data: Dict[str, pd.DataFrame]):
-        """Run backtest on test data."""
-        strat = cast(StrategyProtocol, self.strategy)
-        # for symbol in self.symbols:
-        #     strat.bps.hdata[symbol] = test_data[symbol].copy()
-
+        """Run backtest on test data with rolling z-score."""
         feed = DataFeed(
             self.symbols,
             str(test_data[self.symbols[0]].index[0]),
             str(test_data[self.symbols[0]].index[-1]),
         )
-
+        current_z = 0.0
+        tick_groups = defaultdict(list)
         async for tick in feed.get_data_stream():
             if tick is None:
                 break
-            
+
             for signal in self.pending_signals:
                 if self.execution_handler:
                     fill = self.execution_handler.execute(signal, tick)
@@ -209,14 +226,40 @@ class BacktestEngine:
                 else:
                     self.portfolio.on_signal(signal)
 
-            self.pending_signals = self.strategy.on_tick(tick)
+            tick_groups[tick.timestamp].append(tick)
 
+            if len(tick_groups[tick.timestamp]) == len(self.symbols):
+                for t in tick_groups[tick.timestamp]:
+                    self.pending_prices[tick.timestamp][t.symbol] = t.close
+
+                prices = dict(self.pending_prices[tick.timestamp])
+                self.price_buffers.append(prices)
+
+                if len(self.price_buffers) >= self.rolling_window_size:
+                    if len(self.price_buffers) > self.rolling_window_size:
+                        self.price_buffers = self.price_buffers[
+                            -self.rolling_window_size :
+                        ]
+                    current_z = self.z_model.calculate_z(self.price_buffers)
+                    self.z_scores.append(current_z)
+                    self.z_timestamps.append(tick.timestamp)
+
+                del tick_groups[tick.timestamp]
+
+            self.pending_signals = self.strategy.on_tick(tick, current_z)
             self.portfolio.on_tick(tick)
 
-    def _finalize_results(self) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame]]:
+    def _finalize_results(
+        self,
+    ) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame], pd.DataFrame]:
         """Finalize and return results."""
         last_timestamp = max(df.index[-1] for df in self.data.values())
         last_prices = {symbol: df["Close"].iloc[-1] for symbol, df in self.data.items()}
-        self.portfolio.close_all_positions(last_timestamp, last_prices)
+        self.portfolio.close_all_trades(last_timestamp, last_prices)
 
-        return self.portfolio.get_results(), self.data
+        z_scores_df = pd.DataFrame(
+            {"z": self.z_scores},
+            index=pd.Index(self.z_timestamps),
+        )
+
+        return self.portfolio.get_results(), self.data, z_scores_df

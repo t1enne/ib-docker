@@ -1,6 +1,6 @@
 import pytest
 from src.bt.portfolio import Portfolio, PortfolioProps
-from src.bt.types import TradeSignal, ActionType, Tick
+from src.bt.types import TradeSignal, ActionType, Tick, TradeExitReason
 from src.utils import get_ts
 
 
@@ -79,7 +79,7 @@ def test_sl(portfolio: Portfolio):
     assert portfolio.positions["AAPL"] == 0
     assert len(portfolio.trades) == 1
     assert portfolio.trades[0].exit_price == 85.0
-    assert portfolio.trades[0].close_reason == "stop_loss"
+    assert portfolio.trades[0].close_reason == TradeExitReason.sl
 
 
 def test_trailing_sl(portfolio: Portfolio):
@@ -132,7 +132,7 @@ def test_tp(portfolio: Portfolio):
     assert portfolio.positions["AAPL"] == 0
     assert len(portfolio.trades) == 1
     assert portfolio.trades[0].exit_price == 155.0
-    assert portfolio.trades[0].close_reason == "take_profit"
+    assert portfolio.trades[0].close_reason == TradeExitReason.tp
 
 
 def test_position_sizing(portfolio: Portfolio):
@@ -244,17 +244,46 @@ def test_equity_updates_on_every_tick(portfolio: Portfolio):
     for i, expected_eq in enumerate(expected_equities):
         assert abs(equity_curve.iloc[i] - expected_eq) < 1, f"Tick {i}"
 
-    # portfolio.on_signal(
-    #     TradeSignal(
-    #         timestamp=get_ts("2025-01-01 13:00"),
-    #         action=ActionType.close,
-    #         symbol="AAPL",
-    #         z_score=0.0,
-    #         price=110.0,
-    #     )
-    # )
-    # expected_final_cash = expected_cash + (qty * 110.0 - qty * 100.0)
-    # assert abs(portfolio.cash - expected_final_cash) < 0.01
-    # assert (
-    #     abs(portfolio.get_results().equity_curve.iloc[-1] - expected_final_cash) < 0.01
-    # )
+
+def test_equity_curve_on_close_all_positions(portfolio: Portfolio):
+    """Ensure equity curve uses exit prices, not stale last_price."""
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-03 09:00"),
+        price=100.0,
+    )
+    signal2 = TradeSignal(
+        action=ActionType.long,
+        symbol="MSFT",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-03 09:00"),
+        price=200.0,
+    )
+
+    portfolio.on_signal(signal)
+    portfolio.on_signal(signal2)
+
+    assert portfolio.cash < portfolio.initial_capital
+
+    qty_aapl = portfolio.positions["AAPL"]
+    qty_msft = portfolio.positions["MSFT"]
+    expected_cash_after_entry = portfolio.cash
+
+    portfolio.close_all_trades(
+        timestamp=get_ts("2025-01-03 11:00"), prices={"AAPL": 150.0, "MSFT": 250.0}
+    )
+
+    result = portfolio.get_results()
+    final_equity = result.equity_curve.iloc[-1]
+
+    pnl_aapl = (150.0 - 100.0) * qty_aapl
+    pnl_msft = (250.0 - 200.0) * qty_msft
+    expected_equity = (
+        expected_cash_after_entry + pnl_aapl + pnl_msft - (portfolio.commission * 2)
+    )
+
+    assert abs(final_equity - expected_equity) < 1, (
+        f"Expected {expected_equity}, got {final_equity}"
+    )

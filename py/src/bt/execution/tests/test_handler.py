@@ -111,7 +111,6 @@ def test_no_execution_handler_backwards_compat():
 
     strat = PairsTradingStrategy(
         symbols=["AAPL", "MSFT"],
-        # hdata=hdata,
         strategy_params=StrategyParams(
             entry_z=2.0,
             exit_z=0.5,
@@ -132,7 +131,6 @@ def test_no_execution_handler_backwards_compat():
     ):
         engine = BacktestEngine(
             strategy=strat,
-            z_model=MagicMock(spec=StrategyProtocol),
             symbols=["AAPL", "MSFT"],
             train_start="2024-12-01",
             train_end="2024-12-31",
@@ -158,8 +156,6 @@ def test_with_execution_params():
 
     strat = PairsTradingStrategy(
         symbols=["AAPL", "MSFT"],
-        # hdata=hdata,
-        rolling_window_size=20,
         strategy_params=StrategyParams(
             entry_z=2.0,
             exit_z=0.5,
@@ -181,7 +177,6 @@ def test_with_execution_params():
         exec_params = ExecutionParams(spread_bps=5.0, slippage_bps=2.0)
         engine = BacktestEngine(
             strategy=strat,
-            z_model=MagicMock(spec=StrategyProtocol),
             symbols=["AAPL", "MSFT"],
             train_start="2024-12-01",
             train_end="2024-12-31",

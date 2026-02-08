@@ -1,7 +1,7 @@
 commission: 0.001
-entry_z: 1.5
+entry_z: 2.0
 initial_capital: 100000
-ma_period: 20
+rolling_window_size: 50
 name: ko-pep_pnd
 plot: true
 position_size: 0.5

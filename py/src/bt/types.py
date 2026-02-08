@@ -1,4 +1,3 @@
-from src.bt.algos.z_model import TrainedZModel
 from dataclasses import dataclass
 import pandas as pd
 from typing import List, Optional, Any, Protocol
@@ -17,6 +16,14 @@ class TradeStatus(Enum):
     stopped = "stopped"
 
 
+class TradeExitReason(Enum):
+    sl = "sl"
+    tp = "tp"
+    end = "end"
+    regression = "regression"
+    none = "none"
+
+
 @dataclass
 class Trade:
     entry_time: pd.Timestamp
@@ -32,7 +39,7 @@ class Trade:
     take_profit: float
     pnl: float = 0.0
     status: TradeStatus = TradeStatus.open
-    close_reason: Optional[str] = None
+    close_reason: Optional[TradeExitReason] = None
 
 
 @dataclass
@@ -73,7 +80,7 @@ class ExecutionParams:
 
 @dataclass
 class FillEvent:
-    signal: "TradeSignal"
+    signal: TradeSignal
     filled_qty: float
     executed_price: float
     commission: float
@@ -87,17 +94,13 @@ class TradeSignal:
     z_score: float
     timestamp: pd.Timestamp
     price: float
-    reason: str = ""
+    reason: Optional[TradeExitReason] = TradeExitReason.none
 
 
 class StrategyProtocol(Protocol):
-    """Protocol for strategy classes that receive trained models."""
+    """Protocol for strategy classes."""
 
-    def set_model(self, model: TrainedZModel) -> None: ...
-    def on_tick(self, tick: Tick) -> List[TradeSignal]:
-        """Process a tick and return new state and signals."""
-        ...
-
-    def get_z_scores(self) -> Optional[pd.DataFrame]:
-        """Return DataFrame with 'z' column indexed by timestamp, or None if no z-scores."""
+    def set_model(self, model: Any) -> None: ...
+    def on_tick(self, tick: Tick, z_score: float) -> List[TradeSignal]:
+        """Process a tick with z-score and return signals."""
         ...

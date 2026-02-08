@@ -13,6 +13,7 @@ from src.bt.types import (
     PortfolioResult,
     TradeStatus,
     FillEvent,
+    TradeExitReason,
 )
 
 
@@ -39,35 +40,64 @@ class Portfolio:
         self.positions: Dict[str, float] = {}  # symbol: quantity
         self.trades: List[Trade] = []
         self.open_trades: Dict[str, Trade] = {}  # symbol: open trade
-        self.equity_curve: Dict[pd.Timestamp, float] = {}
-        self.equity_curve[cast(pd.Timestamp, props.start_date)] = props.initial_capital
+        self.equity_curve: pd.DataFrame
+        start_date = cast(pd.Timestamp, props.start_date)
+        self.equity_curve = pd.DataFrame(
+            {
+                "equity": [float(props.initial_capital)],
+                "cash": [float(props.initial_capital)],
+                "positions_value": [0.0],
+            },
+            index=pd.DatetimeIndex([start_date]),
+        )
+        self.equity_curve.index.name = "timestamp"
+
+    def _record_equity(self, timestamp: pd.Timestamp):
+        positions_value = sum(t.qty * t.last_price for t in self.open_trades.values())
+        equity = float(self.cash) + float(positions_value)
+
+        if timestamp in self.equity_curve.index:
+            self.equity_curve.loc[timestamp, "equity"] = equity
+            self.equity_curve.loc[timestamp, "cash"] = float(self.cash)
+            self.equity_curve.loc[timestamp, "positions_value"] = float(positions_value)
+        else:
+            new_row = pd.DataFrame(
+                {
+                    "equity": [float(equity)],
+                    "cash": [float(self.cash)],
+                    "positions_value": [float(positions_value)],
+                },
+                index=pd.DatetimeIndex([timestamp]),
+            )
+            self.equity_curve = pd.concat([self.equity_curve, new_row])
 
     def on_tick(self, tick: Tick):
         if tick.symbol not in self.open_trades:
             return None  # No open trade to close
         sym = tick.symbol
         open_pos = self.open_trades[sym]
+        has_sl = open_pos.stop_loss > 0
+        has_tp = open_pos.take_profit > 0
+
         # udpate equity for the position
         if open_pos:
             self._update_equity_on_tick(open_pos, tick)
 
         is_long = open_pos.position == ActionType.long
-        should_close_long = is_long and (
-            tick.close < open_pos.stop_loss or open_pos.take_profit < tick.close
-        )
-        should_close_short = not is_long and (
-            open_pos.stop_loss < tick.close or tick.close < open_pos.take_profit
-        )
+        is_short = not is_long
+        long_sl_triggered = is_long and has_sl and (tick.close < open_pos.stop_loss)
+        long_tp_triggerd = is_long and has_tp and open_pos.take_profit < tick.close
+        short_sl_triggered = is_short and has_sl and open_pos.stop_loss < tick.close
+        short_tp_triggered = is_short and has_tp and tick.close < open_pos.take_profit
 
-        should_close = should_close_long or should_close_short
-        if should_close:
-            reason = (
-                "stop_loss"
-                if (should_close_long and tick.close <= open_pos.stop_loss)
-                or (should_close_short and tick.close >= open_pos.stop_loss)
-                else "take_profit"
+        if long_sl_triggered or short_sl_triggered:
+            self._send_close_signal(
+                tick.symbol, tick.close, tick.timestamp, TradeExitReason.sl
             )
-            self._send_close_signal(tick.symbol, tick.close, tick.timestamp, reason)
+        if long_tp_triggerd or short_tp_triggered:
+            self._send_close_signal(
+                tick.symbol, tick.close, tick.timestamp, TradeExitReason.tp
+            )
 
         self._update_sl(open_pos, tick)
 
@@ -99,15 +129,15 @@ class Portfolio:
             return None
         return self._open_trade_from_fill(signal, fill)
 
-    def close_all_positions(self, timestamp: pd.Timestamp, prices: Dict[str, float]):
+    def close_all_trades(self, timestamp: pd.Timestamp, prices: Dict[str, float]):
         """Close all open positions at the given prices."""
         for symbol, _ in list(self.open_trades.items()):
             p = prices[symbol]
-            self._send_close_signal(symbol, p, timestamp)
+            self._send_close_signal(symbol, p, timestamp, TradeExitReason.end)
 
     def get_results(self) -> PortfolioResult:
         """Get backtest results."""
-        equity_series = pd.Series(self.equity_curve).sort_index()
+        equity_series = self.equity_curve["equity"].sort_index()
         total_return = (
             equity_series.iloc[-1] - self.initial_capital
         ) / self.initial_capital
@@ -148,7 +178,7 @@ class Portfolio:
     def _update_equity_on_tick(self, pos: Trade, tick: Tick):
         assert pos and tick
         self.open_trades[pos.symbol].last_price = tick.close
-        self.equity_curve[tick.timestamp] = self._calc_current_equity()
+        self._record_equity(tick.timestamp)
 
     def _calc_current_equity(self):
         return self.cash + sum(
@@ -160,7 +190,7 @@ class Portfolio:
         symbol: str,
         price: float,
         timestamp: pd.Timestamp,
-        reason: str = "unknown",
+        reason: Optional[TradeExitReason],
     ):
         signal = TradeSignal(
             action=ActionType.close,
@@ -205,8 +235,7 @@ class Portfolio:
             qty * direction
         )
         self.cash -= qty * signal.price + self.commission
-        self.equity_curve[signal.timestamp] = self._calc_current_equity()
-        # update equity curve
+        self._record_equity(signal.timestamp)
         return trade
 
     def _close_trade(self, trade: Trade, signal: TradeSignal):
@@ -221,17 +250,18 @@ class Portfolio:
             else (trade.entry_price - signal.price) * qty
         )
 
-        self.positions[signal.symbol] = 0
         trade.exit_time = signal.timestamp
         trade.exit_price = signal.price
+        trade.last_price = signal.price
         trade.pnl = pnl
         trade.status = TradeStatus.closed
         trade.close_reason = signal.reason
 
         self.cash += pnl - self.commission
-        self.equity_curve[signal.timestamp] = self._calc_current_equity()
 
+        self.positions[signal.symbol] = 0
         del self.open_trades[signal.symbol]
+        self._record_equity(signal.timestamp)
         return trade
 
     def _update_sl(self, trade: Trade, tick: Tick):
@@ -279,7 +309,7 @@ class Portfolio:
             qty * direction
         )
         self.cash -= (qty * fill.executed_price) + fill.commission
-        self.equity_curve[signal.timestamp] = self._calc_current_equity()
+        self._record_equity(fill.signal.timestamp)
         return trade
 
     def _close_trade_from_fill(self, trade: Trade, fill: FillEvent):
@@ -295,14 +325,15 @@ class Portfolio:
         self.positions[fill.signal.symbol] = 0
         trade.exit_time = fill.signal.timestamp
         trade.exit_price = fill.executed_price
+        trade.last_price = fill.executed_price
         trade.pnl = pnl
         trade.status = TradeStatus.closed
         trade.close_reason = fill.signal.reason
 
-        self.cash += pnl - fill.commission
-        self.equity_curve[fill.signal.timestamp] = self._calc_current_equity()
-
         del self.open_trades[fill.signal.symbol]
+        self.cash += pnl - fill.commission
+        self._record_equity(fill.signal.timestamp)
+
         return trade
 
 

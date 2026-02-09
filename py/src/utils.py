@@ -8,15 +8,20 @@ from datetime import datetime
 
 
 def read_candles(
-    symbol: str, start_date: str | None = None, end_date: str | None = None
+    symbol: str,
+    start_date: str = "2020-01-01",
+    end_date: str = "2099-01-01",
+    bar: str = "1h",
 ) -> pd.DataFrame:
     # return pd.read_csv(f"mdata/{symbol}.csv")
     con = sqlite3.connect("../data/db.sqlite")
+    print(con)
     cur = con.cursor()
-    _sd = start_date and _parse_date(start_date).timestamp() or 0.0
-    _ed = end_date and _parse_date(end_date).timestamp() or 0.0
-    from_filter = f"and o.timestamp >= {int(_sd) * 1000}" if start_date else ""
-    to_filter = f"and o.timestamp <= {int(_ed) * 1000}" if end_date else ""
+    _sd = start_date and _parse_date(start_date).timestamp() or ""
+    _ed = end_date and _parse_date(end_date).timestamp() or ""
+    print(start_date, _sd)
+    from_filter = f"and o.timestamp >= {int(_sd)}" if _sd else ""
+    to_filter = f"and o.timestamp <= {int(_ed)}" if _ed else ""
     q = f"""select s.ticker as symbol,
                 o.timestamp,
                 o.open,
@@ -24,7 +29,7 @@ def read_candles(
                 o.low,
                 o.close,
                 o.volume
-            from ohlcv_1d o left join symbol s
+            from ohlcv_1h o left join symbol s
             on o.symbol_id = s.id
             where s.ticker = UPPER('{symbol}')
             {from_filter}
@@ -47,6 +52,7 @@ def read_candles(
     df = pd.DataFrame(data, columns=columns)
     df = df.assign(Date=pd.to_datetime(df["Timestamp"], unit="ms"))
     df = df.set_index("Date").drop(columns=["Timestamp"])
+    print(df)
     return df
 
 

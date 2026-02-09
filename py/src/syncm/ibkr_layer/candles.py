@@ -22,7 +22,7 @@ def validate_candles_args(conid, period, bar, startTime):
 
 async def candles(
     conid: int,
-    period: Optional[str] = None,
+    period: Optional[str] = "252d",
     bar: str = "1d",
     startTime: Optional[str] = None,
 ):

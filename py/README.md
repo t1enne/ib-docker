@@ -21,3 +21,10 @@ Running the suite in watch mode is done like so: `find . -type f -name "*.py" | 
 The project relies on `ty` for LSP functionality and `ruff` for formatting.
 To typecheck: `uv tool run ty check`
 To format: `uv tool run ruff format`
+
+# Project Structure
+
+- `src/bt/algos/` - Trading strategies and models
+- `src/bt/engine/` - Backtesting engines
+- `src/bt/portfolio/` - Portfolio management
+- `src/bt/execution/` - Execution handler for spreads/slippage

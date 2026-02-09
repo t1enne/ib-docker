@@ -4,7 +4,7 @@ import asyncio
 import datetime
 
 import yaml
-from src.syncm.ibkr_layer import candles, get_contract_info, search_contract
+from src.syncm.ibkr_layer import candles, get_contract_info, lookup
 from src.db.models import get_ohlcv_model
 
 
@@ -26,28 +26,27 @@ async def sync_data(config: UniverseConf):
 
 async def sync_symbol(ticker: str, interval: str, start_date: str):
     try:
-        conid = await search_contract(ticker)
+        conid = await lookup(ticker)
         symbol_info = await get_contract_info(conid)
         print(f"Syncing {ticker} ({symbol_info.id}) for {interval}")
 
         model = get_ohlcv_model(interval)
 
         # Get last timestamp
-        last_record = (
-            model.select()
-            .where(model.symbol_id == symbol_info.id)
-            .order_by(model.timestamp.desc())
-            .first()
-        )
-
-        if last_record:
-            start_dt = datetime.datetime.fromtimestamp(last_record.timestamp / 1000)
-            start_time = start_dt.strftime("%Y%m%d-%H:%M:%S")
-            print(f"  Found last data at {start_dt}, syncing from there")
-        else:
-            start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-            start_time = start_dt.strftime("%Y%m%d-%H:%M:%S")
-            print(f"  No data found, syncing from {start_date}")
+        # last_record = (
+        #     model.select()
+        #     .where(model.symbol_id == symbol_info.id)
+        #     .order_by(model.timestamp.desc())
+        #     .first()
+        # )
+        # if last_record:
+        #     start_dt = datetime.datetime.fromtimestamp(last_record.timestamp / 1000)
+        #     start_time = start_dt.strftime("%Y%m%d-%H:%M:%S")
+        #     print(f"  Found last data at {start_dt}, syncing from there")
+        # else:
+        start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        start_time = start_dt.strftime("%Y%m%d-%H:%M:%S")
+        print(f"  No data found, syncing from {start_date}")
 
         await candles(conid, bar=cast(Any, interval), startTime=start_time)
         print(f"  Synced {ticker} for {interval}")

@@ -17,18 +17,6 @@ async def fetch_contract_info(conid: int) -> Dict[str, Any]:
         raise ValueError(f"Failed call to {ep}: {e}")
 
 
-async def search_contract(ticker: str) -> int:
-    try:
-        r = await client.get("iserver/secdef/search", params={"symbol": ticker})
-        r.raise_for_status()
-        data = r.json()
-        if data:
-            return int(data[0]["conid"])
-    except Exception as e:
-        raise ValueError(f"Failed to search contract for {ticker}: {e}")
-    raise ValueError(f"No contract found for {ticker}")
-
-
 async def get_contract_info(conid: int) -> Symbol:
     # Query DB first
     try:

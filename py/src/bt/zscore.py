@@ -1,17 +1,19 @@
 from typing import List
 import numpy as np
+import pandas as pd
+from src.utils import get_ols_fit_model
 
 
 def calculate_rolling_z(
-    s1: List[float],
-    s2: List[float],
+    s1: pd.Series[float],
+    s2: pd.Series[float],
     window: int,
 ) -> float:
-    """Calculate rolling z-score using rolling beta and rolling mean/std.
+    """Calculate rolling z-score using OLS regression.
 
-    This matches the spread module behavior:
-    - beta = Cov(s1, s2) / Var(s2) computed over rolling window
-    - spread = s1 - beta * s2
+    This uses OLS regression over rolling window:
+    - Fit: s1 ~ s2 using log prices
+    - spread = s1 - (alpha + beta * s2)
     - z = (spread - rolling_mean) / rolling_std
 
     Args:
@@ -28,16 +30,15 @@ def calculate_rolling_z(
     s1_arr = np.array(s1[-window:])
     s2_arr = np.array(s2[-window:])
 
-    cov = np.cov(s1_arr, s2_arr)[0, 1]
-    var = np.var(s2_arr, ddof=1)
-    beta = cov / var if var != 0 else 1.0
+    model = get_ols_fit_model(s1_arr, s2_arr)
+    alpha, beta = model.params
 
-    spreads = s1_arr - beta * s2_arr
+    spread = s1_arr - (alpha + beta * s2_arr)
 
-    mean = np.mean(spreads)
-    std = np.std(spreads, ddof=1)
+    mean = np.mean(spread)
+    std = np.std(spread, ddof=1)
 
-    spread = s1[-1] - beta * s2[-1]
-    z = (spread - mean) / std if std != 0 else 0.0
+    current_spread = s1_arr[-1] - (alpha + beta * s2_arr[-1])
+    z = (current_spread - mean) / std if std != 0 else 0.0
 
     return round(float(z), 2)

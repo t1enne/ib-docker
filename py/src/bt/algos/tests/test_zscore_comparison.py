@@ -51,24 +51,24 @@ def calculate_zscores_spread_module(
         z_scores: pd.Series with datetime index
         raw_values: List of dicts with timestamp, z, s1, s2 for detailed comparison
     """
-    prices1 = df1["Close"].tolist()
-    prices2 = df2["Close"].tolist()
+    prices1: pd.Series = df1["Close"]
+    prices2: pd.Series = df2["Close"]
     dates = df1.index
 
     z_scores = []
     raw_values = []
 
     for i in range(len(prices1)):
-        s1 = prices1[: i + 1]
-        s2 = prices2[: i + 1]
+        s1 = prices1.iloc[: i + 1]
+        s2 = prices2.iloc[: i + 1]
         z = calculate_rolling_z(s1, s2, rolling_window)
         z_scores.append(z)
         raw_values.append(
             {
                 "timestamp": dates[i],
                 "z": z,
-                "s1": prices1[i],
-                "s2": prices2[i],
+                "s1": prices1.iloc[i],
+                "s2": prices2.iloc[i],
                 "data_points": i + 1,
             }
         )

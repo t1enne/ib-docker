@@ -66,13 +66,14 @@ def get_returns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_ols_fit_model(y, x):
-    if y.empty or x.empty or len(y) != len(x):
-        # Return a dummy model or raise
+    y_arr = np.asarray(y)
+    x_arr = np.asarray(x)
+    if len(y_arr) == 0 or len(x_arr) == 0 or len(y_arr) != len(x_arr):
         raise ValueError("Empty or mismatched data for OLS")
-    y = np.log(y).astype(float)
-    x = np.log(x).astype(float)
-    X = sm.add_constant(x)
-    return sm.OLS(y, X).fit()
+    y_arr = np.log(y_arr).astype(float)
+    x_arr = np.log(x_arr).astype(float)
+    X = sm.add_constant(x_arr)
+    return sm.OLS(y_arr, X).fit()
 
 
 def hedge_ratio_residuals(y, x) -> pd.DataFrame:
@@ -82,7 +83,7 @@ def hedge_ratio_residuals(y, x) -> pd.DataFrame:
     return y - (alpha + beta * x)
 
 
-def _calculate_rolling_zscore_spread(s1, s2, rolling_window: int):
+def _calculate_rolling_zscore_spread(s1: pd.Series, s2: pd.Series, rolling_window: int):
     if len(s1) < rolling_window:
         return pd.Series(dtype=float)
 
@@ -119,7 +120,9 @@ def _calculate_rolling_zscore_spread(s1, s2, rolling_window: int):
     return (spread_series - rolling_mean) / rolling_std
 
 
-def calculate_zscore_spread(s1, s2, rolling_window: Optional[int] = None):
+def calculate_zscore_spread(
+    s1: pd.Series, s2: pd.Series, rolling_window: Optional[int] = None
+):
     """Calculate z-score normalized spread"""
     if s1.empty or s2.empty or len(s1) != len(s2):
         return pd.Series(dtype=float)

@@ -49,8 +49,8 @@ def spread(
     fig = make_subplots(
         rows=2,
         cols=1,
-        shared_xaxes=True,
         subplot_titles=["z", "ratio"],
+        shared_xaxes=True,
         vertical_spacing=0.05,
         horizontal_spacing=0.05,
     )

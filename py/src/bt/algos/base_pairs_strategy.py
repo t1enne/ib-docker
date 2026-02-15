@@ -7,8 +7,7 @@ from src.bt.types import TradeSignal, ActionType, TradeExitReason
 
 class BasePairsStrategy:
     """
-    Abstract base class for pair trading strategies.
-
+    Base class for pair trading strategies.
     Provides common utilities for generating trading signals.
     """
 

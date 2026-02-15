@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import pandas as pd
-from typing import List, Optional, Any, Protocol, Union
+from typing import List, Optional, Any, Protocol, Union, TypedDict
 from enum import Enum
 
 
@@ -22,6 +22,21 @@ class TradeExitReason(Enum):
     end = "end"
     regression = "regression"
     none = "none"
+
+
+@dataclass
+class ZScoreState:
+    scores: List[float]
+    timestamps: List[pd.Timestamp]
+    scores_synced: List[float]
+    timestamps_synced: List[pd.Timestamp]
+
+
+@dataclass
+class RegimeState:
+    labels: List[Optional[int]]
+    probs: List[Optional[List[float]]]
+    timestamps: List[pd.Timestamp]
 
 
 @dataclass
@@ -115,13 +130,27 @@ class TradeSignal:
 
 
 class StrategyProtocol(Protocol):
-    """Protocol for strategy classes."""
+    """Protocol for strategy classes.
 
-    def set_model(self, model: Any) -> None: ...
-    def on_tick(
-        self, tick: Tick, z_score: float, open_trade: Optional[Trade]
-    ) -> List[TradeSignal]:
-        """Process a tick with z-score and return signals."""
+    Strategies receive a model object at construction that provides access to
+    features and historical data. Use self.model.z_score, self.model.market_data,
+    etc. from within your strategy.
+    """
+
+    model: Any  # StrategyModel instance
+
+    def on_tick(self, tick: Tick, open_trade: Optional[Trade]) -> List[TradeSignal]:
+        """Process a tick and return trading signals.
+
+        Access computed features via self.model:
+            - self.model.z_score          # Current z-score
+            - self.model.current_regime   # Current HMM regime
+            - self.model.market_data      # Historical OHLCV
+
+        Apply indicators to market data:
+            from src.bt.indicators import ema
+            ema_9 = ema(self.model.market_data[-14:].close, 9)
+        """
         ...
 
 

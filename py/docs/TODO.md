@@ -7,8 +7,8 @@
 
 ## Strategy logic
 
-- Add explicit exit rules tied to spread reversion.
-  - Why: positions only close via SL/TP; mean-reversion strategies should exit on z-score reversion or time-based decay.
+- Add time-based decay
+  - Why: positions should be able to close based on time-based decay.
 
 - Bound the rolling buffer and handle missing ticks.
   - Why: pending tick logic can accumulate if a symbol is missing for a timestamp, which can leak memory and skew signals.
@@ -17,3 +17,16 @@
 
 - Add metrics for gross/net exposure, turnover, and slippage impact.
   - Why: pairs strategies need exposure and turnover tracking to understand risk and cost sensitivity.
+
+## Data resampling
+
+- Add resampling to market data, to construct higher timeframes candles from lower ones.
+
+## Indicators
+
+- Add indicator helpers for use inside strategies, similar to pinescript functions
+
+## HTF data from strategies
+
+- Add `security()` function to get access to higher time-frame candles from inside the strategy
+  - Why: it's useful to verify trends and process other indicators in HTF before entering positions.

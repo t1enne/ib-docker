@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Any
 import pandas as pd
 
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy
@@ -13,21 +13,35 @@ class StrategyParams:
 
 
 class PairsTradingStrategy(StrategyProtocol):
-    """Stateless pairs trading strategy that generates signals from z-score."""
+    """Stateless pairs trading strategy that generates signals from z-score.
+
+    Access computed features via self.model:
+        - self.model.z_score          # Current z-score
+        - self.model.current_regime   # Current HMM regime (if configured)
+        - self.model.market_data      # Historical OHLCV data
+
+    Apply indicators:
+        from src.bt.indicators import ema
+        ema_9 = ema(self.model.market_data[-14:].close, 9)
+    """
 
     bps: BasePairsStrategy
+    model: Any  # StrategyModel - set by engine after construction
 
     def __init__(self, symbols: List[str], strategy_params: StrategyParams):
         self.bps = BasePairsStrategy(symbols)
         self.params = strategy_params
+        # Note: self.model is set by the engine after construction
 
-    def on_tick(
-        self, tick: Tick, z_score: float, open_trade: Optional[Trade]
-    ) -> List[TradeSignal]:
-        """Process tick with z-score and generate signals."""
+    def on_tick(self, tick: Tick, open_trade: Optional[Trade]) -> List[TradeSignal]:
+        """Process tick and generate signals.
+
+        Access z-score via self.model.z_score.
+        """
         symbol = tick.symbol
         timestamp = tick.timestamp
         close = tick.close
+        z_score = self.model.z_score
 
         if open_trade and abs(z_score) < self.params.exit_z:
             # z regression

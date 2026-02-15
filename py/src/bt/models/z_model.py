@@ -1,5 +1,4 @@
 from typing import List
-import math
 from src.bt.zscore import calculate_rolling_z
 
 

@@ -2,6 +2,7 @@ from src.bt.types import PortfolioResult
 from datetime import date
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 import click
 import yaml
 import logging
@@ -32,6 +33,9 @@ class Strategy:
     trading_end: str
     rolling_window_size: int
     plot: bool
+    bar: str
+    hmm_floating_window: Optional[int] = None
+    hmm_retrain_interval: Optional[int] = None
 
 
 def load_strategy(path: str) -> Strategy:
@@ -82,6 +86,7 @@ async def backtest(strategy: Strategy):
         trading_end=strategy.trading_end,
         # Strategy parameters
         entry_z=strategy.entry_z,
+        exit_z=strategy.exit_z,
         stop_loss=strategy.stop_loss,
         take_profit=strategy.take_profit,
         rolling_window_size=strategy.rolling_window_size,
@@ -90,6 +95,8 @@ async def backtest(strategy: Strategy):
         position_size=strategy.position_size,
         commission=strategy.commission,
         plot=strategy.plot,
+        hmm_floating_window=strategy.hmm_floating_window,
+        hmm_retrain_interval=strategy.hmm_retrain_interval,
     )
     # Run walk-forward analysis
     results = await wf_engine.run()

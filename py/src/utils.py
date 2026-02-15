@@ -9,16 +9,16 @@ from datetime import datetime
 
 def read_candles(
     symbol: str,
-    start_date: str = "2020-01-01",
-    end_date: str = "2099-01-01",
+    start_date: Optional[str] = "2020-01-01",
+    end_date: Optional[str] = "2099-01-01",
     bar: str = "1h",
 ) -> pd.DataFrame:
     # return pd.read_csv(f"mdata/{symbol}.csv")
     con = sqlite3.connect("../data/db.sqlite")
     print(con)
     cur = con.cursor()
-    _sd = start_date and _parse_date(start_date).timestamp() or ""
-    _ed = end_date and _parse_date(end_date).timestamp() or ""
+    _sd = start_date and _parse_date(start_date).timestamp() * 1000 or ""
+    _ed = end_date and _parse_date(end_date).timestamp() * 1000 or ""
     print(start_date, _sd)
     from_filter = f"and o.timestamp >= {int(_sd)}" if _sd else ""
     to_filter = f"and o.timestamp <= {int(_ed)}" if _ed else ""
@@ -29,12 +29,13 @@ def read_candles(
                 o.low,
                 o.close,
                 o.volume
-            from ohlcv_1h o left join symbol s
+            from ohlcv_{bar} o left join symbol s
             on o.symbol_id = s.id
             where s.ticker = UPPER('{symbol}')
             {from_filter}
             {to_filter}
             """
+    print(q)
     res = cur.execute(q)
     data = res.fetchall()
     con.close()

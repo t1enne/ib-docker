@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
+from src.bt.algos.pairs_trading import StrategyParams
 from src.bt.engine.backtest_engine import BacktestEngine
 from src.bt.types import ExecutionParams
 from src.utils import pick
@@ -57,8 +57,11 @@ class WalkForwardEngine:
             fixed_commission=kwargs.get("commission", 0.5),
         )
 
-    async def run(self):
+        # HMM regime model config
+        self.hmm_floating_window: Optional[int] = kwargs.get("hmm_floating_window")
+        self.hmm_retrain_interval: Optional[int] = kwargs.get("hmm_retrain_interval")
 
+    async def run(self):
         engine = BacktestEngine(
             strategy=self.strategy_params,
             symbols=self.symbols,
@@ -73,9 +76,11 @@ class WalkForwardEngine:
             stop_loss=self.pf_params.get("stop_loss", 0.10),
             take_profit=self.pf_params.get("take_profit", 1.0),
             execution_params=self.execution_params,
+            hmm_floating_window=self.hmm_floating_window,
+            hmm_retrain_interval=self.hmm_retrain_interval,
         )
 
-        results, data, z_scores = await engine.run()
+        results, data, z_scores, regime_df = await engine.run()
 
         if self.plot:
             from src.bt.plotting.plotting import plot_backtest_results
@@ -86,6 +91,7 @@ class WalkForwardEngine:
                 "Pairs Trading",
                 data,
                 z_scores=z_scores,
+                regime_df=regime_df,
                 entry_z=self.strategy_params.entry_z,
                 exit_z=self.strategy_params.exit_z,
             )

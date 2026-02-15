@@ -12,7 +12,7 @@ from src.db.models import get_ohlcv_model
 class UniverseConf:
     universe: List[str]
     intervals: List[str]
-    start_date: str
+    start_date: datetime.date
 
 
 async def sync_data(config: UniverseConf):
@@ -24,7 +24,7 @@ async def sync_data(config: UniverseConf):
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def sync_symbol(ticker: str, interval: str, start_date: str):
+async def sync_symbol(ticker: str, interval: str, start_date: datetime.date):
     try:
         conid = await lookup(ticker)
         symbol_info = await get_contract_info(conid)
@@ -44,8 +44,7 @@ async def sync_symbol(ticker: str, interval: str, start_date: str):
         #     start_time = start_dt.strftime("%Y%m%d-%H:%M:%S")
         #     print(f"  Found last data at {start_dt}, syncing from there")
         # else:
-        start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-        start_time = start_dt.strftime("%Y%m%d-%H:%M:%S")
+        start_time = start_date.strftime("%Y%m%d-%H:%M:%S")
         print(f"  No data found, syncing from {start_date}")
 
         await candles(conid, bar=cast(Any, interval), startTime=start_time)

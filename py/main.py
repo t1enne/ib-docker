@@ -8,6 +8,7 @@ import src.spread as spread_mod
 import src.nd as nd_mod
 import src.pnd as pnd_mod
 import src.syncm as sync_mod
+import src.hmm as hmm_mod
 
 from src.bt import StrategyType, backtest, load_strategy, Strategy
 
@@ -52,6 +53,56 @@ def pnd(symbols: list[str]):
     pnd_mod.pnd(symbols)
 
 
+@main.command(help="analyze market regimes using Hidden Markov Model")
+@click.argument("symbol")
+@click.option("--start", help="Start date (YYYY-MM-DD)")
+@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option(
+    "--n-regimes", "-n", type=int, default=3, help="Number of regime states (2 or 3)"
+)
+@click.option(
+    "--vol-window", "-v", type=int, default=20, help="Volatility calculation window"
+)
+@click.option(
+    "--momentum-window", "-m", type=int, default=10, help="Momentum calculation window"
+)
+@click.option(
+    "--min-train-size", type=int, default=252, help="Minimum observations for training"
+)
+@click.option("--update-interval", type=int, default=50, help="Retraining interval")
+@click.option(
+    "--output-dir",
+    "-o",
+    default="./hmm_models",
+    help="Output directory for models and plots",
+)
+@click.option("--plot/--no-plot", default=True, help="Generate plots")
+def hmm(
+    symbol: str,
+    start: Optional[str],
+    end: Optional[str],
+    n_regimes: int,
+    vol_window: int,
+    momentum_window: int,
+    min_train_size: int,
+    update_interval: int,
+    output_dir: str,
+    plot: bool,
+):
+    hmm_mod.hmm(
+        symbol,
+        start,
+        end,
+        n_regimes,
+        vol_window,
+        momentum_window,
+        min_train_size,
+        update_interval,
+        output_dir,
+        plot,
+    )
+
+
 @main.command(help="create and save a strategy configuration")
 @click.argument("strategy_type", type=click.Choice([s.value for s in StrategyType]))
 @click.argument("symbols", nargs=-1)
@@ -87,6 +138,7 @@ def strategy(
     training_end: str,
     trading_start: str,
     trading_end: str,
+    bar: str,
     rolling_window_size: int,
     plot: bool,
     output: str,
@@ -111,6 +163,7 @@ def strategy(
         trading_start=trading_start,
         trading_end=trading_end,
         rolling_window_size=rolling_window_size,
+        bar=bar,
         plot=plot,
     )
 

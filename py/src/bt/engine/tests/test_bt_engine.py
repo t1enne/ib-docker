@@ -7,10 +7,8 @@ from src.bt.types import (
     Tick,
     TradeSignal,
     ActionType,
-    PortfolioResult,
     StrategyProtocol,
     FillEvent,
-    ExecutionParams,
 )
 from src.bt.portfolio import Portfolio, PortfolioProps
 from src.utils import get_ts
@@ -63,14 +61,20 @@ def sample_ticks():
 class MockStrategy(StrategyProtocol):
     """Mock strategy that returns signals based on ticks."""
 
+    model = None  # StrategyModel instance - set by engine
+
     def __init__(self, signals: list[TradeSignal]):
         self._signals = signals
         self._signal_idx = 0
 
-    def set_model(self, model):
-        pass
+    def on_tick(self, tick: Tick, open_trade=None) -> list[TradeSignal]:
+        """Process tick and return signals.
 
-    def on_tick(self, tick: Tick, z_score: float) -> list[TradeSignal]:
+        Access computed features via self.model:
+            - self.model.z_score          # Current z-score
+            - self.model.current_regime   # Current HMM regime (if configured)
+            - self.model.market_data      # Historical OHLCV data
+        """
         if tick.symbol == "AAPL" and self._signal_idx < len(self._signals):
             signal = self._signals[self._signal_idx]
             self._signal_idx += 1
@@ -203,7 +207,7 @@ async def test_run(mock_strategy, sample_df):
             price=100.0,
         )
         engine.portfolio.on_fill(get_fill(signal, engine.portfolio))
-        results, _, _ = await engine.run()
+        results, _, _, _ = await engine.run()
         assert len(results.trades) == 1
         assert results.trades[0].symbol == "AAPL"
         assert results.trades[0].position == ActionType.long

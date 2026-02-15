@@ -1,24 +1,27 @@
-from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
 from collections import defaultdict
-from src.bt.algos.z_model import ZModel
+import logging
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
 from typing import List, AsyncGenerator, Tuple, Dict, Optional
 from src.bt.portfolio import Portfolio, PortfolioProps
 from src.bt.risk import RiskManager, RiskManagerProps, TakeProfitEvent
+from src.bt.models.strategy_model import StrategyModel
 from src.utils import read_candles
+from src.hmm import get_regime_df
+from src.bt.algos.pairs_trading import PairsTradingStrategy, StrategyParams
 from src.bt.types import (
     Tick,
-    StrategyProtocol,
     PortfolioResult,
     TradeSignal,
     ExecutionParams,
-    FillEvent,
-    ActionType,
-    TradeExitReason,
+    ZScoreState,
+    RegimeState,
 )
 from src.bt.execution import ExecutionHandler
+
+
+logger = logging.getLogger(__name__)
 
 
 class DataFeed:
@@ -74,7 +77,7 @@ class WalkForwardWindow:
 
 
 class BacktestEngine:
-    """Unified backtesting engine with rolling z-score calculation."""
+    """Unified backtesting engine with rolling z-score calculation and optional HMM regime detection."""
 
     def __init__(
         self,
@@ -91,6 +94,8 @@ class BacktestEngine:
         stop_loss: float = 0.10,
         take_profit: float = 1.0,
         execution_params: ExecutionParams = ExecutionParams(),
+        hmm_floating_window: Optional[int] = None,
+        hmm_retrain_interval: Optional[int] = None,
     ):
         self.strategy = PairsTradingStrategy(
             symbols=symbols,
@@ -135,13 +140,24 @@ class BacktestEngine:
 
         self.pending_signals: List[TradeSignal] = []
 
-        self.z_model = ZModel(symbols, rolling_window_size)
-        self.price_buffers: List[dict[str, float]] = []
-        self.pending_prices: dict[pd.Timestamp, dict[str, float]] = defaultdict(dict)
-        self.z_scores: List[float] = []
-        self.z_timestamps: List[pd.Timestamp] = []
-        self.z_scores_synchronized: List[float] = []
-        self.z_timestamps_synchronized: List[pd.Timestamp] = []
+        # Initialize strategy model with HMM config
+        self.model = StrategyModel(
+            symbols=symbols,
+            rolling_window_size=rolling_window_size,
+            hmm_floating_window=hmm_floating_window,
+            hmm_retrain_interval=hmm_retrain_interval,
+        )
+
+        # Wire the model into the strategy
+        self.strategy.model = self.model
+
+        # Track z-scores for results/plotting
+        self.z_score_state = ZScoreState(
+            scores=[], timestamps=[], scores_synced=[], timestamps_synced=[]
+        )
+
+        # Track HMM regime for results/plotting
+        self.regime_state = RegimeState(labels=[], probs=[], timestamps=[])
 
     def _compute_windows(self) -> List[WalkForwardWindow]:
         """Compute walk-forward windows."""
@@ -175,28 +191,42 @@ class BacktestEngine:
 
     async def run(
         self,
-    ) -> Tuple[PortfolioResult, Dict[str, pd.DataFrame], pd.DataFrame]:
+    ) -> Tuple[
+        PortfolioResult, Dict[str, pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame]
+    ]:
         """Run the backtest with rolling z-score calculation."""
         windows = self._compute_windows()
 
         for window in windows:
-            await self._run_backtest(window.test_data)
+            await self._run_backtest(window.train_data, window.test_data)
 
         results, data, _ = self._finalize_results()
         z_scores_df = pd.DataFrame(
-            {"z": self.z_scores},
-            index=pd.Index(self.z_timestamps),
+            {"z": self.z_score_state.scores},
+            index=pd.Index(self.z_score_state.timestamps),
         )
-        return results, data, z_scores_df
 
-    async def _run_backtest(self, test_data: Dict[str, pd.DataFrame]):
-        """Run backtest on test data with rolling z-score."""
-        feed = DataFeed(
-            self.symbols,
-            str(test_data[self.symbols[0]].index[0]),
-            str(test_data[self.symbols[0]].index[-1]),
-        )
-        current_z = 0.0
+        # Build regime dataframe if HMM was enabled
+        regime_df = get_regime_df(self.regime_state)
+
+        return (results, data, z_scores_df, regime_df)
+
+    async def _run_backtest(
+        self,
+        train_data: Dict[str, pd.DataFrame],
+        test_data: Dict[str, pd.DataFrame],
+    ):
+        """Run backtest on test data with rolling z-score and optional HMM.
+
+        Args:
+            train_data: Training period data (used to pre-seed the model)
+            test_data: Trading period data (signals generated here)
+        """
+        # Pre-seed model with training period data
+        await self._preseed_model(train_data)
+
+        # Now run trading period
+        feed = DataFeed(self.symbols, str(self.test_start), str(self.test_end))
         tick_groups = defaultdict(list)
 
         async for tick in feed.get_data_stream():
@@ -210,21 +240,24 @@ class BacktestEngine:
             tick_groups[tick.timestamp].append(tick)
 
             if len(tick_groups[tick.timestamp]) == len(self.symbols):
-                for t in tick_groups[tick.timestamp]:
-                    self.pending_prices[tick.timestamp][t.symbol] = t.close
+                # Build tick group for this timestamp
+                tick_group = {t.symbol: t for t in tick_groups[tick.timestamp]}
 
-                prices = dict(self.pending_prices[tick.timestamp])
-                self.price_buffers.append(prices)
+                # Update the model (computes z-score, updates market data, regime, etc.)
+                self.model.update(tick.timestamp, tick_group)
 
-                if len(self.price_buffers) >= self.rolling_window_size:
-                    if len(self.price_buffers) > self.rolling_window_size:
-                        self.price_buffers = self.price_buffers[
-                            -self.rolling_window_size :
-                        ]
-                    # keep the z score fresh
-                    current_z = self.z_model.calculate_z(self.price_buffers)
-                    self.z_scores.append(current_z)
-                    self.z_timestamps.append(tick.timestamp)
+                # Track z-score for results/plotting
+                if len(self.model.market_data) >= self.rolling_window_size:
+                    self.z_score_state.scores.append(self.model.z_score)
+                    self.z_score_state.timestamps.append(tick.timestamp)
+
+                # Track regime for plotting (always record for alignment)
+                self.regime_state.labels.append(self.model.current_regime)
+                probs = self.model.get_regime_probability()
+                self.regime_state.probs.append(
+                    probs.tolist() if probs is not None else None
+                )
+                self.regime_state.timestamps.append(tick.timestamp)
 
                 del tick_groups[tick.timestamp]
 
@@ -236,8 +269,45 @@ class BacktestEngine:
                 self.portfolio.on_fill(fill)
 
             open_trade = self.portfolio.open_trades.get(tick.symbol)
-            self.pending_signals = self.strategy.on_tick(tick, current_z, open_trade)
+            # Strategy now accesses z_score via self.model.z_score
+            self.pending_signals = self.strategy.on_tick(tick, open_trade)
             self.portfolio.update_market_value(tick)
+
+    async def _preseed_model(self, train_data: Dict[str, pd.DataFrame]):
+        """Pre-seed the model with training period data.
+
+        This populates market_data with training period bars so that both
+        the z-score model and the HMM have a full lookback window available
+        from the start of trading.
+        """
+        # Build ticks from training data
+        all_ticks = []
+        for symbol, df in train_data.items():
+            for idx, row in df.iterrows():
+                all_ticks.append(
+                    Tick(
+                        timestamp=idx,
+                        symbol=symbol,
+                        open=float(row["Open"]),
+                        high=float(row["High"]),
+                        low=float(row["Low"]),
+                        close=float(row["Close"]),
+                        volume=float(row["Volume"]),
+                    )
+                )
+
+        # Sort by timestamp
+        all_ticks.sort(key=lambda x: x.timestamp)
+
+        # Group by timestamp and feed to model
+        tick_groups = defaultdict(list)
+        for tick in all_ticks:
+            tick_groups[tick.timestamp].append(tick)
+
+        for timestamp in sorted(tick_groups.keys()):
+            if len(tick_groups[timestamp]) == len(self.symbols):
+                tick_group = {t.symbol: t for t in tick_groups[timestamp]}
+                self.model.update(timestamp, tick_group)
 
     def _close_open_position(self, tick: Tick):
         """Close open positions at the end of the BT"""
@@ -265,13 +335,13 @@ class BacktestEngine:
                 close=pos.last_price,
                 volume=0.00,
             )
-            fill = self._close_open_position(t)  # mock a tick to close the position
+            self._close_open_position(t)  # mock a tick to close the position
 
-        last_prices = {symbol: df["Close"].iloc[-1] for symbol, df in self.data.items()}
+        _ = {symbol: df["Close"].iloc[-1] for symbol, df in self.data.items()}
 
         z_scores_df = pd.DataFrame(
-            {"z": self.z_scores},
-            index=pd.Index(self.z_timestamps),
+            {"z": self.z_score_state.scores},
+            index=pd.Index(self.z_score_state.timestamps),
         )
 
         return self.portfolio.get_results(), self.data, z_scores_df

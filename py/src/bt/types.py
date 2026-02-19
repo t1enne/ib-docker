@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import pandas as pd
-from typing import List, Optional, Any, Protocol, Union, TypedDict
+from typing import List, Optional, Any, Protocol, Union, TypedDict, Dict
 from enum import Enum
 
 
@@ -93,8 +93,24 @@ class PortfolioResult:
 
 
 @dataclass
+class BacktestResults:
+    pf: PortfolioResult
+    data: pd.DataFrame
+    z_scores: pd.DataFrame
+    regimes: Optional[pd.DataFrame]
+
+
+@dataclass(frozen=True)
+class EngineWindow:
+    train_start: pd.Timestamp
+    train_end: pd.Timestamp
+    test_start: pd.Timestamp
+    test_end: pd.Timestamp
+
+
+@dataclass
 class Tick:
-    timestamp: Any
+    timestamp: pd.Timestamp
     symbol: str
     open: float
     high: float
@@ -127,6 +143,34 @@ class TradeSignal:
     timestamp: pd.Timestamp
     price: float
     reason: Optional[TradeExitReason] = TradeExitReason.none
+
+
+@dataclass
+class StrategyConfig:
+    name: str
+    strategy_type: str
+    symbols: list[str]
+    entry_z: float
+    exit_z: float
+    stop_loss: float
+    take_profit: float
+    initial_capital: float
+    position_size: float
+    commission: float
+    training_start: str
+    training_end: str
+    trading_start: str
+    trading_end: str
+    rolling_window_size: int
+    plot: bool
+    bar: str
+    hmm_floating_window: Optional[int] = None
+    hmm_retrain_interval: Optional[int] = None
+
+
+class StrategyType(Enum):
+    PND = "pnd"
+    SPREAD = "spread"
 
 
 class StrategyProtocol(Protocol):

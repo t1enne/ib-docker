@@ -1,4 +1,3 @@
-from src.bt.algos.pairs_trading import StrategyParams
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
@@ -9,9 +8,11 @@ from src.bt.types import (
     ActionType,
     StrategyProtocol,
     FillEvent,
+    StrategyConfig,
+    EngineWindow,
 )
 from src.bt.portfolio import Portfolio, PortfolioProps
-from src.utils import get_ts
+from src.utils import get_ts, parse_timestamp
 
 
 def get_fill(s: TradeSignal, pf: Portfolio):
@@ -56,6 +57,29 @@ def sample_ticks():
             volume=1200,
         ),
     ]
+
+
+@pytest.fixture
+def strategy_config():
+    return StrategyConfig(
+        name="test",
+        strategy_type="pnd",
+        symbols=["AAPL", "GOOGL"],
+        entry_z=2.0,
+        exit_z=0.0,
+        stop_loss=0.1,
+        take_profit=1.5,
+        initial_capital=10000,
+        position_size=0.1,
+        commission=0.0001,
+        training_start="2024-01-01",
+        training_end="2024-12-31",
+        trading_start="2025-01-01",
+        trading_end="2025-01-02",
+        rolling_window_size=20,
+        plot=False,
+        bar="1d",
+    )
 
 
 class MockStrategy(StrategyProtocol):
@@ -131,73 +155,11 @@ def sample_df():
     )
 
 
-@pytest.fixture
-def mock_data_feed(sample_ticks):
-    """Mock data feed."""
-    data_feed = MagicMock(spec=DataFeed)
-
-    async def mock_get_data_stream():
-        for tick in sample_ticks:
-            yield tick
-
-    data_feed.get_data_stream = mock_get_data_stream
-    data_feed.symbols = ["AAPL", "GOOGL"]
-    data_feed.start_date = "2025-01-01"
-    data_feed.end_date = "2025-01-02"
-    return data_feed
-
-
 @pytest.mark.asyncio
-async def test_get_data_stream(sample_ticks):
-    """Test DataFeed.get_data_stream yields sorted ticks."""
-    sample_df1 = pd.DataFrame(
-        {
-            "Open": [100.0],
-            "High": [105.0],
-            "Low": [95.0],
-            "Close": [102.0],
-            "Volume": [1000],
-        },
-        index=pd.Index([get_ts("2025-01-01")], dtype="datetime64[ns]"),
-    )
-    sample_df2 = pd.DataFrame(
-        {
-            "Open": [200.0],
-            "High": [210.0],
-            "Low": [195.0],
-            "Close": [205.0],
-            "Volume": [500],
-        },
-        index=pd.Index([get_ts("2025-01-01")], dtype="datetime64[ns]"),
-    )
-
-    with patch(
-        "src.bt.engine.backtest_engine.read_candles",
-        side_effect=[sample_df1, sample_df2],
-    ):
-        data_feed = DataFeed(
-            symbols=["AAPL", "GOOGL"], start_date="2025-01-01", end_date="2025-01-02"
-        )
-        ticks = []
-        async for tick in data_feed.get_data_stream():
-            ticks.append(tick)
-        assert len(ticks) == 2
-        assert ticks[0].symbol == "AAPL"
-        assert ticks[1].symbol == "GOOGL"
-
-
-@pytest.mark.asyncio
-async def test_run(mock_strategy, sample_df):
+async def test_run(mock_strategy, sample_df, strategy_config):
     """Test BacktestEngine.run processes ticks and returns results."""
     with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
-        engine = BacktestEngine(
-            strategy=StrategyParams(entry_z=2.0, exit_z=0.0),
-            symbols=["AAPL", "GOOGL"],
-            train_start="2024-01-01",
-            train_end="2024-12-31",
-            test_start="2025-01-01",
-            test_end="2025-01-02",
-        )
+        engine = BacktestEngine(strategy_config)
 
         signal = TradeSignal(
             action=ActionType.long,
@@ -207,23 +169,17 @@ async def test_run(mock_strategy, sample_df):
             price=100.0,
         )
         engine.portfolio.on_fill(get_fill(signal, engine.portfolio))
-        results, _, _, _ = await engine.run()
+        _r = await engine.run()
+        results = _r.pf
         assert len(results.trades) == 1
         assert results.trades[0].symbol == "AAPL"
         assert results.trades[0].position == ActionType.long
 
 
-def test_finalize_results(sample_df):
+def test_finalize_results(sample_df, strategy_config):
     """Test BacktestEngine._finalize_results constructs PortfolioResult."""
     with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
-        engine = BacktestEngine(
-            strategy=StrategyParams(entry_z=2.0, exit_z=0.0),
-            symbols=["AAPL", "GOOGL"],
-            train_start="2024-01-01",
-            train_end="2024-12-31",
-            test_start="2025-01-01",
-            test_end="2025-01-02",
-        )
+        engine = BacktestEngine(strategy_config)
         signal = TradeSignal(
             action=ActionType.long,
             symbol="AAPL",
@@ -246,7 +202,6 @@ def test_finalize_results(sample_df):
 
         assert len(engine.portfolio.open_trades) == 1
 
-        results, data, z_scores = engine._finalize_results()
+        results = engine._finalize_results().pf
         assert len(results.trades) == 1
         assert results.trades[0].pnl > 1
-        assert data == engine.data

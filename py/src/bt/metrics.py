@@ -90,7 +90,7 @@ def drawdown_periods(
 
                 try:
                     duration = (date - peak_idx).days
-                except (TypeError, AttributeError):
+                except TypeError, AttributeError:
                     duration = i - dates.index(peak_idx) if peak_idx in dates else 0
 
                 periods.append(

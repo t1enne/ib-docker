@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -7,21 +7,25 @@ from statsmodels.tsa.stattools import adfuller
 from datetime import datetime
 
 
+_DEFAULT_START = pd.Timestamp("2020-01-01")
+_DEFAULT_END = pd.Timestamp("2099-01-01")
+
+
 def read_candles(
     symbol: str,
-    start_date: Optional[str] = "2020-01-01",
-    end_date: Optional[str] = "2099-01-01",
+    start_date: Optional[pd.Timestamp] = None,
+    end_date: Optional[pd.Timestamp] = None,
     bar: str = "1h",
 ) -> pd.DataFrame:
     # return pd.read_csv(f"mdata/{symbol}.csv")
     con = sqlite3.connect("../data/db.sqlite")
-    print(con)
     cur = con.cursor()
-    _sd = start_date and _parse_date(start_date).timestamp() * 1000 or ""
-    _ed = end_date and _parse_date(end_date).timestamp() * 1000 or ""
-    print(start_date, _sd)
-    from_filter = f"and o.timestamp >= {int(_sd)}" if _sd else ""
-    to_filter = f"and o.timestamp <= {int(_ed)}" if _ed else ""
+    _start = start_date if start_date else _DEFAULT_START
+    _end = end_date if end_date else _DEFAULT_END
+    _sd = int(_start.timestamp() * 1000)
+    _ed = int(_end.timestamp() * 1000)
+    from_filter = f"and o.timestamp >= {_sd}" if _sd else ""
+    to_filter = f"and o.timestamp <= {_ed}" if _ed else ""
     q = f"""select s.ticker as symbol,
                 o.timestamp,
                 o.open,
@@ -35,9 +39,9 @@ def read_candles(
             {from_filter}
             {to_filter}
             """
-    print(q)
     res = cur.execute(q)
     data = res.fetchall()
+    print(len(data))
     con.close()
     columns = pd.Index(
         [
@@ -199,3 +203,14 @@ def get_ts(ds: str) -> pd.Timestamp:
         return _ts
 
     raise ValueError(f"Failed when creating timestamp for {ds}")
+
+
+def parse_timestamp(value: Union[str, pd.Timestamp]) -> pd.Timestamp:
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            raise ValueError(f"Invalid timestamp: {value}")
+        return value
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        raise ValueError(f"Invalid timestamp: {value}")
+    return timestamp

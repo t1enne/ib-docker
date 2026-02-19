@@ -15,11 +15,12 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from pandas import Timestamp
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.hmm.hmm import MarketRegimeHMM
-from src.utils import read_candles
+from src.utils import read_candles, parse_timestamp
 
 
 # Regime colors for visualization
@@ -326,8 +327,8 @@ def _plot_hmm_analysis(
 
 def hmm(
     symbol: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    start: Optional[Timestamp] = None,
+    end: Optional[Timestamp] = None,
     n_regimes: int = 3,
     vol_window: int = 20,
     momentum_window: int = 10,
@@ -339,7 +340,9 @@ def hmm(
     """Analyze market regimes using Hidden Markov Model and generate visualization."""
     # Load data
     print(f"Loading data for {symbol}...")
-    df = read_candles(symbol.upper(), start, end)
+    _start = parse_timestamp(start) if start else None
+    _end = parse_timestamp(end) if end else None
+    df = read_candles(symbol.upper(), _start, _end)
 
     if df.empty:
         print(f"No data found for {symbol}")

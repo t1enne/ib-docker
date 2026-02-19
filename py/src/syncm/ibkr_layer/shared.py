@@ -1,3 +1,4 @@
+from ib_rest_api_client import AuthenticatedClient, Client
 import httpx
 from typing import Dict, Any
 from src.db.models import Symbol
@@ -5,6 +6,8 @@ from src.db.models import Symbol
 client = httpx.AsyncClient(
     base_url="https://localhost:5000/v1/api/", timeout=10.0, verify=False
 )
+
+auth_client = Client(base_url="https://localhost:5000/v1/api/", verify_ssl=False)
 
 
 async def fetch_contract_info(conid: int) -> Dict[str, Any]:

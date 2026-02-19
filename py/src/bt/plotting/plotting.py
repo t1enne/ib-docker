@@ -1,333 +1,429 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-from typing import Dict, Optional
-from src.bt.types import ActionType, PortfolioResult
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, Optional, cast
+from src.bt.types import ActionType, PortfolioResult, StrategyConfig, BacktestResults
+
+
+@dataclass(frozen=True)
+class PlotMeta:
+    num_rows: int
+    titles: list[str]
+    specs: list[list[dict | None]]
+
+
+@dataclass(frozen=True)
+class TradeMarkers:
+    long_entries: list[tuple[pd.Timestamp, float]]
+    long_entries_text: list[str]
+    long_exits: list[tuple[pd.Timestamp, float]]
+    long_exits_text: list[str]
+    short_entries: list[tuple[pd.Timestamp, float]]
+    short_entries_text: list[str]
+    short_exits: list[tuple[pd.Timestamp, float]]
+    short_exits_text: list[str]
 
 
 def plot_backtest_results(
-    results: PortfolioResult,
-    symbols: list[str],
-    strategy: str,
-    data: Dict[str, pd.DataFrame],
-    z_scores: Optional[pd.DataFrame] = None,
-    regime_df: Optional[pd.DataFrame] = None,
-    entry_z: float = 2.0,
-    exit_z: float = 0.5,
+    config: StrategyConfig,
+    bt_results: BacktestResults,
 ):
-    """Plot backtest performance with price charts, volume, z-score, HMM regime, and entries/exits using Plotly"""
-    has_z_scores = z_scores is not None and not z_scores.empty
-    has_regime = regime_df is not None and not regime_df.empty
+    z_scores = bt_results.z_scores
+    regime_df = bt_results.regimes
+    data = bt_results.data
+    results = bt_results.pf
+    symbols = config.symbols
+    entry_z = config.entry_z
+    exit_z = config.exit_z
+    strategy = config.strategy_type
 
-    # Calculate row count: symbols (each with price+volume) + z-score + regime + equity + drawdown
+    has_z_scores = _has_data(z_scores)
+    has_regime = _has_data(regime_df)
+
+    meta = _build_plot_meta(
+        symbols, has_z_scores, has_regime, entry_z, exit_z, strategy
+    )
+    fig = make_subplots(
+        rows=meta.num_rows,
+        cols=1,
+        shared_xaxes=True,
+        subplot_titles=meta.titles,
+        vertical_spacing=0.04,
+        horizontal_spacing=0.05,
+        specs=meta.specs,
+    )
+
+    for i, symbol in enumerate(symbols):
+        row = i + 1
+        _add_price_and_volume(fig, row, symbol, data[symbol])
+        markers = _collect_trade_markers(results, symbol)
+        _add_trade_markers(fig, row, markers)
+        fig.update_yaxes(title_text="Price", row=row, col=1, secondary_y=False)
+        # fig.update_xaxes(title_text="Date", row=row, col=1)
+
+    row_offset = len(symbols)
+    if has_z_scores:
+        assert z_scores is not None
+        _add_zscore_subplot(fig, row_offset + 1, z_scores, entry_z, exit_z)
+        row_offset += 1
+
+    if has_regime:
+        assert regime_df is not None
+        _add_regime_subplot(fig, row_offset + 1, regime_df)
+        row_offset += 1
+
+    equity_series = _equity_series(results)
+
+    _add_equity_subplot(fig, row_offset + 1, equity_series)
+    _add_drawdown_subplot(fig, row_offset + 2, equity_series)
+
+    fig.update_layout(
+        height=300 * meta.num_rows,
+        title_text=f"Backtest Results - {strategy.upper()} Strategy",
+        showlegend=False,
+    )
+    fig.update_xaxes(type="date")
+
+    output_file = f"backtest_results_{strategy.lower().replace(' ', '_')}.html"
+    fig.write_html(output_file)
+    print(f"Plot saved to {output_file}")
+
+
+def _has_data(df: Optional[pd.DataFrame]) -> bool:
+    return df is not None and not df.empty
+
+
+def _build_plot_meta(
+    symbols: list[str],
+    has_z_scores: bool,
+    has_regime: bool,
+    entry_z: float,
+    exit_z: float,
+    strategy: str,
+) -> PlotMeta:
     num_rows = (
         len(symbols) + 1 + (1 if has_z_scores else 0) + (1 if has_regime else 0) + 1
     )
-
-    subplot_titles = []
-    for symbol in symbols:
-        subplot_titles.append(f"{symbol} Price + Volume")
+    titles = [f"{symbol} Price + Volume" for symbol in symbols]
     if has_z_scores:
-        subplot_titles.append(f"Z-Score (Entry: ±{entry_z}, Exit: ±{exit_z})")
+        titles.append(f"Z-Score (Entry: ±{entry_z}, Exit: ±{exit_z})")
     if has_regime:
-        subplot_titles.append("HMM Regime Probabilities")
-    subplot_titles.extend(
-        [
-            f"Equity Curve - {strategy.upper()} Strategy",
-            "Drawdown",
-        ]
+        titles.append("HMM Regime Probabilities")
+    titles.extend([f"Equity Curve - {strategy.upper()} Strategy", "Drawdown"])
+
+    specs: list[list[dict | None]] = []
+    specs.extend([[{"secondary_y": True}] for _ in symbols])
+    if has_z_scores:
+        specs.append([{}])
+    if has_regime:
+        specs.append([{}])
+    specs.append([{}])
+    specs.append([{}])
+
+    return PlotMeta(num_rows=num_rows, titles=titles, specs=specs)
+
+
+def _add_price_and_volume(
+    fig: go.Figure,
+    row: int,
+    symbol: str,
+    df: pd.DataFrame,
+) -> None:
+    price_data = df["Close"]
+    volume_data = df["Volume"]
+
+    fig.add_trace(
+        go.Scatter(
+            x=price_data.index,
+            y=price_data.values,
+            mode="lines",
+            name=f"{symbol} Price",
+            line=dict(color="orange"),
+            showlegend=False,
+        ),
+        row=row,
+        col=1,
     )
 
-    # Create specs for secondary y-axis on price charts
-    specs = []
-    for _ in symbols:
-        specs.append([{"secondary_y": True}])  # Price chart with volume
-    if has_z_scores:
-        specs.append([None])
-    if has_regime:
-        specs.append([None])
-    specs.append([None])  # Equity
-    specs.append([None])  # Drawdown
-
-    fig = make_subplots(
-        rows=num_rows,
-        cols=1,
-        shared_xaxes=True,
-        subplot_titles=subplot_titles,
-        vertical_spacing=0.04,
-        horizontal_spacing=0.05,
-        specs=specs,
+    fig.add_trace(
+        go.Bar(
+            x=volume_data.index,
+            y=volume_data.values,
+            name=f"{symbol} Volume",
+            marker_color="rgba(100, 100, 200, 0.3)",
+            showlegend=False,
+        ),
+        row=row,
+        col=1,
+        secondary_y=True,
     )
 
-    # Price charts for each symbol with volume
-    for i, symbol in enumerate(symbols):
-        row = i + 1
-        price_data = data[symbol]["Close"]
-        volume_data = data[symbol]["Volume"]
-
-        # Price line
-        fig.add_trace(
-            go.Scatter(
-                x=price_data.index,
-                y=price_data.values,
-                mode="lines",
-                name=f"{symbol} Price",
-                line=dict(color="orange"),
-                showlegend=False,
-            ),
-            row=row,
-            col=1,
-        )
-
-        # Volume bars (secondary y-axis)
-        fig.add_trace(
-            go.Bar(
-                x=volume_data.index,
-                y=volume_data.values,
-                name=f"{symbol} Volume",
-                marker_color="rgba(100, 100, 200, 0.3)",
-                showlegend=False,
-            ),
+    max_vol = volume_data.max()
+    if max_vol > 0:
+        fig.update_yaxes(
+            range=[0, max_vol * 4.5],
+            showticklabels=False,
+            showgrid=False,
             row=row,
             col=1,
             secondary_y=True,
         )
 
-        # Scale volume axis so bars sit in bottom ~25%
-        max_vol = volume_data.max()
-        if max_vol > 0:
-            fig.update_yaxes(
-                range=[0, max_vol * 4.5],
-                showticklabels=False,
-                showgrid=False,
-                row=row,
-                col=1,
-                secondary_y=True,
-            )
 
-        # Trade entry/exit markers
-        long_entries = []
-        long_entries_text = []
-        long_exits = []
-        long_exits_text = []
-        short_entries = []
-        short_entries_text = []
-        short_exits = []
-        short_exits_text = []
+def _collect_trade_markers(results: PortfolioResult, symbol: str) -> TradeMarkers:
+    long_entries: list[tuple[pd.Timestamp, float]] = []
+    long_entries_text: list[str] = []
+    long_exits: list[tuple[pd.Timestamp, float]] = []
+    long_exits_text: list[str] = []
+    short_entries: list[tuple[pd.Timestamp, float]] = []
+    short_entries_text: list[str] = []
+    short_exits: list[tuple[pd.Timestamp, float]] = []
+    short_exits_text: list[str] = []
 
-        for trade in results.trades:
-            if trade.symbol == symbol:
-                if trade.position == ActionType.long:
-                    long_entries.append((trade.entry_time, trade.entry_price))
-                    long_entries_text.append(f"Z: {trade.z_score:.2f}")
-                    if trade.exit_time:
-                        long_exits.append((trade.exit_time, trade.exit_price))
-                        long_exits_text.append(
-                            f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
-                        )
-                else:
-                    short_entries.append((trade.entry_time, trade.entry_price))
-                    short_entries_text.append(f"Z: {trade.z_score:.2f}")
-                    if trade.exit_time:
-                        short_exits.append((trade.exit_time, trade.exit_price))
-                        short_exits_text.append(
-                            f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
-                        )
+    for trade in results.trades:
+        if trade.symbol != symbol:
+            continue
 
-        if long_entries:
-            times, prices = zip(*long_entries)
-            t = pd.DatetimeIndex(times)
-            fig.add_trace(
-                go.Scatter(
-                    x=list(t),
-                    y=list(prices),
-                    mode="markers",
-                    name="Long Entry",
-                    marker=dict(symbol="triangle-up", color="green", size=8),
-                    text=long_entries_text,
-                    textposition="top center",
-                    showlegend=False,
-                ),
-                row=row,
-                col=1,
-            )
-        if long_exits:
-            times, prices = zip(*long_exits)
-            fig.add_trace(
-                go.Scatter(
-                    x=list(times),
-                    y=list(prices),
-                    mode="markers",
-                    name="Long Exit",
-                    marker=dict(symbol="triangle-down", color="red", size=8),
-                    text=long_exits_text,
-                    textposition="bottom center",
-                    showlegend=False,
-                ),
-                row=row,
-                col=1,
-            )
-        if short_entries:
-            times, prices = zip(*short_entries)
-            t = pd.DatetimeIndex(times)
-            fig.add_trace(
-                go.Scatter(
-                    x=list(t),
-                    y=list(prices),
-                    mode="markers",
-                    name="Short Entry",
-                    marker=dict(symbol="triangle-down", color="yellow", size=8),
-                    text=short_entries_text,
-                    textposition="top center",
-                    showlegend=False,
-                ),
-                row=row,
-                col=1,
-            )
-        if short_exits:
-            times, prices = zip(*short_exits)
-            t = pd.DatetimeIndex(times)
-            fig.add_trace(
-                go.Scatter(
-                    x=list(t),
-                    y=list(prices),
-                    mode="markers",
-                    name="Short Exit",
-                    marker=dict(symbol="triangle-up", color="blue", size=8),
-                    text=short_exits_text,
-                    textposition="bottom center",
-                    showlegend=False,
-                ),
-                row=row,
-                col=1,
-            )
-
-        fig.update_yaxes(title_text="Price", row=row, col=1, secondary_y=False)
-        fig.update_xaxes(title_text="Date", row=row, col=1)
-
-    # Z-Score subplot
-    row_offset = len(symbols)
-    if has_z_scores:
-        assert z_scores
-        row_z = row_offset + 1
-        fig.add_trace(
-            go.Scatter(
-                x=z_scores.index,
-                y=z_scores["z"].values,
-                mode="lines",
-                name="Z-Score",
-                line=dict(color="blue"),
-                showlegend=False,
-            ),
-            row=row_z,
-            col=1,
-        )
-        # Entry threshold lines (solid)
-        fig.add_hline(
-            y=entry_z,
-            line_dash="solid",
-            line_color="green",
-            row=row_z,
-            col=1,
-            annotation_text=f"+{entry_z} entry",
-        )
-        fig.add_hline(
-            y=-entry_z,
-            line_dash="solid",
-            line_color="red",
-            row=row_z,
-            col=1,
-            annotation_text=f"-{entry_z} entry",
-        )
-        # Exit threshold lines (dashed)
-        fig.add_hline(
-            y=exit_z,
-            line_dash="dash",
-            line_color="lightgreen",
-            row=row_z,
-            col=1,
-            annotation_text=f"+{exit_z} exit",
-        )
-        fig.add_hline(
-            y=-exit_z,
-            line_dash="dash",
-            line_color="lightcoral",
-            row=row_z,
-            col=1,
-            annotation_text=f"-{exit_z} exit",
-        )
-        # Zero line
-        fig.add_hline(y=0, line_dash="dot", line_color="gray", row=row_z, col=1)
-        fig.update_yaxes(title_text="Z-Score", row=row_z, col=1)
-        row_offset = row_z
-
-    # HMM Regime Probabilities subplot
-    if has_regime:
-        assert regime_df
-        row_hmm = row_offset + 1
-
-        # Regime colors and labels
-        colors = {
-            0: "rgba(76, 175, 80, 0.5)",
-            1: "rgba(255, 193, 7, 0.5)",
-            2: "rgba(244, 67, 54, 0.5)",
-        }
-        labels = {0: "Low Vol", 1: "Med Vol", 2: "High Vol"}
-
-        # Stacked area chart - add traces bottom to top
-        for i in [2, 1, 0]:
-            col = f"prob_{i}"
-            if col in regime_df.columns:
-                fig.add_trace(
-                    go.Scatter(
-                        x=regime_df.index,
-                        y=regime_df[col].values,
-                        name=labels[i],
-                        fill="tonexty" if i < 2 else "tozeroy",
-                        line=dict(width=0.5, color=colors[i].replace("0.5", "1")),
-                        fillcolor=colors[i],
-                        showlegend=False,
-                    ),
-                    row=row_hmm,
-                    col=1,
+        if trade.position == ActionType.long:
+            long_entries.append((trade.entry_time, trade.entry_price))
+            long_entries_text.append(f"Z: {trade.z_score:.2f}")
+            if trade.exit_time and trade.exit_price is not None:
+                long_exits.append((trade.exit_time, trade.exit_price))
+                long_exits_text.append(
+                    f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
+                )
+        else:
+            short_entries.append((trade.entry_time, trade.entry_price))
+            short_entries_text.append(f"Z: {trade.z_score:.2f}")
+            if trade.exit_time and trade.exit_price is not None:
+                short_exits.append((trade.exit_time, trade.exit_price))
+                short_exits_text.append(
+                    f"Reason: {trade.close_reason or 'unknown'}, PnL: {trade.pnl:.2f}"
                 )
 
-        # Annotate regime transitions
-        regimes = regime_df["regime"].dropna()
-        prev_regime = None
-        for ts, regime in regimes.items():
-            if regime != prev_regime and prev_regime is not None:
-                prob_col = f"prob_{int(regime)}"
-                prob = (
-                    regime_df.loc[ts, prob_col]
-                    if prob_col in regime_df.columns
-                    else None
-                )
-                prob_text = f" ({prob:.0%})" if prob is not None else ""
-                fig.add_annotation(
-                    x=ts,
-                    y=1.0,
-                    text=f"{labels.get(int(regime), '?')}{prob_text}",
-                    showarrow=True,
-                    arrowhead=2,
-                    ax=0,
-                    ay=-25,
-                    font=dict(size=9),
-                    row=row_hmm,
-                    col=1,
-                )
-            prev_regime = regime
+    return TradeMarkers(
+        long_entries=long_entries,
+        long_entries_text=long_entries_text,
+        long_exits=long_exits,
+        long_exits_text=long_exits_text,
+        short_entries=short_entries,
+        short_entries_text=short_entries_text,
+        short_exits=short_exits,
+        short_exits_text=short_exits_text,
+    )
 
-        fig.update_yaxes(title_text="Regime Prob", range=[0, 1], row=row_hmm, col=1)
-        row_offset = row_hmm
 
-    # Equity curve
-    row_eq = row_offset + 1
+def _add_trade_markers(fig: go.Figure, row: int, markers: TradeMarkers) -> None:
+    _add_marker_trace(
+        fig,
+        row,
+        markers.long_entries,
+        markers.long_entries_text,
+        "Long Entry",
+        symbol="triangle-up",
+        color="green",
+        text_position="top center",
+    )
+    _add_marker_trace(
+        fig,
+        row,
+        markers.long_exits,
+        markers.long_exits_text,
+        "Long Exit",
+        symbol="triangle-down",
+        color="red",
+        text_position="bottom center",
+    )
+    _add_marker_trace(
+        fig,
+        row,
+        markers.short_entries,
+        markers.short_entries_text,
+        "Short Entry",
+        symbol="triangle-down",
+        color="yellow",
+        text_position="top center",
+    )
+    _add_marker_trace(
+        fig,
+        row,
+        markers.short_exits,
+        markers.short_exits_text,
+        "Short Exit",
+        symbol="triangle-up",
+        color="blue",
+        text_position="bottom center",
+    )
+
+
+def _add_marker_trace(
+    fig: go.Figure,
+    row: int,
+    points: Iterable[tuple[pd.Timestamp, float]],
+    text: list[str],
+    name: str,
+    symbol: str,
+    color: str,
+    text_position: str,
+) -> None:
+    points_list = list(points)
+    if not points_list:
+        return
+
+    times, prices = zip(*points_list)
+    fig.add_trace(
+        go.Scatter(
+            x=list(pd.DatetimeIndex(times)),
+            y=list(prices),
+            mode="markers",
+            name=name,
+            marker=dict(symbol=symbol, color=color, size=8),
+            text=text,
+            textposition=text_position,
+            showlegend=False,
+        ),
+        row=row,
+        col=1,
+    )
+
+
+def _add_zscore_subplot(
+    fig: go.Figure,
+    row_z: int,
+    z_scores: pd.DataFrame,
+    entry_z: float,
+    exit_z: float,
+):
+    fig.add_trace(
+        go.Scatter(
+            x=z_scores.index,
+            y=z_scores["z"].values,
+            mode="lines",
+            name="Z-Score",
+            line=dict(color="blue"),
+            showlegend=False,
+        ),
+        row=row_z,
+        col=1,
+    )
+    fig.add_hline(
+        y=entry_z,
+        line_dash="solid",
+        line_color="green",
+        row=cast(Any, row_z),
+        col=cast(Any, 1),
+        annotation_text=f"+{entry_z} entry",
+    )
+    fig.add_hline(
+        y=-entry_z,
+        line_dash="solid",
+        line_color="red",
+        row=cast(Any, row_z),
+        col=cast(Any, 1),
+        annotation_text=f"-{entry_z} entry",
+    )
+    fig.add_hline(
+        y=exit_z,
+        line_dash="dash",
+        line_color="lightgreen",
+        row=cast(Any, row_z),
+        col=cast(Any, 1),
+        annotation_text=f"+{exit_z} exit",
+    )
+    fig.add_hline(
+        y=-exit_z,
+        line_dash="dash",
+        line_color="lightcoral",
+        row=cast(Any, row_z),
+        col=cast(Any, 1),
+        annotation_text=f"-{exit_z} exit",
+    )
+    fig.add_hline(
+        y=0,
+        line_dash="dot",
+        line_color="gray",
+        row=cast(Any, row_z),
+        col=cast(Any, 1),
+    )
+    fig.update_yaxes(title_text="Z-Score", row=row_z, col=1)
+
+
+def _add_regime_subplot(
+    fig: go.Figure,
+    row_offset: int,
+    regime_df: pd.DataFrame,
+) -> int:
+    row_hmm = row_offset + 1
+
+    colors = {
+        0: "rgba(76, 175, 80, 0.5)",
+        1: "rgba(255, 193, 7, 0.5)",
+        2: "rgba(244, 67, 54, 0.5)",
+    }
+    labels = {0: "Low Vol", 1: "Med Vol", 2: "High Vol"}
+
+    for i in [2, 1, 0]:
+        col = f"prob_{i}"
+        if col in regime_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=regime_df.index,
+                    y=regime_df[col].values,
+                    name=labels[i],
+                    fill="tonexty" if i < 2 else "tozeroy",
+                    line=dict(width=0.5, color=colors[i].replace("0.5", "1")),
+                    fillcolor=colors[i],
+                    showlegend=False,
+                ),
+                row=row_hmm,
+                col=1,
+            )
+
+    _annotate_regime_transitions(fig, row_hmm, regime_df, labels)
+
+    fig.update_yaxes(title_text="Regime Prob", range=[0, 1], row=row_hmm, col=1)
+    return row_hmm
+
+
+def _annotate_regime_transitions(
+    fig: go.Figure,
+    row: int,
+    regime_df: pd.DataFrame,
+    labels: Dict[int, str],
+) -> None:
+    regimes = regime_df["regime"].dropna()
+    prev_regime = None
+    for ts, regime in regimes.items():
+        if regime != prev_regime and prev_regime is not None:
+            prob_col = f"prob_{int(regime)}"
+            prob = (
+                regime_df.loc[ts, prob_col] if prob_col in regime_df.columns else None
+            )
+            prob_text = f" ({prob:.0%})" if prob is not None else ""
+            fig.add_annotation(
+                x=ts,
+                y=1.0,
+                text=f"{labels.get(int(regime), '?')}{prob_text}",
+                showarrow=True,
+                arrowhead=2,
+                ax=0,
+                ay=-25,
+                font=dict(size=9),
+                row=row,
+                col=1,
+            )
+        prev_regime = regime
+
+
+def _equity_series(results: PortfolioResult) -> pd.Series:
     equity_data = results.equity_curve
     if isinstance(equity_data, dict):
-        equity_series = pd.Series(equity_data)
-    else:
-        equity_series = equity_data
+        return pd.Series(equity_data)
+    return equity_data
+
+
+def _add_equity_subplot(fig: go.Figure, row: int, equity_series: pd.Series) -> None:
     fig.add_trace(
         go.Scatter(
             x=equity_series.index,
@@ -337,13 +433,13 @@ def plot_backtest_results(
             line=dict(color="green"),
             showlegend=False,
         ),
-        row=row_eq,
+        row=row,
         col=1,
     )
-    fig.update_yaxes(title_text="Portfolio Value ($)", row=row_eq, col=1)
+    fig.update_yaxes(title_text="Portfolio Value ($)", row=row, col=1)
 
-    # Drawdown
-    row_dd = row_eq + 1
+
+def _add_drawdown_subplot(fig: go.Figure, row: int, equity_series: pd.Series) -> None:
     rolling_max = equity_series.expanding().max()
     drawdown = (equity_series - rolling_max) / rolling_max
     fig.add_trace(
@@ -356,20 +452,8 @@ def plot_backtest_results(
             fill="tozeroy",
             showlegend=False,
         ),
-        row=row_dd,
+        row=row,
         col=1,
     )
-    fig.update_yaxes(title_text="Drawdown", row=row_dd, col=1)
-    fig.update_xaxes(title_text="Date", row=row_dd, col=1)
-
-    # Update layout
-    fig.update_layout(
-        height=300 * num_rows,
-        title_text=f"Backtest Results - {strategy.upper()} Strategy",
-        showlegend=False,
-    )
-    fig.update_xaxes(type="date")
-
-    output_file = f"backtest_results_{strategy.lower().replace(' ', '_')}.html"
-    fig.write_html(output_file)
-    print(f"Plot saved to {output_file}")
+    fig.update_yaxes(title_text="Drawdown", row=row, col=1)
+    fig.update_xaxes(title_text="Date", row=row, col=1)

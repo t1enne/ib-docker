@@ -1,41 +1,37 @@
-"""StrategyModel - Composite model facade for trading strategies.
+"""StrategyModel - Composite model facade for trading strategies."""
 
-Provides unified access to sub-models and historical data from within strategies.
+from dataclasses import dataclass
+from typing import List, Optional
 
-Usage from strategy:
-    - self.model.z_score         # Current z-score
-    - self.model.market_data[-14:]  # Last 14 bars of OHLCV
-    - self.model.current_regime  # Current HMM regime (if configured)
-    - self.model.hmm            # HMM model (if configured)
-"""
-
-from typing import Optional, List
-import pandas as pd
 import numpy as np
-from src.bt.types import Tick
-from src.bt.models.z_model import ZModel
+import pandas as pd
+
 from src.bt.models.market_data import MarketDataView
 from src.bt.models.regime_model import RegimeModel
+from src.bt.models.z_model import ZModel
+from src.bt.types import Tick
 from src.hmm.hmm import MarketRegimeHMM
 
 
+@dataclass
+class ZState:
+    price_buffers: List[dict[str, float]]
+    current_z: float = 0.0
+
+
+@dataclass
+class HMMState:
+    enabled: bool
+    floating_window: int
+    retrain_interval: int
+    model: Optional[MarketRegimeHMM] = None
+    regime_model: Optional[RegimeModel] = None
+    bars_since_last_train: int = 0
+    current_regime: Optional[int] = None
+
+
 class StrategyModel:
-    """Composite model that strategies access as self.model.
-
-    Composes multiple sub-models (ZModel, RegimeModel) and provides
-    unified access to computed features and historical market data.
-
-    Usage:
-        class MyStrategy:
-            def __init__(self, symbols, params, model: StrategyModel):
-                self.model = model
-
-            def on_tick(self, tick, open_trade):
-                z = self.model.z_score
-                regime = self.model.current_regime
-                ema_9 = ema(self.model.market_data[-14:].close, 9)
-                # ...
-    """
+    """Composite model that strategies access as self.model."""
 
     def __init__(
         self,
@@ -44,169 +40,119 @@ class StrategyModel:
         hmm_floating_window: Optional[int] = None,
         hmm_retrain_interval: Optional[int] = None,
     ):
-        """Initialize the strategy model.
-
-        Args:
-            symbols: List of trading symbols
-            rolling_window_size: Window size for z-score calculation
-            hmm_floating_window: Lookback window for HMM training (None = HMM disabled)
-            hmm_retrain_interval: Retrain HMM every N bars (default 50 if hmm enabled)
-        """
         self.symbols = symbols
         self.rolling_window_size = rolling_window_size
 
-        # Sub-models
         self._z = ZModel(symbols, rolling_window_size)
         self._market_data = MarketDataView(symbols)
 
-        # Z-score state
-        self._current_z: float = 0.0
-        self._price_buffers: List[dict[str, float]] = []
+        self._z_state = ZState(price_buffers=[])
 
-        # HMM regime model config
-        self._hmm_enabled = hmm_floating_window is not None
-        self._hmm_floating_window = hmm_floating_window or 252
-        self._hmm_retrain_interval = hmm_retrain_interval or 50
-
-        # HMM state
-        self._hmm: Optional[MarketRegimeHMM] = None
-        self._regime: Optional[RegimeModel] = None
-        self._bars_since_last_hmm_train: int = 0
-        self._current_regime: Optional[int] = None
+        hmm_enabled = hmm_floating_window is not None
+        self._hmm_state = HMMState(
+            enabled=hmm_enabled,
+            floating_window=hmm_floating_window or 252,
+            retrain_interval=hmm_retrain_interval or 50,
+        )
 
     @property
     def z(self) -> ZModel:
-        """Access to the ZModel (z-score calculator)."""
         return self._z
 
     @property
     def hmm(self) -> Optional[RegimeModel]:
-        """Access to the HMM regime model (None until first fit)."""
-        return self._regime
+        return self._hmm_state.regime_model
 
     @property
     def z_score(self) -> float:
-        """Current z-score value (convenience property)."""
-        return self._current_z
+        return self._z_state.current_z
 
     @property
     def current_regime(self) -> Optional[int]:
-        """Current regime label (0=Low Vol, 1=Med Vol, 2=High Vol).
-
-        Returns None if:
-        - HMM not enabled (hmm_floating_window not set)
-        - Insufficient data to fit/predict regime
-        """
-        return self._current_regime
+        return self._hmm_state.current_regime
 
     @property
     def market_data(self) -> MarketDataView:
-        """Historical OHLCV data view."""
         return self._market_data
 
     def update(self, timestamp: pd.Timestamp, tick_group: dict[str, Tick]) -> None:
-        """Update the model with new market data.
-
-        Called by the engine each time all symbols have ticked for a timestamp.
-        Handles z-score update and HMM training/prediction.
-
-        Args:
-            timestamp: Current timestamp
-            tick_group: Dict mapping symbol -> Tick for this timestamp
-        """
-        # Update market data view
         self._market_data.append(timestamp, tick_group)
 
-        # Build price dict for z-score calculation
-        prices = {symbol: tick.close for symbol, tick in tick_group.items()}
-        self._price_buffers.append(prices)
+        prices = self._prices_from_tick_group(tick_group)
+        self._update_z_state(prices)
 
-        # Maintain rolling buffer for z-score
-        if len(self._price_buffers) > self.rolling_window_size:
-            self._price_buffers = self._price_buffers[-self.rolling_window_size :]
+        if self._hmm_state.enabled:
+            self._update_hmm_state()
 
-        # Update z-score if we have enough data
-        if len(self._price_buffers) >= 2:
-            self._current_z = self._z.calculate_z(self._price_buffers)
+    def _prices_from_tick_group(self, tick_group: dict[str, Tick]) -> dict[str, float]:
+        return {symbol: tick.close for symbol, tick in tick_group.items()}
 
-        # Handle HMM training and prediction
-        if self._hmm_enabled:
-            self._update_hmm()
+    def _update_z_state(self, prices: dict[str, float]) -> None:
+        buffers = self._z_state.price_buffers
+        buffers.append(prices)
 
-    def _update_hmm(self) -> None:
-        """Update HMM: train/retrain if needed, then predict."""
-        self._bars_since_last_hmm_train += 1
+        if len(buffers) > self.rolling_window_size:
+            del buffers[: len(buffers) - self.rolling_window_size]
+
+        if len(buffers) >= 2:
+            self._z_state.current_z = self._z.calculate_z(buffers)
+
+    def _update_hmm_state(self) -> None:
+        state = self._hmm_state
+        state.bars_since_last_train += 1
         n_bars = len(self._market_data)
 
-        needs_initial_fit = self._hmm is None and n_bars >= self._hmm_floating_window
+        if self._needs_hmm_fit(state, n_bars):
+            self._fit_hmm(state)
+
+        if state.regime_model is not None:
+            self._predict_regime(state)
+
+    def _needs_hmm_fit(self, state: HMMState, n_bars: int) -> bool:
+        needs_initial_fit = state.model is None and n_bars >= state.floating_window
         needs_retrain = (
-            self._hmm is not None
-            and self._bars_since_last_hmm_train >= self._hmm_retrain_interval
-            and n_bars >= self._hmm_floating_window
+            state.model is not None
+            and state.bars_since_last_train >= state.retrain_interval
+            and n_bars >= state.floating_window
         )
+        return needs_initial_fit or needs_retrain
 
-        if needs_initial_fit or needs_retrain:
-            self._fit_hmm()
-
-        if self._regime is not None:
-            self._predict_regime()
-
-    def _fit_hmm(self) -> None:
-        """Train or retrain HMM on trailing hmm_floating_window bars."""
-        symbol = self.symbols[0]
-        prices = self._market_data[-self._hmm_floating_window :].for_symbol(symbol)[
-            "close"
-        ]
-
+    def _fit_hmm(self, state: HMMState) -> None:
+        prices = self._get_hmm_prices(state.floating_window)
         hmm_model = MarketRegimeHMM(
-            min_train_size=min(self._hmm_floating_window, len(prices)),
+            min_train_size=min(state.floating_window, len(prices)),
         )
-        hmm_model.fit(pd.Series(prices))
+        hmm_model.fit(prices)
 
-        self._hmm = hmm_model
-        self._regime = RegimeModel(hmm_model)
-        self._bars_since_last_hmm_train = 0
+        state.model = hmm_model
+        state.regime_model = RegimeModel(hmm_model)
+        state.bars_since_last_train = 0
 
-    def _predict_regime(self) -> None:
-        """Update current regime prediction using fitted HMM."""
-        if not self._regime:
-            self._current_regime = None
-            return None
-
+    def _predict_regime(self, state: HMMState) -> None:
+        assert state.regime_model
         try:
-            symbol = self.symbols[0]
-            prices = self._market_data[-self._hmm_floating_window :].for_symbol(symbol)[
-                "close"
-            ]
-            self._current_regime = self._regime.get_current_regime(pd.Series(prices))
+            prices = self._get_hmm_prices(state.floating_window)
+            state.current_regime = state.regime_model.get_current_regime(prices)
         except IndexError, ValueError:
-            self._current_regime = None
+            state.current_regime = None
+
+    def _get_hmm_prices(self, window: int) -> pd.Series:
+        assert self.symbols, "At least one symbol is required for HMM"
+        symbol = self.symbols[0]
+        closes = self._market_data[-window:].for_symbol(symbol)["close"]
+        return pd.Series(closes)
 
     def get_price_buffers(self) -> List[dict[str, float]]:
-        """Get current price buffers (for internal use/debugging).
-
-        Returns:
-            List of price dicts in the rolling window
-        """
-        return list(self._price_buffers)
+        return list(self._z_state.price_buffers)
 
     def get_regime_probability(self) -> Optional[np.ndarray]:
-        """Get regime probabilities for the current state.
-
-        Returns:
-            Array of probabilities for each regime, or None if:
-            - HMM not enabled or not yet fitted
-            - Insufficient data
-        """
-        if self._regime is None:
+        state = self._hmm_state
+        if state.regime_model is None:
             return None
 
         try:
-            symbol = self.symbols[0]
-            prices = self._market_data[-self._hmm_floating_window :].for_symbol(symbol)[
-                "close"
-            ]
-            return self._regime.get_regime_probability(pd.Series(prices))
+            prices = self._get_hmm_prices(state.floating_window)
+            return state.regime_model.get_regime_probability(prices)
         except IndexError, ValueError:
             return None
 
@@ -215,33 +161,19 @@ class StrategyModel:
         confidence_threshold: float = 0.7,
         avoid_regimes: Optional[List[int]] = None,
     ) -> bool:
-        """Check if trading should be allowed based on current regime.
-
-        By default avoids trading in high volatility regime (regime 2).
-
-        Args:
-            confidence_threshold: Minimum probability for regime confidence
-            avoid_regimes: List of regime IDs to avoid (default: [2])
-
-        Returns:
-            True if trading is allowed
-        """
-        if self._regime is None:
-            return True  # No HMM, allow all trading
+        state = self._hmm_state
+        if state.regime_model is None:
+            return True
 
         if avoid_regimes is None:
             avoid_regimes = [2]
 
         try:
-            symbol = self.symbols[0]
-            prices = self._market_data[-self._hmm_floating_window :].for_symbol(symbol)[
-                "close"
-            ]
-
-            return self._regime.should_trade(
-                pd.Series(prices),
+            prices = self._get_hmm_prices(state.floating_window)
+            return state.regime_model.should_trade(
+                prices,
                 confidence_threshold=confidence_threshold,
                 avoid_regimes=avoid_regimes,
             )
         except IndexError, ValueError:
-            return True  # On error, be permissive
+            return True

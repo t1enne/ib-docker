@@ -177,7 +177,10 @@ def patch_test_db(test_db):
 
     # Patch get_ohlcv_model functions
     with patch("src.db.models.get_ohlcv_model", side_effect=patched_get_ohlcv_model):
-        with patch("src.syncm.ibkr_layer.candles.get_ohlcv_model", side_effect=patched_get_ohlcv_model):
+        with patch(
+            "src.syncm.ibkr_layer.candles.get_ohlcv_model",
+            side_effect=patched_get_ohlcv_model,
+        ):
             yield test_db
 
     # Restore original db

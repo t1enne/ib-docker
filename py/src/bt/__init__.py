@@ -1,59 +1,30 @@
-from src.bt.types import PortfolioResult
+from src.bt.plotting.plotting import plot_backtest_results
 from datetime import date
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
-import click
-import yaml
 import logging
 
-from src.bt.engine.walk_forward_engine import WalkForwardEngine
-from src.bt.algos.pairs_trading import PairsTradingStrategy
+import click
+import yaml
+
+from src.bt.engine.backtest_engine import BacktestEngine
 from src.bt.metrics import print_results_analysis
+from src.bt.types import StrategyConfig, StrategyType
+from src.bt.types import PortfolioResult
 
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Strategy:
-    name: str
-    strategy_type: str
-    symbols: list[str]
-    entry_z: float
-    exit_z: float
-    stop_loss: float
-    take_profit: float
-    initial_capital: float
-    position_size: float
-    commission: float
-    training_start: str
-    training_end: str
-    trading_start: str
-    trading_end: str
-    rolling_window_size: int
-    plot: bool
-    bar: str
-    hmm_floating_window: Optional[int] = None
-    hmm_retrain_interval: Optional[int] = None
-
-
-def load_strategy(path: str) -> Strategy:
+def load_strategy(path: str) -> StrategyConfig:
     with open(path, "r") as f:
         data = yaml.safe_load(f)
         for key in ["training_start", "training_end", "trading_start", "trading_end"]:
             if key in data and isinstance(data[key], date):
                 data[key] = data[key].isoformat()
 
-    return Strategy(**data)
+    return StrategyConfig(**data)
 
 
-class StrategyType(Enum):
-    PND = "pnd"
-    SPREAD = "spread"
-
-
-async def backtest(strategy: Strategy):
+async def backtest(strategy_conf: StrategyConfig):
     """
     Backtest a trading strategy using walk-forward analysis.
 
@@ -64,11 +35,12 @@ async def backtest(strategy: Strategy):
     """
     # Validate inputs
     if (
-        strategy.strategy_type in [StrategyType.PND.value, StrategyType.SPREAD.value]
-        and len(strategy.symbols) != 2
+        strategy_conf.strategy_type
+        in [StrategyType.PND.value, StrategyType.SPREAD.value]
+        and len(strategy_conf.symbols) != 2
     ):
         raise click.BadParameter(
-            f"{strategy.strategy_type.upper()} strategy requires exactly 2 symbols"
+            f"{strategy_conf.strategy_type.upper()} strategy requires exactly 2 symbols"
         )
 
     # Use walk-forward analysis as the default backtesting method
@@ -77,50 +49,7 @@ async def backtest(strategy: Strategy):
     # - training_end: initial training period end
     # - trading_end: end of the entire walk-forward period
 
-    wf_engine = WalkForwardEngine(
-        strategy_class=PairsTradingStrategy,
-        symbols=strategy.symbols,
-        initial_train_start=strategy.training_start,
-        initial_train_end=strategy.training_end,
-        trading_start=strategy.trading_start,
-        trading_end=strategy.trading_end,
-        # Strategy parameters
-        entry_z=strategy.entry_z,
-        exit_z=strategy.exit_z,
-        stop_loss=strategy.stop_loss,
-        take_profit=strategy.take_profit,
-        rolling_window_size=strategy.rolling_window_size,
-        # Portfolio parameters
-        initial_capital=strategy.initial_capital,
-        position_size=strategy.position_size,
-        commission=strategy.commission,
-        plot=strategy.plot,
-        hmm_floating_window=strategy.hmm_floating_window,
-        hmm_retrain_interval=strategy.hmm_retrain_interval,
-    )
-    # Run walk-forward analysis
-    results = await wf_engine.run()
-    print_results_analysis(results)
-    # display_walk_forward_results(results, strategy.symbols, "pairsstrat")
-
-
-def display_walk_forward_results(
-    results: PortfolioResult, symbols: list[str], strategy: str
-):
-    """Display walk-forward analysis results"""
-    separator = "=" * 60
-    output = f"""
-{separator}
-WALK-FORWARD ANALYSIS - {strategy.upper()} Strategy
-Symbols: {", ".join([s.upper() for s in symbols])}
-{separator}
-Total Return: {results.total_return:.2%}
-Sharpe Ratio: {results.sharpe_ratio:.2f}
-Max Drawdown: {results.max_drawdown:.2%}
-Total Trades: {results.total_return}
-{separator}
-"""
-    click.echo(output.strip())
-
-
-__all__ = ["backtest", "load_strategy", "Strategy"]
+    engine = BacktestEngine(strategy_conf)
+    results = await engine.run()
+    print_results_analysis(results.pf)
+    plot_backtest_results(strategy_conf, results)

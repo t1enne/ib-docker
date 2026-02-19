@@ -18,3 +18,4 @@ gateway
 db.sqlite
 db.sqlite-*
 hono/static/main.css
+ib-rest-api-client

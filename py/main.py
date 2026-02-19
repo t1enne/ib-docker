@@ -10,7 +10,7 @@ import src.pnd as pnd_mod
 import src.syncm as sync_mod
 import src.hmm as hmm_mod
 
-from src.bt import StrategyType, backtest, load_strategy, Strategy
+from src.bt import StrategyType, backtest, load_strategy, StrategyConfig
 
 
 @click.group()
@@ -147,7 +147,7 @@ def strategy(
         name = f"{strategy_type}_{'_'.join(symbols)}"
     if not output:
         output = f"{name}.yaml"
-    strat = Strategy(
+    strat = StrategyConfig(
         name=name,
         strategy_type=strategy_type,
         symbols=list(symbols),
@@ -175,7 +175,8 @@ def strategy(
 @main.command(help="run walk-forward backtest from strategy file")
 @click.argument("strategy_file")
 def bt(strategy_file: str):
-    asyncio.run(backtest(load_strategy(strategy_file)))
+    config = load_strategy(strategy_file)
+    asyncio.run(backtest(config))
 
 
 @main.command(help="sync historical candle data for universe")

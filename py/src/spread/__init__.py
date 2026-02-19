@@ -1,22 +1,25 @@
 from typing import Optional
 import pandas as pd
+from pandas import Timestamp
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from src.utils import read_candles
+from src.utils import read_candles, parse_timestamp
 from src.bt.zscore import calculate_rolling_z
 
 
 def spread(
     symbols: tuple[str, str],
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    start_date: Optional[Timestamp] = None,
+    end_date: Optional[Timestamp] = None,
     rolling: Optional[int] = None,
 ):
     sym1, sym2 = symbols
     ma_windows = [9, 14, 50]
-    df1 = read_candles(sym1.upper(), start_date, end_date)
-    df2 = read_candles(sym2.upper(), start_date, end_date)
+    _start = parse_timestamp(start_date) if start_date else None
+    _end = parse_timestamp(end_date) if end_date else None
+    df1 = read_candles(sym1.upper(), _start, _end)
+    df2 = read_candles(sym2.upper(), _start, _end)
 
     prices1 = df1["Close"].tolist()
     prices2 = df2["Close"].tolist()

@@ -4,8 +4,8 @@ import pandas as pd
 from pandas import Timestamp
 
 from src.bt.types import StrategyConfig, EngineWindow
+from src.bt.state import Tick
 from src import read_candles
-from src.bt.types import Tick
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 

@@ -1,10 +1,11 @@
+from src.bt.state import Tick, TradeSignal, Trade
 from src.bt.models import StrategyModel
 from dataclasses import dataclass
 from typing import List, Optional, Any
 import pandas as pd
 
 from src.bt.algos.base_pairs_strategy import BasePairsStrategy
-from src.bt.types import Tick, TradeSignal, StrategyProtocol, Trade
+from src.bt.types import StrategyProtocol
 
 
 @dataclass
@@ -32,11 +33,11 @@ class PairsTradingStrategy(StrategyProtocol):
         self,
         symbols: List[str],
         strategy_params: StrategyParams,
-        model: StrategyModel,
+        # model: StrategyModel,
     ):
-        self.bps = BasePairsStrategy(symbols)
+        self.bps = BasePairsStrategy()
         self.params = strategy_params
-        self.model = model
+        # self.model = model
         # Note: self.model is set by the engine after construction
 
     def on_tick(self, tick: Tick, open_trade: Optional[Trade]) -> List[TradeSignal]:

@@ -274,6 +274,47 @@ def analyze_portfolio(result: PortfolioResult) -> PerformanceMetrics:
     )
 
 
+def calculate_portfolio_result(
+    equity_curve: pd.Series, trades, initial_capital: float
+) -> PortfolioResult:
+    """Calculate portfolio result from equity curve and trades.
+
+    Args:
+        equity_curve: Equity curve as pandas Series
+        trades: Iterable of Trade objects
+        initial_capital: Starting capital
+
+    Returns:
+        PortfolioResult with all calculated metrics
+    """
+    returns = equity_curve.pct_change().dropna()
+    ppy = periods_per_year(equity_curve)
+
+    total_return = (equity_curve.iloc[-1] - initial_capital) / initial_capital
+
+    sharpe = 0.0
+    if len(returns) > 0 and returns.std() != 0 and ppy > 0:
+        sharpe = returns.mean() / returns.std() * np.sqrt(ppy)
+
+    return PortfolioResult(
+        total_return=total_return,
+        sharpe_ratio=sharpe,
+        trades=tuple(trades),
+        equity_curve=equity_curve,
+        annual_return=annual_return(equity_curve),
+        annual_volatility=annual_volatility(equity_curve),
+        max_drawdown=max_drawdown(equity_curve),
+        calmar_ratio=calmar_ratio(equity_curve),
+        sortino_ratio=sortino_ratio(equity_curve),
+        omega_ratio=omega_ratio(equity_curve),
+        skewness=skewness(equity_curve),
+        kurtosis=kurtosis(equity_curve),
+        stability=stability(equity_curve),
+        alpha=alpha_beta(equity_curve)[0],
+        beta=alpha_beta(equity_curve)[1],
+    )
+
+
 def _safe_date_str(date: object | None) -> str:
     if date is None:
         return "NaT"

@@ -5,7 +5,7 @@ import logging
 import click
 import yaml
 
-from src.bt.engine.backtest_engine import BacktestEngine
+from src.bt.engine.functional_engine import FunctionalBacktestEngine
 from src.bt.metrics import print_results_analysis
 from src.bt.types import StrategyConfig, StrategyType
 from src.bt.types import PortfolioResult
@@ -43,13 +43,8 @@ async def backtest(strategy_conf: StrategyConfig):
             f"{strategy_conf.strategy_type.upper()} strategy requires exactly 2 symbols"
         )
 
-    # Use walk-forward analysis as the default backtesting method
-    # The strategy defines the walk-forward parameters:
-    # - training_start: initial training period start
-    # - training_end: initial training period end
-    # - trading_end: end of the entire walk-forward period
-
-    engine = BacktestEngine(strategy_conf)
+    # Use functional engine
+    engine = FunctionalBacktestEngine(strategy_conf)
     results = await engine.run()
     print_results_analysis(results.pf)
     plot_backtest_results(strategy_conf, results)

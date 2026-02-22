@@ -11,9 +11,8 @@ class BasePairsStrategy:
     Provides common utilities for generating trading signals.
     """
 
-    def __init__(self, symbols: List[str]):
-        self.symbols = symbols
-        self.pending_ticks = defaultdict(dict)
+    def __init__(self):
+        pass
 
     def _long(
         self,

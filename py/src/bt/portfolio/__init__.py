@@ -53,7 +53,14 @@ class Portfolio:
         self.equity_curve.index.name = "timestamp"
 
     def _record_equity(self, timestamp: pd.Timestamp):
-        positions_value = sum(t.qty * t.last_price for t in self.open_trades.values())
+        positions_value = 0.0
+        for t in self.open_trades.values():
+            if t.position == ActionType.long:
+                positions_value += t.qty * t.last_price
+            else:
+                # Collateral (qty * entry) is already deducted from cash.
+                # MTM value = collateral + unrealized pnl = qty * (2 * entry - last)
+                positions_value += t.qty * (2 * t.entry_price - t.last_price)
         equity = float(self.cash) + float(positions_value)
 
         if timestamp in self.equity_curve.index:
@@ -91,13 +98,16 @@ class Portfolio:
 
     def get_results(self) -> PortfolioResult:
         """Get backtest results."""
-        equity_series = self.equity_curve["equity"].sort_index()
+        equity_series = cast(pd.Series, self.equity_curve["equity"].sort_index())
         total_return = (
             equity_series.iloc[-1] - self.initial_capital
         ) / self.initial_capital
         returns = equity_series.pct_change().dropna()
+        ppy = metrics.periods_per_year(equity_series)
         sharpe = (
-            returns.mean() / returns.std() * np.sqrt(252) if len(returns) > 0 else 0
+            returns.mean() / returns.std() * np.sqrt(ppy)
+            if len(returns) > 0 and ppy > 0
+            else 0.0
         )
 
         annual_return = metrics.annual_return(equity_series)
@@ -132,15 +142,18 @@ class Portfolio:
     def _open_trade_from_fill(self, signal: TradeSignal, fill: FillEvent):
         """Open position from fill event with execution pricing."""
         is_long = signal.action == ActionType.long
-        qty = round(self.position_size * self.cash / fill.executed_price, 4)
+        base_qty = self.position_size * self.cash / fill.executed_price
+        hedge_beta = signal.hedge_beta
+        qty = round(base_qty * (hedge_beta or 1.0), 4)
+
         sl = 0.0
         tp = 0.0
         if is_long:
             sl = round(fill.executed_price * (1 - self.stop_loss), 2)
             tp = round(fill.executed_price * (1 + self.take_profit), 2)
         else:
-            sl = fill.executed_price * (1 + self.stop_loss)
-            tp = fill.executed_price * (1 - self.take_profit)
+            sl = round(fill.executed_price * (1 + self.stop_loss), 2)
+            tp = round(fill.executed_price * (1 - self.take_profit), 2)
 
         trade = Trade(
             entry_time=signal.timestamp,
@@ -162,6 +175,7 @@ class Portfolio:
         self.positions[signal.symbol] = self.positions.get(signal.symbol, 0) + (
             qty * direction
         )
+        # when shorting, we are reserving collateral. this is to circumvent having no margin account
         self.cash -= (qty * fill.executed_price) + fill.commission
         self._record_equity(fill.signal.timestamp)
         return trade
@@ -185,7 +199,12 @@ class Portfolio:
         trade.close_reason = fill.signal.reason
 
         del self.open_trades[fill.signal.symbol]
-        self.cash += qty * trade.exit_price - fill.commission
+        if is_long:
+            # Sell shares, receive proceeds
+            self.cash += qty * fill.executed_price - fill.commission
+        else:
+            # Return collateral and apply pnl
+            self.cash += (qty * trade.entry_price) + pnl - fill.commission
         self._record_equity(fill.signal.timestamp)
 
         return trade

@@ -1,112 +1,150 @@
+import asyncio
+from pprint import pprint
+from src.db.models import CandleSchema
 from ib_rest_api_client.models import (
     IserverHistoryLastResponse,
     SingleHistoricalBarLast,
     SingleHistoricalBarBidAsk,
     IserverHistoryBidAskResponse,
 )
-import datetime
 import math
 import re
+import pandas as pd
+from datetime import date, datetime
 from typing import Optional, cast
 from src.consts import BAR_INTERVAL
-from src.db.models import get_ohlcv_model
 from src.db import db
 
 from .shared import client, get_contract_info, auth_client
+from .rate_limiter import RateLimiter, RateLimitConfig, with_retry, batch_items
 
-from ib_rest_api_client.api.trading_market_data.get_iserver_marketdata_history import (
-    sync,
-    asyncio,
-)
+from ib_rest_api_client.api.trading_market_data import get_iserver_marketdata_history
 
 
 # Maximum number of candles per API request
 MAX_CANDLES_PER_REQUEST = 1000
 
-# Bar interval to milliseconds mapping
-BAR_INTERVAL_MS = {
-    "1min": 60 * 1000,
-    "5min": 5 * 60 * 1000,
-    "15min": 15 * 60 * 1000,
-    "30min": 30 * 60 * 1000,
-    "1h": 60 * 60 * 1000,
-    "4h": 4 * 60 * 60 * 1000,
-    "1d": 24 * 60 * 60 * 1000,
-    "1w": 7 * 24 * 60 * 60 * 1000,
-}
+# Default rate limiter config for candles
+DEFAULT_CANDLE_RATE_LIMIT = RateLimitConfig(
+    max_concurrent=2,
+    min_delay_ms=200,
+    max_retries=3,
+    base_delay_ms=500,
+    max_delay_ms=10000,
+)
+
+_candle_limiter = RateLimiter(DEFAULT_CANDLE_RATE_LIMIT)
 
 
-async def candles(
+async def _fetch_candles(
     conid: int,
-    period: Optional[str] = "1d",
-    bar: str = "1h",
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
-):
-    """Fetch candles from IBKR API with chunking support."""
+    bar: str,
+    from_date: date,
+    to_date: date = date.today(),
+    data: list[dict] = [],
+) -> list[dict]:
+    """Internal function to fetch candles from IBKR API. It fetches {days_left} worth of candles starting from from_date going backwards"""
+    days_left = (to_date - from_date).days
+    if days_left <= 0:
+        return data
 
     symbol_info = await get_contract_info(conid)
-    print(f"Getting candles for {symbol_info.ticker}")
+    print(
+        f"Getting candles for {symbol_info.ticker} for days {days_left}, from {from_date}, to {to_date}"
+    )
 
-    model = get_ohlcv_model(bar)
-
-    r = sync(
+    r = get_iserver_marketdata_history.sync(
         client=auth_client,
         conid=conid,
         bar=bar,
-        period=cast(str, period),
-        start_time=cast(str, start_time),
+        period=f"{days_left}d",
+        start_time=to_date.strftime("%Y%m%d-%H:%M:%S"),
     )
 
     if not isinstance(r, IserverHistoryBidAskResponse) or not r.data:
+        print("Unexpected!")
+        pprint(r)
         raise Exception("Unexpected response type")
 
-    data = r.data
-    print(f"Inserting {len(data)} candles total")
+    sorted_data = sorted(r.data, key=lambda x: x.t)
+    oldest_ts = sorted_data[0].t
+    if not oldest_ts:
+        print("Unexpected!")
+        raise ValueError("Empty timestamp")
 
-    insert_data = [
+    new_data = data + [
         {
-            "symbol_id": symbol_info.id,
-            "timestamp": item["t"],
-            "open": item["o"],
-            "high": item["h"],
-            "low": item["l"],
-            "close": item["c"],
-            "volume": item["v"],
+            "conid": symbol_info.conid,
+            "ticker": symbol_info.ticker,
+            "timestamp": item.t,
+            "open": item.o,
+            "high": item.h,
+            "low": item.l,
+            "close": item.c,
+            "volume": item.v,
         }
-        for item in data
+        for item in r.data
     ]
 
+    oldest_date = datetime.fromtimestamp(oldest_ts / 1000).date()
+    print(f"Got {len(r.data)} candles, oldest: {oldest_date}")
+
+    return await _fetch_candles(
+        conid=conid,
+        from_date=from_date,
+        to_date=oldest_date,
+        bar=bar,
+        data=new_data,
+    )
+
+
+@with_retry(max_retries=3, base_delay_ms=1000, max_delay_ms=10000)
+async def candles(
+    conid: int,
+    from_date: date,
+    bar: str = "1h",
+):
+    """Fetch candles from IBKR API with rate limiting and retry support."""
+    async with _candle_limiter:
+        insert_data = await _fetch_candles(conid, bar, from_date, date.today())
     try:
         with db.atomic():
-            model.insert_many(insert_data).on_conflict(
-                conflict_target=(model.timestamp, model.symbol_id),
-                update={
-                    model.open: model.open,
-                    model.high: model.high,
-                    model.low: model.low,
-                    model.close: model.close,
-                    model.volume: model.volume,
-                },
-            ).execute()
+            CandleSchema.insert_many(insert_data).on_conflict_ignore().execute()
     except Exception as e:
-        # Fallback for databases without unique constraint: filter and batch insert
         print(f"Bulk insert failed ({e}), using filtered batch insert")
-        # Get existing timestamps for this symbol
-        existing_timestamps = {
-            row.timestamp
-            for row in model.select(model.timestamp).where(
-                model.symbol_id == symbol_info.id
-            )
-        }
-        # Filter out existing records
-        new_data = [
-            item for item in insert_data if item["timestamp"] not in existing_timestamps
-        ]
-        if new_data:
-            # Batch insert in chunks of 1000
-            batch_size = 1000
-            for i in range(0, len(new_data), batch_size):
-                batch = new_data[i : i + batch_size]
-                with db.atomic():
-                    model.insert_many(batch).execute()
+        raise e
+
+
+async def candles_batch(
+    conids: list[int],
+    lookback: int,
+    from_date: date,
+    max_concurrent: int = 2,
+    bar: str = "1h",
+) -> list[int]:
+    """Fetch candles for multiple conids with rate limiting and batching.
+
+    Args:
+        conids: List of conids to fetch candles for
+        period: Time period (e.g., "1d", "1w", "1y")
+        bar: Bar size (e.g., "1h", "1d")
+        start_time: Optional start date
+        max_concurrent: Maximum concurrent requests
+
+    Returns:
+        List of conids that were successfully fetched
+    """
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def fetch_with_limit(c: int) -> int | None:
+        try:
+            async with semaphore:
+                await candles(c, from_date, bar)
+                return c
+        except Exception as e:
+            print(f"Failed to fetch candles for conid {c}: {e}")
+            return None
+
+    results = await asyncio.gather(*[fetch_with_limit(c) for c in conids])
+    return [r for r in results if r is not None]

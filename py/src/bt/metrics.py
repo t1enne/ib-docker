@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, cast
 from scipy import stats
 
 from src.bt.types import PortfolioResult, ActionType
@@ -37,12 +37,42 @@ def _get_returns(equity_curve: pd.Series) -> pd.Series:
     return returns
 
 
+def _equity_curve_time_info(equity_curve: pd.Series) -> tuple[float, float]:
+    if len(equity_curve) < 2:
+        return 0.0, 0.0
+
+    index = equity_curve.index
+    if isinstance(index, pd.DatetimeIndex):
+        start = index[0]
+        end = index[-1]
+        try:
+            elapsed_seconds = float((end - start).total_seconds())
+        except AttributeError:
+            elapsed_seconds = 0.0
+
+        if elapsed_seconds > 0:
+            elapsed_years = elapsed_seconds / (365.25 * 24 * 60 * 60)
+            periods = len(equity_curve) - 1
+            periods_per_year = periods / elapsed_years if elapsed_years > 0 else 0.0
+            return elapsed_years, periods_per_year
+
+    periods = len(equity_curve) - 1
+    if periods <= 0:
+        return 0.0, 0.0
+    elapsed_years = periods / 252.0
+    return elapsed_years, 252.0
+
+
+def periods_per_year(equity_curve: pd.Series) -> float:
+    _, ppy = _equity_curve_time_info(equity_curve)
+    return ppy
+
+
 def annual_return(equity_curve: pd.Series) -> float:
     if len(equity_curve) < 2:
         return 0.0
     total_return = (equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1
-    n_periods = len(equity_curve)
-    years = n_periods / 252.0
+    years, _ = _equity_curve_time_info(equity_curve)
     if years <= 0:
         return 0.0
     cagr = ((1 + total_return) ** (1 / years)) - 1
@@ -53,7 +83,10 @@ def annual_volatility(equity_curve: pd.Series) -> float:
     returns = _get_returns(equity_curve)
     if len(returns) == 0:
         return 0.0
-    return float(returns.std() * np.sqrt(252))
+    ppy = periods_per_year(equity_curve)
+    if ppy <= 0:
+        return 0.0
+    return float(returns.std() * np.sqrt(ppy))
 
 
 def max_drawdown(equity_curve: pd.Series) -> float:
@@ -136,16 +169,22 @@ def sortino_ratio(equity_curve: pd.Series, risk_free_rate: float = 0.0) -> float
     if downside_std == 0:
         return 0.0
     ret = annual_return(equity_curve)
-    return (ret - risk_free_rate) / downside_std
+    ppy = periods_per_year(equity_curve)
+    if ppy <= 0:
+        return 0.0
+    downside_std_annual = downside_std * np.sqrt(ppy)
+    return (ret - risk_free_rate) / downside_std_annual
+    # return (ret - risk_free_rate) / downside_std
 
 
 def omega_ratio(equity_curve: pd.Series, risk_free_rate: float = 0.0) -> float:
     returns = _get_returns(equity_curve)
     if len(returns) == 0:
         return 0.0
-    daily_rf = risk_free_rate / 252
-    gain = float(returns[returns > daily_rf].sum())
-    loss = float(-returns[returns < daily_rf].sum())
+    ppy = periods_per_year(equity_curve)
+    per_period_rf = risk_free_rate / ppy if ppy > 0 else 0.0
+    gain = float(returns[returns > per_period_rf].sum())
+    loss = float(-returns[returns < per_period_rf].sum())
     if loss == 0:
         return 1.0
     return gain / loss
@@ -170,8 +209,11 @@ def stability(equity_curve: pd.Series) -> float:
         return 0.0
     x = np.arange(len(equity_curve))
     y = equity_curve.values
-    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
-    return float(r_value**2)
+    result = stats.linregress(x, y)
+    r_value: Any = getattr(result, "rvalue", None)
+    if r_value is None:
+        r_value = result[2] if isinstance(result, tuple) else 0.0
+    return float(r_value) ** 2
 
 
 def alpha_beta(equity_curve: pd.Series) -> tuple[float, float]:
@@ -193,9 +235,12 @@ def alpha_beta(equity_curve: pd.Series) -> tuple[float, float]:
         return 0.0, 1.0
 
     beta = covariance / market_variance
-    daily_alpha = float(returns.mean() - beta * market_return.mean())
+    period_alpha = float(returns.mean() - beta * market_return.mean())
+    ppy = periods_per_year(equity_curve)
+    if ppy <= 0:
+        return 0.0, float(beta)
 
-    annualized_alpha = ((1 + daily_alpha) ** 252) - 1 if daily_alpha > -1 else -1
+    annualized_alpha = ((1 + period_alpha) ** ppy) - 1 if period_alpha > -1 else -1
 
     return annualized_alpha, float(beta)
 
@@ -229,11 +274,11 @@ def analyze_portfolio(result: PortfolioResult) -> PerformanceMetrics:
     )
 
 
-def _safe_date_str(date: Optional[pd.Timestamp]) -> str:
+def _safe_date_str(date: object | None) -> str:
     if date is None:
         return "NaT"
     if hasattr(date, "strftime"):
-        return date.strftime("%Y-%m-%d")
+        return cast(Any, date).strftime("%Y-%m-%d")
     return str(date)[:10]
 
 
@@ -259,8 +304,18 @@ def print_results_analysis(
     print(f"Data End Date: {last_str}")
 
     n_periods = len(equity_curve)
-    months = n_periods / 21.0
-    print(f"\nBacktest Duration: {n_periods} periods ({months:.1f} months)")
+    duration_desc = f"{n_periods} periods"
+    if isinstance(equity_curve.index, pd.DatetimeIndex) and n_periods > 1:
+        start = equity_curve.index[0]
+        end = equity_curve.index[-1]
+        try:
+            elapsed_days = (end - start).total_seconds() / (24 * 60 * 60)
+        except AttributeError:
+            elapsed_days = 0.0
+        if elapsed_days > 0:
+            months = elapsed_days / 30.44
+            duration_desc = f"{n_periods} periods ({months:.1f} months)"
+    print(f"\nBacktest Duration: {duration_desc}")
 
     print(f"\n{'Metric':<25} {'Value':>15}")
     print("-" * 42)
@@ -284,10 +339,11 @@ def print_results_analysis(
 
     print(f"\n{'Trading Statistics':<25}")
     print("-" * 42)
+    print(f"Starting Capital:<25 {equity_curve.iloc[0]}")
     print(f"{'Total Trades':<25} {len(trades):>15}")
     print(f"{'Closed Trades':<25} {len(closed_trades):>15}")
     print(f"{'Win Rate':<25} {win_rate:>14.2%}")
-    print(f"{'Total P&L':<25} {sum(t.pnl for t in closed_trades):>15.2f}")
+    print(f"{'Total P&L':<25} {equity_curve.iloc[-1] - equity_curve.iloc[0]:>15.2f}")
 
     dds = drawdown_periods(equity_curve)
     if drawdown_periods:
@@ -337,10 +393,10 @@ def exposure_and_turnover(
 
     if closed_trades:
         turnover = sum(abs(t.qty * t.entry_price) for t in closed_trades)
+        ppy = periods_per_year(result.equity_curve)
+        num_periods = len(result.equity_curve) - 1
         annualized_turnover = (
-            turnover * 252 / len(result.equity_curve)
-            if len(result.equity_curve) > 0
-            else turnover
+            turnover * ppy / num_periods if num_periods > 0 and ppy > 0 else turnover
         )
     else:
         turnover = 0.0

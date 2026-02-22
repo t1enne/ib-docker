@@ -1,8 +1,8 @@
 import { db } from "../db/db";
-import type { ISymbol } from "../db/types";
 import { attemptAsync, invariant } from "es-toolkit";
-import type { SymbolInfo } from "../types/ibkr";
 import { client } from "./shared";
+import type { SymbolSchema } from "../db/types";
+import type { SymbolInfo } from "../types/ibkr";
 
 async function fetchContractInfo(conid: number) {
   const ep = `iserver/contract/${conid}/info`;
@@ -11,11 +11,11 @@ async function fetchContractInfo(conid: number) {
   return r.data;
 }
 
-export async function getContractInfo(conid: number): Promise<ISymbol> {
+export async function getContractInfo(conid: number): Promise<SymbolSchema> {
   const contract = await db
-    .selectFrom("symbols")
+    .selectFrom("symbol")
     .selectAll()
-    .where("id", "=", conid)
+    .where("conid", "=", conid)
     .executeTakeFirst();
 
   if (contract) {
@@ -23,13 +23,13 @@ export async function getContractInfo(conid: number): Promise<ISymbol> {
   }
   const cinfo = await fetchContractInfo(conid);
   return await db
-    .insertInto("symbols")
+    .insertInto("symbol")
     .values({
-      id: conid,
+      conid: conid,
       market: cinfo.exchange,
       currency: cinfo.currency,
       name: cinfo.company_name,
-      symbol: cinfo.symbol,
+      ticker: cinfo.symbol,
     })
     .returningAll()
     .executeTakeFirstOrThrow();

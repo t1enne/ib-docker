@@ -28,8 +28,381 @@ def get_fill(s: TradeSignal, pf: Portfolio):
     )
 
 
+# ---------------------------------------------------------------------------
+# Long-side tests (regression guards)
+# ---------------------------------------------------------------------------
+
+
+def test_long_open_cash(pf: Portfolio):
+    """Opening a long should debit cash by notional + commission."""
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    cash_before = pf.cash
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+
+    qty = trade.qty
+    expected_cash = cash_before - (qty * 100.0) - pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+
+
+def test_long_close_cash(pf: Portfolio):
+    """Closing a long should credit cash by qty * exit_price - commission."""
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    pf.on_fill(get_fill(signal, pf))
+    cash_after_open = pf.cash
+
+    close_signal = TradeSignal(
+        action=ActionType.close,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=110.0,
+    )
+    trade = pf.on_fill(get_fill(close_signal, pf))
+    assert trade is not None
+
+    qty = trade.qty
+    expected_cash = cash_after_open + (qty * 110.0) - pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+
+
+def test_long_round_trip_pnl(pf: Portfolio):
+    """Long round-trip: final cash = initial - 2*commission + pnl."""
+    entry_price, exit_price = 100.0, 120.0
+
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+
+    close_signal = TradeSignal(
+        action=ActionType.close,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=exit_price,
+    )
+    pf.on_fill(get_fill(close_signal, pf))
+
+    pnl = (exit_price - entry_price) * qty
+    expected_cash = pf.initial_capital + pnl - 2 * pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+
+
+def test_long_equity_mark_to_market(pf: Portfolio):
+    """Long equity = cash + qty * last_price."""
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+
+    tick = Tick(
+        timestamp=get_ts("2025-01-02"),
+        symbol="AAPL",
+        open=110.0,
+        high=115.0,
+        low=109.0,
+        close=112.0,
+        volume=1000,
+    )
+    pf.update_market_value(tick)
+
+    expected_equity = pf.cash + qty * 112.0
+    last_eq = pf.equity_curve["equity"].iloc[-1]
+    assert abs(last_eq - expected_equity) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Short-side tests
+# ---------------------------------------------------------------------------
+
+
+def test_short_open_cash(pf: Portfolio):
+    """Opening a short reserves collateral: cash -= notional + commission."""
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    cash_before = pf.cash
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+
+    qty = trade.qty
+    expected_cash = cash_before - (qty * 100.0) - pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+
+
+def test_short_close_winning(pf: Portfolio):
+    """Winning short (price dropped): cash increases by collateral + profit - commission."""
+    entry_price, exit_price = 100.0, 80.0
+
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+    cash_after_open = pf.cash
+
+    close_signal = TradeSignal(
+        action=ActionType.close,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=exit_price,
+    )
+    pf.on_fill(get_fill(close_signal, pf))
+
+    # On close: return collateral (qty * entry_price) and apply pnl, minus commission
+    pnl = (entry_price - exit_price) * qty  # positive
+    expected_cash = cash_after_open + (qty * entry_price) + pnl - pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+
+
+def test_short_close_losing(pf: Portfolio):
+    """Losing short (price rose): cash increases by collateral - loss - commission."""
+    entry_price, exit_price = 100.0, 120.0
+
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+    cash_after_open = pf.cash
+
+    close_signal = TradeSignal(
+        action=ActionType.close,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=exit_price,
+    )
+    pf.on_fill(get_fill(close_signal, pf))
+
+    # On close: return collateral + pnl (negative here) - commission
+    pnl = (entry_price - exit_price) * qty  # negative
+    expected_cash = cash_after_open + (qty * entry_price) + pnl - pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+
+
+def test_short_round_trip_pnl(pf: Portfolio):
+    """Short round-trip: final cash = initial + pnl - 2*commission."""
+    entry_price, exit_price = 100.0, 80.0
+
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+
+    close_signal = TradeSignal(
+        action=ActionType.close,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=exit_price,
+    )
+    closed = pf.on_fill(get_fill(close_signal, pf))
+    assert closed is not None
+
+    pnl = (entry_price - exit_price) * qty
+    expected_cash = pf.initial_capital + pnl - 2 * pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+    assert abs(closed.pnl - pnl) < 0.01
+
+
+def test_short_losing_round_trip(pf: Portfolio):
+    """Losing short round-trip: final cash = initial - loss - 2*commission."""
+    entry_price, exit_price = 100.0, 115.0
+
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+
+    close_signal = TradeSignal(
+        action=ActionType.close,
+        symbol="AAPL",
+        z_score=0.0,
+        timestamp=get_ts("2025-01-02"),
+        price=exit_price,
+    )
+    closed = pf.on_fill(get_fill(close_signal, pf))
+    assert closed is not None
+
+    pnl = (entry_price - exit_price) * qty  # negative
+    expected_cash = pf.initial_capital + pnl - 2 * pf.commission
+    assert abs(pf.cash - expected_cash) < 0.01
+    assert pf.cash < pf.initial_capital  # lost money
+
+
+# ---------------------------------------------------------------------------
+# Short equity / mark-to-market tests
+# ---------------------------------------------------------------------------
+
+
+def test_short_equity_price_drops(pf: Portfolio):
+    """Short equity when price drops: equity should increase (unrealized gain)."""
+    entry_price = 100.0
+
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+
+    tick = Tick(
+        timestamp=get_ts("2025-01-02"),
+        symbol="AAPL",
+        open=95.0,
+        high=96.0,
+        low=88.0,
+        close=90.0,
+        volume=1000,
+    )
+    pf.update_market_value(tick)
+
+    # Equity = initial_capital - open_commission + unrealized_pnl
+    unrealized_pnl = qty * (entry_price - 90.0)
+    expected_equity = pf.initial_capital - pf.commission + unrealized_pnl
+    last_eq = pf.equity_curve["equity"].iloc[-1]
+    assert abs(last_eq - expected_equity) < 0.01
+    # Price dropped -> unrealized gain -> equity above what we started with (minus commission)
+    assert last_eq > pf.initial_capital - pf.commission
+
+
+def test_short_equity_price_rises(pf: Portfolio):
+    """Short equity when price rises: equity should decrease (unrealized loss)."""
+    entry_price = 100.0
+
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=entry_price,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+    qty = trade.qty
+
+    tick = Tick(
+        timestamp=get_ts("2025-01-02"),
+        symbol="AAPL",
+        open=105.0,
+        high=115.0,
+        low=104.0,
+        close=112.0,
+        volume=1000,
+    )
+    pf.update_market_value(tick)
+
+    # Equity = initial_capital - open_commission + unrealized_pnl (negative here)
+    unrealized_pnl = qty * (entry_price - 112.0)
+    expected_equity = pf.initial_capital - pf.commission + unrealized_pnl
+    last_eq = pf.equity_curve["equity"].iloc[-1]
+    assert abs(last_eq - expected_equity) < 0.01
+    # Price rose -> unrealized loss -> equity below initial (minus commission)
+    assert last_eq < pf.initial_capital - pf.commission
+
+
+# ---------------------------------------------------------------------------
+# SL/TP rounding consistency
+# ---------------------------------------------------------------------------
+
+
+def test_short_sl_tp_rounding(pf: Portfolio):
+    """Short SL and TP should be rounded to 2 decimal places like longs."""
+    signal = TradeSignal(
+        action=ActionType.short,
+        symbol="AAPL",
+        z_score=-2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.33,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+
+    # SL = 100.33 * (1 + 0.1) = 110.363 → should round to 110.36
+    # TP = 100.33 * (1 - 0.5) = 50.165 → should round to 50.17 (or 50.16)
+    assert trade.stop_loss == round(100.33 * 1.1, 2)
+    assert trade.take_profit == round(100.33 * 0.5, 2)
+
+
+def test_long_sl_tp_rounding(pf: Portfolio):
+    """Long SL and TP should be rounded to 2 decimal places."""
+    signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.33,
+    )
+    trade = pf.on_fill(get_fill(signal, pf))
+    assert trade is not None
+
+    assert trade.stop_loss == round(100.33 * 0.9, 2)
+    assert trade.take_profit == round(100.33 * 1.5, 2)
+
+
+# ---------------------------------------------------------------------------
+# Existing tests (preserved from original file)
+# ---------------------------------------------------------------------------
+
+
 def test_on_fill(pf: Portfolio):
-    # Test opening a long position
     signal = TradeSignal(
         action=ActionType.long,
         symbol="AAPL",
@@ -44,9 +417,8 @@ def test_on_fill(pf: Portfolio):
     assert trade.position == ActionType.long
     assert trade.entry_price == 100.0
     assert pf.positions["AAPL"] > 0
-    assert pf.cash < 10000  # Cash decreased
+    assert pf.cash < 10000
 
-    # Test closing the position
     close_signal = TradeSignal(
         action=ActionType.close,
         symbol="AAPL",
@@ -90,216 +462,4 @@ def test_close(pf: Portfolio):
     )
     pf._close_trade_from_fill(trade, fe)
 
-    assert pf.cash > pf.initial_capital  # cash should be above initial capital
-
-
-# def test_sl(pf: Portfolio):
-#     # Open a long position
-#     signal = TradeSignal(
-#         action=ActionType.long,
-#         symbol="AAPL",
-#         z_score=2.0,
-#         timestamp=get_ts("2025-01-01"),
-#         price=100.0,
-#     )
-#
-#     pf.on_fill(get_fill(signal, pf))
-#     assert pf.open_trades["AAPL"].stop_loss == 90
-#
-#     # Simulate tick with price below stop loss (100 * (1 - 0.1) = 90)
-#     tick = Tick(
-#         timestamp=get_ts("2025-01-02"),
-#         symbol="AAPL",
-#         open=95.0,
-#         high=105.0,
-#         low=85.0,
-#         close=85.0,  # Below SL
-#         volume=1000,
-#     )
-#     pf.update_market_value(tick)
-#
-#     # Position should be closed
-#     assert pf.positions["AAPL"] == 0
-#     assert len(pf.trades) == 1
-#     assert pf.trades[0].exit_price == 85.0
-#     assert pf.trades[0].close_reason == TradeExitReason.sl
-
-
-# def test_trailing_sl(pf: Portfolio):
-#     signal = TradeSignal(
-#         action=ActionType.long,
-#         symbol="AAPL",
-#         z_score=2.0,
-#         timestamp=get_ts("2025-01-01"),
-#         price=100.0,
-#     )
-#     pf.on_fill(get_fill(signal, pf))
-#
-#     tick = Tick(
-#         timestamp=get_ts("2025-01-02"),
-#         symbol="AAPL",
-#         open=95.0,
-#         high=105.0,
-#         low=85.0,
-#         close=105.0,  # Below SL
-#         volume=1000,
-#     )
-#     pf.update_market_value(tick)
-#     assert pf.trades[0].stop_loss == 105 * (1 - 0.1)
-#
-#
-# def test_position_sizing(pf: Portfolio):
-#     # Initial cash 10000, position_size 0.1, price 100
-#     # Expected qty: 0.1 * 10000 / 100 = 10
-#     signal = TradeSignal(
-#         action=ActionType.long,
-#         symbol="AAPL",
-#         z_score=2.0,
-#         timestamp=get_ts("2025-01-01"),
-#         price=100.0,
-#     )
-#     pf.on_fill(get_fill(signal, pf))
-#     expected_qty = round(0.1 * 10000 / 100.0, 4)
-#     assert pf.positions["AAPL"] == expected_qty
-#     assert pf.trades[0].qty == expected_qty
-#
-#
-# def test_commissions(pf: Portfolio):
-#     entry_price = 100
-#     exit_price = 120
-#     initial_cash = pf.cash
-#     signal = TradeSignal(
-#         action=ActionType.long,
-#         symbol="AAPL",
-#         z_score=2.0,
-#         timestamp=get_ts("2025-01-01"),
-#         price=entry_price,
-#     )
-#     pf.on_fill(get_fill(signal, pf))
-#     qty = pf.positions["AAPL"]
-#     cost = qty * entry_price
-#     assert pf.cash == initial_cash - cost - pf.commission
-#
-#     updated_cash = pf.cash
-#     # Close and check commission on exit
-#     close_signal = TradeSignal(
-#         action=ActionType.close,
-#         symbol="AAPL",
-#         z_score=0.0,
-#         timestamp=get_ts("2025-01-02"),
-#         price=exit_price,
-#     )
-#     pf.on_fill(get_fill(close_signal, pf))
-#     # Commission deducted again on close
-#     pnl = (exit_price - entry_price) * qty
-#     assert pf.cash == updated_cash + pnl - pf.commission
-#
-#
-# def test_equity_updates_on_every_tick(pf: Portfolio):
-#     commission = pf.commission
-#
-#     pf.on_fill(
-#         get_fill(
-#             TradeSignal(
-#                 timestamp=get_ts("2025-01-01 10:00"),
-#                 action=ActionType.long,
-#                 symbol="AAPL",
-#                 z_score=2.0,
-#                 price=100.0,
-#             ),
-#             pf,
-#         )
-#     )
-#
-#     qty = pf.positions["AAPL"]
-#     expected_cash = pf.initial_capital - (qty * 100.0) - commission
-#     # assert abs(portfolio.cash - expected_cash) < 0.01
-#
-#     ticks = [
-#         Tick(
-#             timestamp=get_ts("2025-01-01 10:00"),
-#             symbol="AAPL",
-#             open=102.0,
-#             high=103.0,
-#             low=101.0,
-#             close=102.0,
-#             volume=1000,
-#         ),
-#         Tick(
-#             timestamp=get_ts("2025-01-01 11:00"),
-#             symbol="AAPL",
-#             open=102.0,
-#             high=105.0,
-#             low=101.0,
-#             close=104.0,
-#             volume=1000,
-#         ),
-#         Tick(
-#             timestamp=get_ts("2025-01-01 12:00"),
-#             symbol="AAPL",
-#             open=104.0,
-#             high=106.0,
-#             low=103.0,
-#             close=103.0,
-#             volume=1000,
-#         ),
-#     ]
-#
-#     for tick in ticks:
-#         pf.update_market_value(tick)
-#
-#     equity_curve = pf.get_results().equity_curve
-#     assert len(equity_curve) == 4
-#
-#     expected_equities = [
-#         10000.0,
-#         expected_cash + qty * 102.0,
-#         expected_cash + qty * 104.0,
-#         expected_cash + qty * 103.0,
-#     ]
-#     for i, expected_eq in enumerate(expected_equities):
-#         assert abs(equity_curve.iloc[i] - expected_eq) < 1, f"Tick {i}"
-
-
-# def test_equity_curve_on_close_all_positions(pf: Portfolio):
-# """Ensure equity curve uses exit prices, not stale last_price."""
-# signal = TradeSignal(
-#     action=ActionType.long,
-#     symbol="AAPL",
-#     z_score=2.0,
-#     timestamp=get_ts("2025-01-03 09:00"),
-#     price=100.0,
-# )
-# signal2 = TradeSignal(
-#     action=ActionType.long,
-#     symbol="MSFT",
-#     z_score=2.0,
-#     timestamp=get_ts("2025-01-03 09:00"),
-#     price=200.0,
-# )
-#
-# pf.on_fill(get_fill(signal, pf))
-# pf.on_fill(get_fill(signal2, pf))
-#
-# assert pf.cash < pf.initial_capital
-#
-# qty_aapl = pf.positions["AAPL"]
-# qty_msft = pf.positions["MSFT"]
-# expected_cash_after_entry = pf.cash
-#
-# pf.close_all_trades(
-#     timestamp=get_ts("2025-01-03 11:00"), prices={"AAPL": 150.0, "MSFT": 250.0}
-# )
-#
-# result = pf.get_results()
-# final_equity = result.equity_curve.iloc[-1]
-#
-# pnl_aapl = (150.0 - 100.0) * qty_aapl
-# pnl_msft = (250.0 - 200.0) * qty_msft
-# expected_equity = (
-#     expected_cash_after_entry + pnl_aapl + pnl_msft - (pf.commission * 2)
-# )
-#
-# assert abs(final_equity - expected_equity) < 1, (
-#     f"Expected {expected_equity}, got {final_equity}"
-# )
+    assert pf.cash > pf.initial_capital

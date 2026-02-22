@@ -70,8 +70,8 @@ class BacktestEngine:
         self.strategy = strategy_class(
             symbols=self.symbols,
             strategy_params=self._strategy_params(config),
+            model=self.model,
         )
-        self.strategy.model = self.model
 
         self.z_score_state = ZScoreState(
             scores=[], timestamps=[], scores_synced=[], timestamps_synced=[]
@@ -120,9 +120,7 @@ class BacktestEngine:
             if tick is None:
                 break
 
-            CAN_TRADE = (
-                self.window.train_start <= tick.timestamp <= self.window.test_end
-            )
+            CAN_TRADE = self.window.test_start <= tick.timestamp <= self.window.test_end
 
             ticks_by_timestamp[tick.timestamp].append(tick)
             has_ticks = len(ticks_by_timestamp[tick.timestamp]) == len(self.symbols)
@@ -143,10 +141,15 @@ class BacktestEngine:
             if not CAN_TRADE:
                 continue
 
-            # handle trading
+            # handle trading — only execute signals matching this tick's symbol
+            remaining_signals: List[TradeSignal] = []
             for signal in self.pending_signals:
-                fill = self.execution_handler.execute(signal, tick)
-                self.portfolio.on_fill(fill)
+                if signal.symbol == tick.symbol:
+                    fill = self.execution_handler.execute(signal, tick)
+                    self.portfolio.on_fill(fill)
+                else:
+                    remaining_signals.append(signal)
+            self.pending_signals = remaining_signals
 
             self.risk_manager.update_trades(self.portfolio.open_trades)
             risk_events = self.risk_manager.on_tick(tick)
@@ -156,7 +159,9 @@ class BacktestEngine:
                 self.portfolio.on_fill(fill)
 
             open_trade = self.portfolio.open_trades.get(tick.symbol)
-            self.pending_signals = self.strategy.on_tick(tick, open_trade)
+            self.pending_signals = self.pending_signals + self.strategy.on_tick(
+                tick, open_trade
+            )
             self.portfolio.update_market_value(tick)
 
     def _close_open_position(self, tick: Tick) -> None:

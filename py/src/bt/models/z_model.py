@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 from src.bt.zscore import calculate_rolling_z
 
 
@@ -6,6 +6,11 @@ class ZModel:
     def __init__(self, symbols: List[str], rolling_window_size: int):
         self.symbols = symbols
         self.rolling_window_size = rolling_window_size
+        self._current_beta: float = 1.0
+
+    @property
+    def beta(self) -> float:
+        return self._current_beta
 
     def calculate_z(self, buffers: List[dict[str, float]]) -> float:
         """Compute rolling z-score from price buffers using shared calculation."""
@@ -16,7 +21,9 @@ class ZModel:
         prices1 = [b[sym1] for b in buffers]
         prices2 = [b[sym2] for b in buffers]
 
-        return calculate_rolling_z(prices1, prices2, self.rolling_window_size)
+        z, _, beta = calculate_rolling_z(prices1, prices2, self.rolling_window_size)
+        self._current_beta = beta
+        return z
 
     def calculate_z_by_index(
         self, prices1: List[float], prices2: List[float], window: int
@@ -31,4 +38,6 @@ class ZModel:
         prices1_arr = prices1[-window:]
         prices2_arr = prices2[-window:]
 
-        return calculate_rolling_z(prices1_arr, prices2_arr, window)
+        z, _, beta = calculate_rolling_z(prices1_arr, prices2_arr, window)
+        self._current_beta = beta
+        return z

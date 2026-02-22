@@ -21,10 +21,10 @@ def test_db():
     db = SqliteDatabase(TEST_DB_PATH, pragmas={"journal_mode": "wal"})
 
     # Create tables
-    from src.db.models import Symbol, OHLCVBase
+    from src.db.models import SymbolSchema, CandleSchema
 
-    db.bind([Symbol])
-    db.create_tables([Symbol])
+    db.bind([SymbolSchema])
+    db.create_tables([SymbolSchema])
 
     # Create dynamic OHLCV tables for different bar sizes
     bar_sizes = ["1h", "1d"]
@@ -43,10 +43,10 @@ def test_db():
 @pytest.fixture(autouse=True)
 def clean_tables(test_db):
     """Clean all tables before each test."""
-    from src.db.models import Symbol
+    from src.db.models import SymbolSchema
 
     # Delete from symbol table
-    Symbol.delete().execute()
+    SymbolSchema.delete().execute()
 
     # Delete from all OHLCV tables
     bar_sizes = ["1h", "1d"]
@@ -73,7 +73,7 @@ def get_ohlcv_model_for_test(db_instance, bar: str):
 
     # Use type() to create class dynamically to avoid closure issues
     attrs = {
-        "symbol_id": IntegerField(),
+        "conid": IntegerField(),
         "timestamp": IntegerField(index=True),
         "open": FloatField(),
         "high": FloatField(),
@@ -149,8 +149,9 @@ def ibkr_api_mock():
 @pytest.fixture(autouse=True)
 def patch_test_db(test_db):
     """Patch the production database with test database for candles module."""
-    from src.db.models import Symbol, OHLCVBase
+    from src.db.models import SymbolSchema, CandleSchema
     import src.db as db_module
+    from unittest.mock import patch
 
     # Create models bound to test database
     test_models = {}
@@ -164,19 +165,32 @@ def patch_test_db(test_db):
             database = test_db
             table_name = f"ohlcv_{bar}"
 
-        model = type(f"OHLCV{bar}", (OHLCVBase,), {"Meta": Meta})
+        model = type(f"OHLCV{bar}", (CandleSchema,), {"Meta": Meta})
         test_models[bar] = model
         return model
 
     # Bind Symbol model to test database
-    test_db.bind([Symbol])
+    test_db.bind([SymbolSchema])
 
     # Patch the db module's db object
     original_db = db_module.db
     db_module.db = test_db
 
-    # Patch get_ohlcv_model functions
-    with patch("src.db.models.get_ohlcv_model", side_effect=patched_get_ohlcv_model):
+    # Only patch if get_ohlcv_model exists
+    import src.db.models as models_module
+
+    has_get_ohlcv_model = hasattr(models_module, "get_ohlcv_model")
+
+    if has_get_ohlcv_model:
+        with patch(
+            "src.db.models.get_ohlcv_model", side_effect=patched_get_ohlcv_model
+        ):
+            with patch(
+                "src.syncm.ibkr_layer.candles.get_ohlcv_model",
+                side_effect=patched_get_ohlcv_model,
+            ):
+                yield test_db
+    else:
         with patch(
             "src.syncm.ibkr_layer.candles.get_ohlcv_model",
             side_effect=patched_get_ohlcv_model,

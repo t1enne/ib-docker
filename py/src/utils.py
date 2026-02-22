@@ -4,7 +4,7 @@ import sqlite3
 import numpy as np
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
-from datetime import datetime
+from datetime import datetime, date
 
 
 _DEFAULT_START = pd.Timestamp("2020-01-01")
@@ -24,24 +24,23 @@ def read_candles(
     _end = end_date if end_date else _DEFAULT_END
     _sd = int(_start.timestamp() * 1000)
     _ed = int(_end.timestamp() * 1000)
-    from_filter = f"and o.timestamp >= {_sd}" if _sd else ""
-    to_filter = f"and o.timestamp <= {_ed}" if _ed else ""
+    from_filter = f"and c.timestamp >= {_sd}" if _sd else ""
+    to_filter = f"and c.timestamp <= {_ed}" if _ed else ""
     q = f"""select s.ticker as symbol,
-                o.timestamp,
-                o.open,
-                o.high,
-                o.low,
-                o.close,
-                o.volume
-            from ohlcv_{bar} o left join symbol s
-            on o.symbol_id = s.id
+                c.timestamp,
+                c.open,
+                c.high,
+                c.low,
+                c.close,
+                c.volume
+            from candle c left join symbol s
+            on c.conid = s.conid
             where s.ticker = UPPER('{symbol}')
             {from_filter}
             {to_filter}
             """
     res = cur.execute(q)
     data = res.fetchall()
-    print(len(data))
     con.close()
     columns = pd.Index(
         [
@@ -57,7 +56,6 @@ def read_candles(
     df = pd.DataFrame(data, columns=columns)
     df = df.assign(Date=pd.to_datetime(df["Timestamp"], unit="ms"))
     df = df.set_index("Date").drop(columns=["Timestamp"])
-    print(df)
     return df
 
 
@@ -71,27 +69,9 @@ def _parse_date(date_str: str) -> datetime:
     raise ValueError(f"Unable to parse date: {date_str}")
 
 
-def get_returns(df: pd.DataFrame) -> pd.DataFrame:
+def get_log_returns(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[:, "Returns"] = np.log(df["Close"] / df["Close"].shift(1)).round(4)
     return df.dropna()
-
-
-def get_ols_fit_model(y, x):
-    y_arr = np.asarray(y)
-    x_arr = np.asarray(x)
-    if len(y_arr) == 0 or len(x_arr) == 0 or len(y_arr) != len(x_arr):
-        raise ValueError("Empty or mismatched data for OLS")
-    y_arr = np.log(y_arr).astype(float)
-    x_arr = np.log(x_arr).astype(float)
-    X = sm.add_constant(x_arr)
-    return sm.OLS(y_arr, X).fit()
-
-
-def hedge_ratio_residuals(y, x) -> pd.DataFrame:
-    """Returns residuals from OLS(y ~ x) using log prices."""
-    model = get_ols_fit_model(y, x)
-    alpha, beta = model.params
-    return y - (alpha + beta * x)
 
 
 def _calculate_rolling_zscore_spread(s1: pd.Series, s2: pd.Series, rolling_window: int):
@@ -131,6 +111,17 @@ def _calculate_rolling_zscore_spread(s1: pd.Series, s2: pd.Series, rolling_windo
     return (spread_series - rolling_mean) / rolling_std
 
 
+def get_ols_fit_model(y, x):
+    y_arr = np.asarray(y)
+    x_arr = np.asarray(x)
+    if len(y_arr) == 0 or len(x_arr) == 0 or len(y_arr) != len(x_arr):
+        raise ValueError("Empty or mismatched data for OLS")
+    y_arr = np.log(y_arr).astype(float)
+    x_arr = np.log(x_arr).astype(float)
+    X = sm.add_constant(x_arr)
+    return sm.OLS(y_arr, X).fit()
+
+
 def calculate_zscore_spread(
     s1: pd.Series, s2: pd.Series, rolling_window: Optional[int] = None
 ):
@@ -147,6 +138,13 @@ def calculate_zscore_spread(
     if spread_series.empty:
         return pd.Series(dtype=float)
     return (spread_series - spread_series.mean()) / spread_series.std()
+
+
+def hedge_ratio_residuals(y, x) -> pd.DataFrame:
+    """Returns residuals from OLS(y ~ x) using log prices."""
+    model = get_ols_fit_model(y, x)
+    alpha, beta = model.params
+    return y - (alpha + beta * x)
 
 
 def eg_pvalue(price1, price2):
@@ -214,3 +212,9 @@ def parse_timestamp(value: Union[str, pd.Timestamp]) -> pd.Timestamp:
     if pd.isna(timestamp):
         raise ValueError(f"Invalid timestamp: {value}")
     return timestamp
+
+
+def get_days_from_now(from_date: date) -> int:
+    now = date.today()
+    diff = now - from_date
+    return diff.days

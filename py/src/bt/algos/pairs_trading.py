@@ -1,3 +1,4 @@
+from src.bt.models import StrategyModel
 from dataclasses import dataclass
 from typing import List, Optional, Any
 import pandas as pd
@@ -26,11 +27,16 @@ class PairsTradingStrategy(StrategyProtocol):
     """
 
     bps: BasePairsStrategy
-    model: Any  # StrategyModel - set by engine after construction
 
-    def __init__(self, symbols: List[str], strategy_params: StrategyParams):
+    def __init__(
+        self,
+        symbols: List[str],
+        strategy_params: StrategyParams,
+        model: StrategyModel,
+    ):
         self.bps = BasePairsStrategy(symbols)
         self.params = strategy_params
+        self.model = model
         # Note: self.model is set by the engine after construction
 
     def on_tick(self, tick: Tick, open_trade: Optional[Trade]) -> List[TradeSignal]:
@@ -45,7 +51,7 @@ class PairsTradingStrategy(StrategyProtocol):
 
         if open_trade and abs(z_score) < self.params.exit_z:
             # z regression
-            return self._calculate_exit_signal(tick, open_trade, z_score)
+            return [self._calculate_exit_signal(tick, open_trade, z_score)]
 
         self.bps.pending_ticks[timestamp][symbol] = close
 
@@ -63,20 +69,24 @@ class PairsTradingStrategy(StrategyProtocol):
     ) -> List[TradeSignal]:
         """Generate signals based on z-score."""
         sym1, sym2 = self.bps.symbols
+        hedge_beta = self.model.hedge_beta
 
         if z_score < -self.params.entry_z:
             return [
                 self.bps._long(sym1, timestamp, prices[sym1], z_score),
-                self.bps._short(sym2, timestamp, prices[sym2], z_score),
+                self.bps._short(sym2, timestamp, prices[sym2], z_score, hedge_beta),
             ]
 
         if z_score > self.params.entry_z:
             return [
-                self.bps._long(sym2, timestamp, prices[sym2], z_score),
                 self.bps._short(sym1, timestamp, prices[sym1], z_score),
+                self.bps._long(sym2, timestamp, prices[sym2], z_score, hedge_beta),
             ]
 
         return []
 
-    def _calculate_exit_signal(self, tick: Tick, trade: Trade, z_score: int | float):
-        return [self.bps._close(trade.symbol, tick.timestamp, tick.close, z_score)]
+    def _calculate_exit_signal(
+        self, tick: Tick, trade: Trade, z_score: int | float
+    ) -> TradeSignal:
+        """Close one leg of the pair."""
+        return self.bps._close(trade.symbol, tick.timestamp, tick.close, z_score)

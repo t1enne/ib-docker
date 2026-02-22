@@ -5,7 +5,9 @@ import type { DatabaseSchema } from "./types";
 import { BunSqliteDialect } from "kysely-bun-sqlite";
 
 const dbPath = path.join(process.cwd(), "..", "data", "db.sqlite");
+
 const _db = new Database(dbPath);
+
 const dialect = new BunSqliteDialect({
   database: _db,
   onCreateConnection: async (c) => {

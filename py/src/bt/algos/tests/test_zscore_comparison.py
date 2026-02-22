@@ -61,7 +61,7 @@ def calculate_zscores_spread_module(
     for i in range(len(prices1)):
         s1 = prices1.iloc[: i + 1]
         s2 = prices2.iloc[: i + 1]
-        z = calculate_rolling_z(s1, s2, rolling_window)
+        z, _, _ = calculate_rolling_z(s1, s2, rolling_window)
         z_scores.append(z)
         raw_values.append(
             {

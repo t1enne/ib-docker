@@ -14,7 +14,7 @@ export async function getContractInfo(conid: number) {
   const savedSymbol = await db
     .selectFrom("symbol")
     .selectAll()
-    .where("symbol.id", "=", conid)
+    .where("symbol.conid", "=", conid)
     .executeTakeFirst();
   return savedSymbol ?? fetchContractInfo(conid);
 }
@@ -26,10 +26,10 @@ export async function fetchContractInfo(conid: number) {
   const values = await db
     .insertInto("symbol")
     .values({
-      id: r.data.con_id,
+      conid: r.data.con_id,
       name: r.data.company_name,
       currency: r.data.currency,
-      symbol: r.data.symbol,
+      ticker: r.data.symbol,
       market: r.data.exchange,
     })
     .returningAll()

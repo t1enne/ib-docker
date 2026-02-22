@@ -68,6 +68,10 @@ class StrategyModel:
         return self._z_state.current_z
 
     @property
+    def hedge_beta(self) -> float:
+        return self._z.beta
+
+    @property
     def current_regime(self) -> Optional[int]:
         return self._hmm_state.current_regime
 

@@ -1,7 +1,7 @@
 from ib_rest_api_client import AuthenticatedClient, Client
 import httpx
 from typing import Dict, Any
-from src.db.models import Symbol
+from src.db.models import SymbolSchema, ISymbol
 
 client = httpx.AsyncClient(
     base_url="https://localhost:5000/v1/api/", timeout=10.0, verify=False
@@ -20,20 +20,20 @@ async def fetch_contract_info(conid: int) -> Dict[str, Any]:
         raise ValueError(f"Failed call to {ep}: {e}")
 
 
-async def get_contract_info(conid: int) -> Symbol:
+async def get_contract_info(conid: int) -> ISymbol:
     # Query DB first
     try:
-        symbol = Symbol.get(Symbol.id == conid)
+        symbol = SymbolSchema.get(SymbolSchema.conid == conid)
         return symbol
-    except Symbol.DoesNotExist:
+    except SymbolSchema.DoesNotExist:
         pass
 
     # Fetch from API
     cinfo = await fetch_contract_info(conid)
 
     # Insert into DB
-    symbol = Symbol.create(
-        id=conid,
+    symbol = SymbolSchema.create(
+        conid=conid,
         ticker=cinfo["symbol"],
         name=cinfo.get("company_name"),
         market=cinfo["exchange"],

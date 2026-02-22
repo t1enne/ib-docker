@@ -1,3 +1,4 @@
+from src.utils import get_ts
 from typing import Optional
 import click
 import yaml
@@ -20,8 +21,20 @@ def main():
 
 @main.command(help="log correlation and cointegrations for the passed symbols")
 @click.argument("symbols", nargs=-1)
-def mx(symbols: list[str]):
-    mx_mod.matrix(symbols)
+@click.option("--universe", "-u", default=None, help="Path to universe config file")
+@click.option("--start", help="Start date (YYYY-MM-DD)")
+@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--plot/--no-plot", default=False, help="Generate plotly heatmaps")
+def mx(
+    symbols: list[str],
+    universe: Optional[str],
+    start: Optional[str],
+    end: Optional[str],
+    plot: bool,
+):
+    s = get_ts(start) if start else None
+    e = get_ts(end) if end else None
+    mx_mod.matrix(symbols, s, e, plot, universe)
 
 
 @main.command()
@@ -35,7 +48,9 @@ def spread(
     end: Optional[str],
     rolling: Optional[int] = None,
 ):
-    spread_mod.spread(symbols, start, end, rolling)
+    s = get_ts(start) if start else None
+    e = get_ts(end) if end else None
+    spread_mod.spread(symbols, s, e, rolling)
 
 
 @main.command(help="plot normalized deviation between price/returns and relative MA")
@@ -89,10 +104,12 @@ def hmm(
     output_dir: str,
     plot: bool,
 ):
+    s = get_ts(start) if start else None
+    e = get_ts(end) if end else None
     hmm_mod.hmm(
         symbol,
-        start,
-        end,
+        s,
+        e,
         n_regimes,
         vol_window,
         momentum_window,

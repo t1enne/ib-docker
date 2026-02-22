@@ -143,6 +143,7 @@ class TradeSignal:
     timestamp: pd.Timestamp
     price: float
     reason: Optional[TradeExitReason] = TradeExitReason.none
+    hedge_beta: Optional[float] = None
 
 
 @dataclass

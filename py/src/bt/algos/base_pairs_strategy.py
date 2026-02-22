@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 import pandas as pd
 from collections import defaultdict
 
@@ -16,7 +16,12 @@ class BasePairsStrategy:
         self.pending_ticks = defaultdict(dict)
 
     def _long(
-        self, symbol: str, timestamp: pd.Timestamp, price: float, z_score: float
+        self,
+        symbol: str,
+        timestamp: pd.Timestamp,
+        price: float,
+        z_score: float,
+        hedge_beta: Optional[float] = None,
     ) -> TradeSignal:
         """Create a long signal."""
         return TradeSignal(
@@ -25,10 +30,16 @@ class BasePairsStrategy:
             z_score=z_score,
             timestamp=timestamp,
             price=price,
+            hedge_beta=hedge_beta,
         )
 
     def _short(
-        self, symbol: str, timestamp: pd.Timestamp, price: float, z_score: float
+        self,
+        symbol: str,
+        timestamp: pd.Timestamp,
+        price: float,
+        z_score: float,
+        hedge_beta: Optional[float] = None,
     ) -> TradeSignal:
         """Create a short signal."""
         return TradeSignal(
@@ -37,6 +48,7 @@ class BasePairsStrategy:
             z_score=z_score,
             timestamp=timestamp,
             price=price,
+            hedge_beta=hedge_beta,
         )
 
     def _close(

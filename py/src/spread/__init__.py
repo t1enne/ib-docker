@@ -15,7 +15,7 @@ def spread(
     rolling: Optional[int] = None,
 ):
     sym1, sym2 = symbols
-    ma_windows = [9, 14, 50]
+    ma_windows = [14]
     _start = parse_timestamp(start_date) if start_date else None
     _end = parse_timestamp(end_date) if end_date else None
     df1 = read_candles(sym1.upper(), _start, _end)
@@ -41,12 +41,12 @@ def spread(
         for i in range(len(prices1)):
             s1 = prices1[: i + 1]
             s2 = prices2[: i + 1]
-            z = calculate_rolling_z(s1, s2, window)
+            z, _, _ = calculate_rolling_z(s1, s2, window)
             z_scores.append(z)
 
         z_score = pd.Series(z_scores, index=dates)
     else:
-        z = calculate_rolling_z(prices1, prices2, len(prices1))
+        z, _, _ = calculate_rolling_z(prices1, prices2, len(prices1))
         z_score = pd.Series([z], index=[dates[-1]])
 
     fig = make_subplots(
@@ -108,6 +108,6 @@ def spread(
 
     fig.update_xaxes(type="date")
 
-    output_file = f"spread_{sym1}_{sym2}.html"
+    output_file = f"plots/spread_{sym1}_{sym2}.html"
     fig.write_html(output_file)
     print(f"Saved to {output_file}")

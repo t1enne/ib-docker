@@ -2,12 +2,14 @@ import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
 from src.bt.engine.backtest_engine import DataFeed, BacktestEngine
+from src.bt.execution import ExecutionHandler
 from src.bt.types import (
     Tick,
     TradeSignal,
     ActionType,
     StrategyProtocol,
     FillEvent,
+    ExecutionParams,
     StrategyConfig,
     EngineWindow,
 )
@@ -158,7 +160,7 @@ def sample_df():
 @pytest.mark.asyncio
 async def test_run(mock_strategy, sample_df, strategy_config):
     """Test BacktestEngine.run processes ticks and returns results."""
-    with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
+    with patch("src.read_candles", return_value=sample_df):
         engine = BacktestEngine(strategy_config)
 
         signal = TradeSignal(
@@ -178,7 +180,7 @@ async def test_run(mock_strategy, sample_df, strategy_config):
 
 def test_finalize_results(sample_df, strategy_config):
     """Test BacktestEngine._finalize_results constructs PortfolioResult."""
-    with patch("src.bt.engine.backtest_engine.read_candles", return_value=sample_df):
+    with patch("src.read_candles", return_value=sample_df):
         engine = BacktestEngine(strategy_config)
         signal = TradeSignal(
             action=ActionType.long,
@@ -205,3 +207,154 @@ def test_finalize_results(sample_df, strategy_config):
         results = engine._finalize_results().pf
         assert len(results.trades) == 1
         assert results.trades[0].pnl > 1
+
+
+# ---------------------------------------------------------------------------
+# Signal dispatch tests
+# ---------------------------------------------------------------------------
+
+
+def _make_engine(strategy_config):
+    """Create a BacktestEngine with patched read_candles."""
+    sample_df = pd.DataFrame(
+        {
+            "Open": [100.0],
+            "High": [105.0],
+            "Low": [95.0],
+            "Close": [102.0],
+            "Volume": [1000],
+        },
+        index=pd.Index([get_ts("2025-01-01")], dtype="datetime64[ns]"),
+    )
+    with patch("src.read_candles", return_value=sample_df):
+        return BacktestEngine(strategy_config)
+
+
+def test_all_pending_signals_execute(strategy_config):
+    """All pending signals for a symbol should execute — no skipped elements."""
+    engine = _make_engine(strategy_config)
+    exec_handler = ExecutionHandler(ExecutionParams(spread_bps=0, slippage_bps=0))
+    engine.execution_handler = exec_handler
+
+    # 3 signals for AAPL
+    engine.pending_signals = [
+        TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            z_score=2.0,
+            timestamp=get_ts("2025-01-01"),
+            price=100.0,
+        ),
+        TradeSignal(
+            action=ActionType.close,
+            symbol="AAPL",
+            z_score=0.0,
+            timestamp=get_ts("2025-01-01"),
+            price=105.0,
+        ),
+        TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            z_score=2.5,
+            timestamp=get_ts("2025-01-01"),
+            price=103.0,
+        ),
+    ]
+
+    tick = Tick(
+        timestamp=get_ts("2025-01-01"),
+        symbol="AAPL",
+        open=100.0,
+        high=106.0,
+        low=99.0,
+        close=105.0,
+        volume=1000,
+    )
+
+    # Simulate the dispatch loop from _run_backtest
+    remaining = []
+    for signal in engine.pending_signals:
+        if signal.symbol == tick.symbol:
+            fill = engine.execution_handler.execute(signal, tick)
+            engine.portfolio.on_fill(fill)
+        else:
+            remaining.append(signal)
+    engine.pending_signals = remaining
+
+    # All 3 signals should have been processed (open, close, re-open)
+    assert len(engine.portfolio.trades) == 2  # two opens recorded
+    assert engine.pending_signals == []
+
+
+def test_signals_only_execute_against_matching_tick(strategy_config):
+    """Signals for GOOGL should not execute on an AAPL tick."""
+    engine = _make_engine(strategy_config)
+    exec_handler = ExecutionHandler(ExecutionParams(spread_bps=0, slippage_bps=0))
+    engine.execution_handler = exec_handler
+
+    aapl_signal = TradeSignal(
+        action=ActionType.long,
+        symbol="AAPL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=100.0,
+    )
+    googl_signal = TradeSignal(
+        action=ActionType.short,
+        symbol="GOOGL",
+        z_score=2.0,
+        timestamp=get_ts("2025-01-01"),
+        price=200.0,
+    )
+    engine.pending_signals = [aapl_signal, googl_signal]
+
+    aapl_tick = Tick(
+        timestamp=get_ts("2025-01-01"),
+        symbol="AAPL",
+        open=100.0,
+        high=106.0,
+        low=99.0,
+        close=105.0,
+        volume=1000,
+    )
+
+    # Dispatch against AAPL tick
+    remaining = []
+    for signal in engine.pending_signals:
+        if signal.symbol == aapl_tick.symbol:
+            fill = engine.execution_handler.execute(signal, aapl_tick)
+            engine.portfolio.on_fill(fill)
+        else:
+            remaining.append(signal)
+    engine.pending_signals = remaining
+
+    # Only AAPL signal executed; GOOGL signal deferred
+    assert len(engine.portfolio.trades) == 1
+    assert engine.portfolio.trades[0].symbol == "AAPL"
+    assert len(engine.pending_signals) == 1
+    assert engine.pending_signals[0].symbol == "GOOGL"
+
+    # Now dispatch against GOOGL tick
+    googl_tick = Tick(
+        timestamp=get_ts("2025-01-01"),
+        symbol="GOOGL",
+        open=200.0,
+        high=210.0,
+        low=195.0,
+        close=205.0,
+        volume=500,
+    )
+    remaining = []
+    for signal in engine.pending_signals:
+        if signal.symbol == googl_tick.symbol:
+            fill = engine.execution_handler.execute(signal, googl_tick)
+            engine.portfolio.on_fill(fill)
+        else:
+            remaining.append(signal)
+    engine.pending_signals = remaining
+
+    # Both legs now filled
+    assert len(engine.portfolio.trades) == 2
+    assert engine.pending_signals == []
+    symbols_traded = {t.symbol for t in engine.portfolio.trades}
+    assert symbols_traded == {"AAPL", "GOOGL"}

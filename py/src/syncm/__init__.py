@@ -1,39 +1,63 @@
+from src.utils import get_days_from_now
+from src.db.models import SymbolSchema, ISymbol
 from dataclasses import dataclass
 from typing import cast, Any, Dict, List, Optional
 import asyncio
-import datetime
-
+from datetime import date, datetime
 import yaml
-from src.syncm.ibkr_layer import candles, get_contract_info, lookup
-from src.db.models import get_ohlcv_model
+
+from src.syncm.ibkr_layer.candles import candles_batch
+from src.syncm.ibkr_layer import get_contract_info, lookup
 
 
 @dataclass
 class UniverseConf:
     universe: List[str]
-    intervals: List[str]
-    start_date: Optional[datetime.date] = None
+    from_date: Optional[date] = None
+
+
+async def _get_symbol_for_ticker(ticker: str) -> ISymbol:
+    s = SymbolSchema.get_or_none(SymbolSchema.ticker == ticker)
+    if s:
+        return s
+
+    print(f"looking up {ticker}")
+    contract = await lookup(ticker)
+    conid = int(contract.conid or "-")
+    symbol_info = await get_contract_info(conid)
+    return symbol_info
+
+
+def _get_symbols(tickers: list[str]):
+    semaphore = asyncio.Semaphore(2)
+
+    async def bounded_resolve(ticker: str) -> Optional[ISymbol]:
+        async with semaphore:
+            try:
+                return await _get_symbol_for_ticker(ticker)
+            except Exception as e:
+                print(f"Error resolving {ticker}: {e}")
+                return None
+
+    return [bounded_resolve(ticker) for ticker in tickers]
+
+
+async def _get_candles(symbols: list[ISymbol], from_date: date):
+    try:
+        await candles_batch(
+            [symbol.conid for symbol in symbols],
+            lookback=get_days_from_now(from_date),
+            from_date=from_date,
+        )
+    except Exception as e:
+        print(f"Error syncing {symbols}: {e}")
 
 
 async def sync_data(config: UniverseConf):
-    tasks = []
-    for ticker in config.universe:
-        for interval in config.intervals:
-            tasks.append(sync_symbol(ticker, interval))
-
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def sync_symbol(ticker: str, interval: str):
-    try:
-        conid = await lookup(ticker)
-        symbol_info = await get_contract_info(conid)
-        print(f"Syncing {ticker} ({symbol_info.id}) for {interval}")
-        model = get_ohlcv_model(interval)
-        await candles(conid, bar=cast(Any, interval))
-        print(f"  Synced {ticker} for {interval}")
-    except Exception as e:
-        print(f"Error syncing {ticker} for {interval}: {e}")
+    from_date = config.from_date or date.today()
+    _symbols: list[ISymbol] = await asyncio.gather(*_get_symbols(config.universe))
+    symbols = [s for s in _symbols if s is not None]
+    await _get_candles(symbols, from_date)
 
 
 def load_universe_config(file_path: str) -> UniverseConf:

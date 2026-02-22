@@ -1,9 +1,42 @@
+from dataclasses import dataclass
 from peewee import Model, IntegerField, CharField, FloatField
 from . import db
 
+from dataclasses import dataclass
+from typing import Optional
 
-class Symbol(Model):
-    id = IntegerField(primary_key=True)
+
+@dataclass
+class ISymbol:
+    """
+    Dataclass matching SymbolSchema Peewee model
+    """
+
+    conid: int
+    ticker: str
+    market: str
+    currency: str
+    name: Optional[str] = None
+
+
+@dataclass
+class ICandle:
+    """
+    Dataclass matching CandleSchema Peewee model
+    """
+
+    conid: int
+    ticker: str
+    timestamp: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class SymbolSchema(Model):
+    conid = IntegerField(primary_key=True)
     ticker = CharField()
     name = CharField(null=True)
     market = CharField()
@@ -14,8 +47,9 @@ class Symbol(Model):
         table_name = "symbol"
 
 
-class OHLCVBase(Model):
-    symbol_id = IntegerField()
+class CandleSchema(Model):
+    conid = IntegerField()
+    ticker = CharField()
     timestamp = IntegerField()
     open = FloatField()
     high = FloatField()
@@ -25,11 +59,4 @@ class OHLCVBase(Model):
 
     class Meta:
         database = db
-
-
-def get_ohlcv_model(bar: str):
-    class Meta:
-        database = db
-        table_name = f"ohlcv_{bar}"
-
-    return type(f"OHLCV{bar}", (OHLCVBase,), {"Meta": Meta})
+        table_name = "candle"

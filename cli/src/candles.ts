@@ -27,11 +27,10 @@ export async function candles({
     bar, // 5mins
   };
 
-  const tableName = `ohlcv_${bar as "1h"}` as const;
   const maxTimestampResult = await db
-    .selectFrom(tableName)
+    .selectFrom("candle")
     .select((eb) => eb.fn.max("timestamp").as("maxTs"))
-    .where("symbol_id", "=", symbolInfo.id)
+    .where("conid", "=", symbolInfo.conid)
     .executeTakeFirst();
   const maxTs = maxTimestampResult?.maxTs as number | null;
 
@@ -57,13 +56,14 @@ export async function candles({
     process.exit(0);
   }
 
-  console.log(`Inserting ${filteredData.length} rows for ${symbolInfo.symbol}`);
+  console.log(`Inserting ${filteredData.length} rows for ${symbolInfo.ticker}`);
 
   await db
-    .insertInto(tableName)
+    .insertInto("candle")
     .values(
       filteredData.map((item) => ({
-        symbol_id: symbolInfo.id,
+        conid: symbolInfo.conid,
+        ticker: symbolInfo.ticker,
         timestamp: item.t,
         open: item.o,
         high: item.h,

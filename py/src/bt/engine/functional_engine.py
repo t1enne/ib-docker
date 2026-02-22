@@ -2,15 +2,21 @@
 
 This provides a functional interface while maintaining compatibility
 with the existing backtest engine.
+
+Design principles:
+- Dependencies can be injected for testing
+- Factory function creates default dependencies for production
+- Core logic is as pure as possible
 """
 
 from src.bt.data_feed import DataFeed
 from src.bt.algos.pairs_trading_functional import pairs_trading_on_tick
 
-from typing import Iterator, Optional, Dict, Any
+from typing import Iterator, Optional, Dict, Any, Callable
 from collections import defaultdict
 import pandas as pd
 import logging
+import asyncio
 
 from src.bt.state import (
     BacktestState,
@@ -29,7 +35,7 @@ from src.bt.state import (
 from src.bt.portfolio.pure import apply_fill, update_prices, get_open_position
 from src.bt.risk.pure import check_risk
 from src.bt.execution.pure import execute_signal, execute_risk_event
-from src.bt.types import StrategyConfig, PortfolioResult
+from src.bt.types import StrategyConfig, PortfolioResult, EngineWindow, BacktestResults
 from src.utils import parse_timestamp
 
 logger = logging.getLogger(__name__)
@@ -38,37 +44,54 @@ logger = logging.getLogger(__name__)
 class FunctionalBacktestEngine:
     """Backtest engine using pure functional state transformations.
 
-    Maintains compatibility with the original BacktestEngine interface
-    while using immutable state internally.
+    Dependencies can be injected via constructor for testing.
+    Use create_functional_engine() for production default setup.
     """
 
     def __init__(
         self,
         config: StrategyConfig,
+        # Injected dependencies - all optional
+        initial_state: Optional[BacktestState] = None,
+        execution_params: Optional[ExecutionParams] = None,
+        risk_config: Optional[RiskConfig] = None,
+        window: Optional[EngineWindow] = None,
+        # Data feed factory - will be called if data_feed is None
+        data_feed_factory: Optional[Callable[[], DataFeed]] = None,
     ):
         self.config = config
         self.symbols = config.symbols
 
-        # Create initial state
+        # Initialize or use injected dependencies
         start_date = parse_timestamp(config.trading_start)
 
-        self.state = create_initial_backtest_state(
-            symbols=config.symbols,
-            initial_capital=config.initial_capital,
-            start_timestamp=start_date,
-            rolling_window_size=config.rolling_window_size,
+        self._state = (
+            initial_state
+            if initial_state is not None
+            else create_initial_backtest_state(
+                symbols=config.symbols,
+                initial_capital=config.initial_capital,
+                start_timestamp=start_date,
+                rolling_window_size=config.rolling_window_size,
+            )
         )
 
-        # Execution and risk configs
-        self.execution_params = create_execution_params(
-            fixed_commission=config.commission
-        )
-        self.risk_config = create_risk_config(
-            stop_loss_pct=config.stop_loss, take_profit_pct=config.take_profit
+        self._execution_params = (
+            execution_params
+            if execution_params is not None
+            else create_execution_params(fixed_commission=config.commission)
         )
 
-        # Window
-        self.window = self._build_window(config)
+        self._risk_config = (
+            risk_config
+            if risk_config is not None
+            else create_risk_config(
+                stop_loss_pct=config.stop_loss, take_profit_pct=config.take_profit
+            )
+        )
+
+        self._window = window if window is not None else self._build_window(config)
+        self._data_feed_factory = data_feed_factory
 
         # Data storage for results
         self.z_scores = []
@@ -76,11 +99,30 @@ class FunctionalBacktestEngine:
         self.regime_labels = []
         self.regime_timestamps = []
 
-    def _build_window(self, config):
-        """Build engine window from config."""
-        from src.utils import parse_timestamp
-        from src.bt.types import EngineWindow
+    @property
+    def state(self) -> BacktestState:
+        """Current backtest state (read-only)."""
+        return self._state
 
+    @state.setter
+    def state(self, value: BacktestState):
+        """Allow setting state for testing."""
+        self._state = value
+
+    @property
+    def execution_params(self) -> ExecutionParams:
+        return self._execution_params
+
+    @property
+    def risk_config(self) -> RiskConfig:
+        return self._risk_config
+
+    @property
+    def window(self) -> EngineWindow:
+        return self._window
+
+    def _build_window(self, config: StrategyConfig) -> EngineWindow:
+        """Build engine window from config."""
         return EngineWindow(
             train_start=parse_timestamp(config.training_start),
             train_end=parse_timestamp(config.training_end),
@@ -88,15 +130,26 @@ class FunctionalBacktestEngine:
             test_end=parse_timestamp(config.trading_end),
         )
 
-    async def run(self):
-        """Run backtest using functional pipeline."""
-        from src.bt.data_feed import DataFeed
+    async def run(self) -> "BacktestResults":
+        """Run backtest using functional pipeline.
 
-        # Create data feed
-        data_feed = DataFeed(self.config, self.window)
+        Creates data feed internally or uses injected factory.
+        """
+        # Create data feed using factory if provided
+        if self._data_feed_factory is not None:
+            data_feed = self._data_feed_factory()
+        else:
+            data_feed = DataFeed(self.config, self._window)
 
+        return await self.run_with_data_feed(data_feed)
+
+    async def run_with_data_feed(self, data_feed: DataFeed) -> "BacktestResults":
+        """Run backtest with an injected data feed.
+
+        This is the main entry point when data feed is injected for testing.
+        """
         # Process all ticks
-        state = self.state
+        state = self._state
         ticks_by_timestamp = defaultdict(list)
 
         async for tick in data_feed.get_data_stream():
@@ -112,19 +165,19 @@ class FunctionalBacktestEngine:
 
                 # Check if we're in trading period
                 can_trade = (
-                    self.window.test_start <= tick.timestamp <= self.window.test_end
+                    self._window.test_start <= tick.timestamp <= self._window.test_end
                 )
 
                 if can_trade:
                     # Process tick through functional pipeline
                     state = self._process_tick(state, tick, tick_group)
-                    self.state = state
+                    self._state = state
 
                 del ticks_by_timestamp[tick.timestamp]
 
         # Finalize - close all positions
         final_state = self._finalize(state)
-        self.state = final_state
+        self._state = final_state
 
         # Build results
         return self._build_results(final_state, data_feed)
@@ -159,7 +212,7 @@ class FunctionalBacktestEngine:
                 sig_tick = tick_group.get(signal.symbol)
                 if sig_tick is None:
                     continue
-                fill = execute_signal(signal, sig_tick, self.execution_params)
+                fill = execute_signal(signal, sig_tick, self._execution_params)
                 portfolio = apply_fill(
                     portfolio,
                     fill,
@@ -240,7 +293,6 @@ class FunctionalBacktestEngine:
             return 0.0, 1.0
 
         from src.bt.zscore import calculate_rolling_z
-        import pandas as pd
 
         z, _, beta = calculate_rolling_z(
             pd.Series(prices1), pd.Series(prices2), self.config.rolling_window_size
@@ -269,7 +321,7 @@ class FunctionalBacktestEngine:
             if tick is None:
                 continue
 
-            fill = execute_signal(signal, tick, self.execution_params)
+            fill = execute_signal(signal, tick, self._execution_params)
             portfolio = apply_fill(
                 portfolio,
                 fill,
@@ -290,14 +342,14 @@ class FunctionalBacktestEngine:
         self, state: BacktestState, tick: Tick
     ) -> BacktestState:
         """Check risk and execute closes."""
-        risk_events = check_risk(state.portfolio, tick, self.risk_config)
+        risk_events = check_risk(state.portfolio, tick, self._risk_config)
 
         if not risk_events:
             return state
 
         portfolio = state.portfolio
         for event in risk_events:
-            fill = execute_risk_event(event, tick, self.execution_params)
+            fill = execute_risk_event(event, tick, self._execution_params)
             portfolio = apply_fill(portfolio, fill)
 
         return BacktestState(
@@ -341,7 +393,7 @@ class FunctionalBacktestEngine:
                 signal=close_signal,
                 filled_qty=abs(position.qty),
                 executed_price=position.last_price,
-                commission=self.execution_params.fixed_commission,
+                commission=self._execution_params.fixed_commission,
                 slippage=0.0,
                 timestamp=close_signal.timestamp,
             )
@@ -360,7 +412,6 @@ class FunctionalBacktestEngine:
         """Build backtest results from final state."""
         from src.bt.types import BacktestResults
         from src.bt.metrics import calculate_portfolio_result
-        import pandas as pd
 
         # Calculate results from portfolio
         equity_series = pd.Series(
@@ -384,3 +435,12 @@ class FunctionalBacktestEngine:
             regimes=None,
             final_state=state,
         )
+
+
+def create_functional_engine(config: StrategyConfig) -> FunctionalBacktestEngine:
+    """Factory function to create engine with default production dependencies.
+
+    This is the recommended way to create the engine in production.
+    For testing, inject dependencies directly via FunctionalBacktestEngine constructor.
+    """
+    return FunctionalBacktestEngine(config=config)

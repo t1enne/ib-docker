@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional, Any, cast
 from scipy import stats
+from io import StringIO
+import sys
 
 from src.bt.types import PortfolioResult, ActionType
 
@@ -327,11 +329,20 @@ def print_results_analysis(
     result: PortfolioResult,
     metrics: Optional[PerformanceMetrics] = None,
     title: str = "Backtest Results",
-):
+    return_output: bool = False,
+) -> Optional[str]:
     if metrics is None:
         metrics = analyze_portfolio(result)
 
     equity_curve = result.equity_curve
+
+    # Capture output if requested
+    output = None
+    original_stdout = None
+    if return_output:
+        output = StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = output
 
     print(f"\n{title}")
     print("=" * 80)
@@ -424,6 +435,13 @@ def print_results_analysis(
             f"{str(t.close_reason):<15} "
             f"{sl_tp_str:<15}"
         )
+
+    # Restore stdout and return output if requested
+    if return_output:
+        sys.stdout = original_stdout
+        return output.getvalue()
+
+    return None
 
 
 def exposure_and_turnover(

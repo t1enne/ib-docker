@@ -12,6 +12,7 @@ import src.syncm as sync_mod
 import src.hmm as hmm_mod
 
 from src.bt import StrategyType, backtest, load_strategy, StrategyConfig
+from src.bt.metrics import print_results_analysis
 
 
 @click.group()
@@ -193,7 +194,8 @@ def strategy(
 @click.argument("strategy_file")
 def bt(strategy_file: str):
     config = load_strategy(strategy_file)
-    asyncio.run(backtest(config))
+    output = asyncio.run(backtest(config, return_output=True, plot=False))
+    click.echo(output)
 
 
 @main.command(help="sync historical candle data for universe")

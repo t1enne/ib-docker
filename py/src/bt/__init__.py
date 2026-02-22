@@ -24,7 +24,9 @@ def load_strategy(path: str) -> StrategyConfig:
     return StrategyConfig(**data)
 
 
-async def backtest(strategy_conf: StrategyConfig):
+async def backtest(
+    strategy_conf: StrategyConfig, return_output: bool = False, plot: bool = True
+):
     """
     Backtest a trading strategy using walk-forward analysis.
 
@@ -32,6 +34,11 @@ async def backtest(strategy_conf: StrategyConfig):
     - Training on historical data (in-sample)
     - Testing on future data (out-of-sample)
     - Rolling forward through time with retraining at specified intervals
+
+    Args:
+        strategy_conf: Strategy configuration
+        return_output: If True, return the output string instead of printing
+        plot: If True, generate plot (default True)
     """
     # Validate inputs
     if (
@@ -46,5 +53,11 @@ async def backtest(strategy_conf: StrategyConfig):
     # Use functional engine
     engine = FunctionalBacktestEngine(strategy_conf)
     results = await engine.run()
-    print_results_analysis(results.pf)
-    plot_backtest_results(strategy_conf, results)
+    output = print_results_analysis(results.pf, return_output=return_output)
+
+    if plot:
+        plot_backtest_results(strategy_conf, results)
+
+    if return_output:
+        return output
+    return None

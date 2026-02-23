@@ -1,5 +1,5 @@
 # Engine module for backtesting engine
-from src.bt.engine.functional_engine import (
-    FunctionalBacktestEngine,
-    create_functional_engine,
+from src.bt.engine.engine import (
+    Engine,
+    create_engine,
 )

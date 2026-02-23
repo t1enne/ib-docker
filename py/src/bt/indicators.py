@@ -24,54 +24,10 @@ import pandas as pd
 import numpy as np
 
 
-def ema(
-    data: Union[pd.Series, pd.DataFrame], *spans: int
-) -> Union[pd.DataFrame, pd.Series]:
-    """Calculate Exponential Moving Average(s).
-
-    Args:
-        data: Price series or DataFrame (columns=symbols, index=time)
-        *spans: One or more EMA span/period values
-
-    Returns:
-        DataFrame with columns named like 'ema_9', 'ema_14' if multiple spans
-        or single Series if only one span provided
-
-    Usage:
-        # Single EMA on single series
-        ema_9 = ema(closes, 9)
-
-        # Multiple EMAs on single series
-        emas = ema(closes, 9, 14, 50)  # Returns DataFrame with ema_9, ema_14, ema_50
-
-        # EMA on DataFrame of multiple symbols
-        ema_9_all = ema(market_data.close, 9)  # Returns DataFrame with ema for each symbol
-    """
-    if not spans:
-        spans = (20,)  # Default EMA period
-
-    if isinstance(data, pd.DataFrame):
-        # Multi-symbol case
-        if len(spans) == 1:
-            return data.ewm(span=spans[0], adjust=False).mean()
-        else:
-            # Multiple EMAs - return DataFrame with MultiIndex columns
-            result = pd.DataFrame(index=data.index)
-            for span in spans:
-                ema_df = data.ewm(span=span, adjust=False).mean()
-                for col in ema_df.columns:
-                    result[f"ema_{span}_{col}"] = ema_df[col]
-            return result
-    else:
-        # Single series case
-        if len(spans) == 1:
-            return data.ewm(span=spans[0], adjust=False).mean()
-        else:
-            # Multiple EMAs - return DataFrame
-            result = pd.DataFrame(index=data.index)
-            for span in spans:
-                result[f"ema_{span}"] = data.ewm(span=span, adjust=False).mean()
-            return result
+def ema(data: pd.Series, span: int) -> int:
+    """Calculate Exponential Moving Average(s)."""
+    mean = data.ewm(span=span, adjust=False).mean()
+    return round(mean.iloc[-1], 3)
 
 
 def sma(data: pd.Series, window: int) -> pd.Series:

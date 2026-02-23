@@ -325,24 +325,20 @@ def _safe_date_str(date: object | None) -> str:
     return str(date)[:10]
 
 
-def print_results_analysis(
+def get_backtest_results_analysis(
     result: PortfolioResult,
     metrics: Optional[PerformanceMetrics] = None,
     title: str = "Backtest Results",
-    return_output: bool = False,
-) -> Optional[str]:
+) -> str:
     if metrics is None:
         metrics = analyze_portfolio(result)
 
     equity_curve = result.equity_curve
 
-    # Capture output if requested
-    output = None
-    original_stdout = None
-    if return_output:
-        output = StringIO()
-        original_stdout = sys.stdout
-        sys.stdout = output
+    # Capture output
+    output = StringIO()
+    original_stdout = sys.stdout
+    sys.stdout = output
 
     print(f"\n{title}")
     print("=" * 80)
@@ -391,7 +387,7 @@ def print_results_analysis(
 
     print(f"\n{'Trading Statistics':<25}")
     print("-" * 42)
-    print(f"Starting Capital:<25 {equity_curve.iloc[0]}")
+    print(f"{'Starting Capital':<25} {equity_curve.iloc[0]:>15}")
     print(f"{'Total Trades':<25} {len(trades):>15}")
     print(f"{'Closed Trades':<25} {len(closed_trades):>15}")
     print(f"{'Win Rate':<25} {win_rate:>14.2%}")
@@ -409,9 +405,6 @@ def print_results_analysis(
                 f"{dd.net_drawdown_pct:<14.2f} {_safe_date_str(dd.peak_date):<15} {_safe_date_str(dd.valley_date):<15} {_safe_date_str(dd.recovery_date):<15} {dd.duration:<10}"
             )
 
-    if len(trades) == 0:
-        print()
-        return
     print(f"\n{'Trades':<75}")
     print("-" * 120)
     # Table header
@@ -437,11 +430,8 @@ def print_results_analysis(
         )
 
     # Restore stdout and return output if requested
-    if return_output:
-        sys.stdout = original_stdout
-        return output.getvalue()
-
-    return None
+    sys.stdout = original_stdout
+    return output.getvalue()
 
 
 def exposure_and_turnover(

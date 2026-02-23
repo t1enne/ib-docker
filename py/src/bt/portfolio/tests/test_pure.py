@@ -32,7 +32,6 @@ class TestApplyFill:
             symbol="AAPL",
             timestamp=pd.Timestamp("2024-01-01"),
             price=100.0,
-            z_score=2.0,
         )
 
         fill = FillEvent(
@@ -124,6 +123,7 @@ class TestApplyFill:
         assert len(new_portfolio.trades) == 1
         assert new_portfolio.trades[0].status == TradeStatus.closed
         assert new_portfolio.trades[0].pnl == 100.0  # (110-100) * 10 - 1 commission
+        assert new_portfolio.cash < 10000
 
         # Original unchanged
         assert "AAPL" in portfolio.positions

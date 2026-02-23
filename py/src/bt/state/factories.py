@@ -1,7 +1,7 @@
 """Factory functions for creating initial states."""
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast, Any
 import pandas as pd
 
 from src.bt.state.types import (
@@ -37,15 +37,15 @@ def create_initial_portfolio(
 
 def create_empty_market_data(symbols: List[str]) -> MarketDataState:
     """Create empty market data state."""
-    return MarketDataState(timestamps=(), bars=(), symbols=tuple(symbols))
+    return MarketDataState(symbols=tuple(symbols))
 
 
 def create_initial_model_state(
-    symbols: List[str], rolling_window_size: int
+    symbols: List[str], rolling_window_size: Optional[int] = None
 ) -> ModelState:
     """Create initial model state."""
     return ModelState(
-        z_score=0.0,
+        z_score=None,
         current_regime=None,
         price_buffers=(),
         market_data=create_empty_market_data(symbols),
@@ -57,15 +57,20 @@ def create_initial_backtest_state(
     symbols: List[str],
     initial_capital: float,
     start_timestamp: pd.Timestamp,
-    rolling_window_size: int,
+    rolling_window_size: Optional[int] = None,
 ) -> BacktestState:
     """Create initial backtest state."""
+    empty_candles = pd.DataFrame(
+        columns=cast(Any, ["open", "high", "low", "close", "volume"]),
+        index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
+    )
     return BacktestState(
         portfolio=create_initial_portfolio(initial_capital, start_timestamp),
         timestamp=None,
         pending_signals=[],
         model_state=create_initial_model_state(symbols, rolling_window_size),
         risk_events=(),
+        candles=empty_candles,
     )
 
 

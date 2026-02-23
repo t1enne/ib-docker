@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
-from src.bt.engine.functional_engine import FunctionalBacktestEngine
+from src.bt.engine.engine import Engine
 from src.bt.execution.pure import execute_signal
 from src.bt.types import (
     StrategyProtocol,
@@ -77,8 +77,6 @@ def strategy_config():
         name="test",
         strategy_type="pnd",
         symbols=["AAPL", "GOOGL"],
-        entry_z=2.0,
-        exit_z=0.0,
         stop_loss=0.1,
         take_profit=1.5,
         initial_capital=10000,
@@ -90,6 +88,10 @@ def strategy_config():
         trading_end="2025-01-02",
         rolling_window_size=20,
         plot=False,
+        strategy_params={
+            "entry_z": 2.0,
+            "exit_z": 0.0,
+        },
         bar="1d",
     )
 
@@ -157,9 +159,9 @@ def sample_df():
 
 @pytest.mark.asyncio
 async def test_run(mock_strategy, sample_df, strategy_config):
-    """Test FunctionalBacktestEngine.run processes ticks and returns results."""
+    """Test Engine.run processes ticks and returns results."""
     with patch("src.read_candles", return_value=sample_df):
-        engine = FunctionalBacktestEngine(strategy_config)
+        engine = Engine(strategy_config)
 
         signal = TradeSignal(
             action=ActionType.long,
@@ -181,9 +183,9 @@ async def test_run(mock_strategy, sample_df, strategy_config):
 
 
 def test_finalize_results(sample_df, strategy_config):
-    """Test FunctionalBacktestEngine._finalize constructs PortfolioResult."""
+    """Test Engine._finalize constructs PortfolioResult."""
     with patch("src.read_candles", return_value=sample_df):
-        engine = FunctionalBacktestEngine(strategy_config)
+        engine = Engine(strategy_config)
         signal = TradeSignal(
             action=ActionType.long,
             symbol="AAPL",
@@ -236,7 +238,7 @@ def test_finalize_results(sample_df, strategy_config):
 
 
 def _make_engine(strategy_config):
-    """Create a FunctionalBacktestEngine with patched read_candles."""
+    """Create a Engine with patched read_candles."""
     sample_df = pd.DataFrame(
         {
             "Open": [100.0],
@@ -248,7 +250,7 @@ def _make_engine(strategy_config):
         index=pd.Index([get_ts("2025-01-01")], dtype="datetime64[ns]"),
     )
     with patch("src.read_candles", return_value=sample_df):
-        return FunctionalBacktestEngine(strategy_config)
+        return Engine(strategy_config)
 
 
 def test_all_pending_signals_execute(strategy_config):

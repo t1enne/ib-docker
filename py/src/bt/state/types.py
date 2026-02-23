@@ -8,11 +8,14 @@ All state is immutable (frozen dataclasses) to enable:
 """
 
 from dataclasses import dataclass, field
-from typing import Tuple, Dict, Optional, Any, List
+from typing import Tuple, Dict, Optional, Any, List, Union, Literal, TYPE_CHECKING
 from enum import Enum, auto
 import pandas as pd
 import numpy as np
 from typing import FrozenSet
+
+if TYPE_CHECKING:
+    from src.bt.types import PlotConfig
 
 
 class ActionType(Enum):
@@ -33,6 +36,7 @@ class TradeExitReason(Enum):
     end = "end"
     regression = "regression"
     none = "none"
+    signal = "signal"
 
 
 @dataclass(frozen=True)
@@ -61,7 +65,7 @@ class Position:
     last_price: float
 
 
-@dataclass(frozen=True)
+@dataclass
 class Trade:
     """A completed trade record."""
 
@@ -70,7 +74,7 @@ class Trade:
     exit_time: Optional[pd.Timestamp]
     exit_price: Optional[float]
     last_price: float
-    z_score: float
+    z_score: Optional[float]
     symbol: str
     position: ActionType
     qty: float
@@ -78,7 +82,7 @@ class Trade:
     take_profit: float
     pnl: float = 0.0
     status: TradeStatus = TradeStatus.open
-    close_reason: Optional[TradeExitReason] = None
+    close_reason: Optional[Any] = None
 
 
 @dataclass(frozen=True)
@@ -110,9 +114,9 @@ class TradeSignal:
     symbol: str
     timestamp: pd.Timestamp
     price: float
-    z_score: float
     qty: float = 0.0
-    reason: Optional[TradeExitReason] = None
+    reason: Optional[Any] = None
+    z_score: Optional[float] = None
     hedge_beta: Optional[float] = None
 
 
@@ -173,8 +177,6 @@ class RiskConfig:
 class MarketDataState:
     """Immutable market data history."""
 
-    timestamps: Tuple[pd.Timestamp, ...]
-    bars: Tuple[Dict[str, Tick], ...]
     symbols: Tuple[str, ...]
 
 
@@ -182,7 +184,7 @@ class MarketDataState:
 class ModelState:
     """Strategy model computations."""
 
-    z_score: float
+    z_score: Optional[float]
     current_regime: Optional[int]
     price_buffers: Tuple[Dict[str, float], ...]
     market_data: MarketDataState
@@ -195,9 +197,10 @@ class BacktestState:
 
     portfolio: PortfolioState
     timestamp: Optional[pd.Timestamp]
-    pending_signals: Tuple[TradeSignal, ...]
+    pending_signals: List[TradeSignal]
     model_state: ModelState
     risk_events: Tuple[Any, ...]  # RiskEvent tuple
+    candles: pd.DataFrame
 
 
 @dataclass(frozen=True)
@@ -230,3 +233,4 @@ class BacktestResults:
     z_scores: pd.DataFrame
     regimes: Optional[pd.DataFrame]
     final_state: BacktestState
+    plot_config: Optional["PlotConfig"] = None

@@ -24,7 +24,7 @@ Beta                                 1.00
 
 Trading Statistics       
 ------------------------------------------
-Starting Capital:<25 10000.0
+Starting Capital                  10000.0
 Total Trades                           32
 Closed Trades                          32
 Win Rate                          46.88%

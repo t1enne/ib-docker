@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import pandas as pd
 from typing import List, Optional, Any, Protocol, Union, TypedDict, Dict
 from enum import Enum
@@ -40,13 +40,17 @@ class EngineWindow:
     test_end: pd.Timestamp
 
 
+@dataclass(frozen=True)
+class PlotConfig:
+    price_overlays: Dict[str, Dict[str, pd.Series]] = field(default_factory=dict)
+    subplots: List[tuple[str, pd.Series]] = field(default_factory=list)
+
+
 @dataclass
 class StrategyConfig:
     name: str
     strategy_type: str
     symbols: list[str]
-    entry_z: float
-    exit_z: float
     stop_loss: float
     take_profit: float
     initial_capital: float
@@ -56,9 +60,12 @@ class StrategyConfig:
     training_end: str
     trading_start: str
     trading_end: str
-    rolling_window_size: int
-    plot: bool
     bar: str
+    # the strategy_params will be passed to the strategy raw
+    strategy_params: dict
+    # the rolling_window_size will be used to retrain the models
+    plot: Optional[bool] = False
+    rolling_window_size: Optional[int] = None
     hmm_floating_window: Optional[int] = None
     hmm_retrain_interval: Optional[int] = None
 
@@ -75,8 +82,6 @@ class StrategyProtocol(Protocol):
     features and historical data. Use self.model.z_score, self.model.market_data,
     etc. from within your strategy.
     """
-
-    model: Any  # StrategyModel instance
 
     def on_tick(self, tick: Tick, open_trade: Optional[Trade]) -> List[TradeSignal]:
         """Process a tick and return trading signals.

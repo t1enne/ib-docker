@@ -12,7 +12,7 @@ import src.syncm as sync_mod
 import src.hmm as hmm_mod
 
 from src.bt import StrategyType, backtest, load_strategy, StrategyConfig
-from src.bt.metrics import print_results_analysis
+from src.bt.metrics import get_backtest_results_analysis
 
 
 @click.group()
@@ -169,8 +169,6 @@ def strategy(
         name=name,
         strategy_type=strategy_type,
         symbols=list(symbols),
-        entry_z=entry_z,
-        exit_z=exit_z,
         stop_loss=stop_loss,
         take_profit=take_profit,
         initial_capital=initial_capital,
@@ -182,6 +180,10 @@ def strategy(
         trading_end=trading_end,
         rolling_window_size=rolling_window_size,
         bar=bar,
+        strategy_params={
+            entry_z: entry_z,
+            exit_z: exit_z,
+        },
         plot=plot,
     )
 
@@ -194,7 +196,7 @@ def strategy(
 @click.argument("strategy_file")
 def bt(strategy_file: str):
     config = load_strategy(strategy_file)
-    output = asyncio.run(backtest(config, return_output=True, plot=False))
+    output = asyncio.run(backtest(config))
     click.echo(output)
 
 

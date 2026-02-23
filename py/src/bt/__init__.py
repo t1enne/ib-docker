@@ -5,8 +5,8 @@ import logging
 import click
 import yaml
 
-from src.bt.engine.functional_engine import FunctionalBacktestEngine
-from src.bt.metrics import print_results_analysis
+from src.bt.engine.engine import Engine
+from src.bt.metrics import get_backtest_results_analysis
 from src.bt.types import StrategyConfig, StrategyType
 from src.bt.types import PortfolioResult
 
@@ -24,9 +24,7 @@ def load_strategy(path: str) -> StrategyConfig:
     return StrategyConfig(**data)
 
 
-async def backtest(
-    strategy_conf: StrategyConfig, return_output: bool = False, plot: bool = True
-):
+async def backtest(strategy_conf: StrategyConfig) -> str:
     """
     Backtest a trading strategy using walk-forward analysis.
 
@@ -51,13 +49,11 @@ async def backtest(
         )
 
     # Use functional engine
-    engine = FunctionalBacktestEngine(strategy_conf)
+    engine = Engine(strategy_conf)
     results = await engine.run()
-    output = print_results_analysis(results.pf, return_output=return_output)
+    output = get_backtest_results_analysis(results.pf)
 
-    if plot:
+    if strategy_conf.plot:
         plot_backtest_results(strategy_conf, results)
 
-    if return_output:
-        return output
-    return None
+    return output

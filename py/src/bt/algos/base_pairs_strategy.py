@@ -19,7 +19,7 @@ class BasePairsStrategy:
         symbol: str,
         timestamp: pd.Timestamp,
         price: float,
-        z_score: float,
+        z_score: Optional[float],
         hedge_beta: Optional[float] = None,
     ) -> TradeSignal:
         """Create a long signal."""
@@ -37,7 +37,7 @@ class BasePairsStrategy:
         symbol: str,
         timestamp: pd.Timestamp,
         price: float,
-        z_score: float,
+        z_score: Optional[float],
         hedge_beta: Optional[float] = None,
     ) -> TradeSignal:
         """Create a short signal."""
@@ -51,7 +51,11 @@ class BasePairsStrategy:
         )
 
     def _close(
-        self, symbol: str, timestamp: pd.Timestamp, price: float, z_score: float
+        self,
+        symbol: str,
+        timestamp: pd.Timestamp,
+        price: float,
+        z_score: Optional[float],
     ) -> TradeSignal:
         """Create a close signal."""
         return TradeSignal(

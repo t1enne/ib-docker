@@ -9,16 +9,22 @@ Design principles:
 - Core logic is as pure as possible
 """
 
-from src.bt.data_feed import DataFeed
-from src.bt.algos.pairs_trading_functional import pairs_trading_on_tick
+from src.bt.metrics import calculate_portfolio_result
+from src.bt.types import PlotConfig
 
-from typing import Iterator, Optional, Dict, Any, Callable
+from src.bt.zscore import calculate_rolling_z
+
+from src.bt.data_feed import DataFeed
+from src.bt.algos import ema_cross, pairs_trading_functional
+
+from typing import Iterator, Optional, Dict, Any, Callable, List
 from collections import defaultdict
 import pandas as pd
 import logging
 import asyncio
 
 from src.bt.state import (
+    ActionType,
     BacktestState,
     Tick,
     PortfolioState,
@@ -31,6 +37,7 @@ from src.bt.state import (
     create_initial_backtest_state,
     create_execution_params,
     create_risk_config,
+    TradeExitReason,
 )
 from src.bt.portfolio.pure import apply_fill, update_prices, get_open_position
 from src.bt.risk.pure import check_risk
@@ -41,11 +48,11 @@ from src.utils import parse_timestamp
 logger = logging.getLogger(__name__)
 
 
-class FunctionalBacktestEngine:
+class Engine:
     """Backtest engine using pure functional state transformations.
 
     Dependencies can be injected via constructor for testing.
-    Use create_functional_engine() for production default setup.
+    Use create_engine() for production default setup.
     """
 
     def __init__(
@@ -176,11 +183,10 @@ class FunctionalBacktestEngine:
                 del ticks_by_timestamp[tick.timestamp]
 
         # Finalize - close all positions
-        final_state = self._finalize(state)
-        self._state = final_state
+        self._state = self._finalize(state)
 
         # Build results
-        return self._build_results(final_state, data_feed)
+        return self._build_results(self._state, data_feed)
 
     def _process_tick(
         self, state: BacktestState, tick: Tick, tick_group: Dict[str, Any]
@@ -188,19 +194,33 @@ class FunctionalBacktestEngine:
         """Process single tick through functional pipeline."""
 
         # Stage 0: Update models FIRST (so z_score is current when generating signals)
-        state = self._update_models(state, tick_group)
+        if self.config.rolling_window_size:
+            state = self._update_models(state, tick_group)
+
+        state = self._append_candle(state, tick)
 
         # Stage 1: Execute pending signals from PREVIOUS tick
         state = self._execute_signals(state, tick_group)
 
+        def _strat_wrap() -> List[TradeSignal]:
+            if self.config.strategy_type == "pnd":
+                entry_z = self.config.strategy_params.get("entry_z", 0.0)
+                exit_z = self.config.strategy_params.get("exit_z", 0.0)
+                return pairs_trading_functional.on_tick(
+                    state,
+                    tick_group,
+                    entry_z,
+                    exit_z,
+                )
+            elif self.config.strategy_type == "ema_cross":
+                return ema_cross.on_tick(state, tick, self.config.strategy_params)
+
+            raise ValueError("Unrecognized strat")
+
         # Stage 2: Generate NEW signals from strategy (using updated z_score)
         # This includes BOTH exit signals (if z regressed) and entry signals
-        all_signals = pairs_trading_on_tick(
-            state, tick_group, self.config.entry_z, self.config.exit_z
-        )
 
-        # Separate close and entry signals
-        from src.bt.state import ActionType
+        all_signals = _strat_wrap()
 
         close_signals = [s for s in all_signals if s.action == ActionType.close]
         entry_signals = [s for s in all_signals if s.action != ActionType.close]
@@ -223,13 +243,14 @@ class FunctionalBacktestEngine:
             state = BacktestState(
                 portfolio=portfolio,
                 timestamp=state.timestamp,
-                pending_signals=(),
+                pending_signals=[],
                 model_state=state.model_state,
                 risk_events=state.risk_events,
+                candles=state.candles,
             )
 
         # Store entry signals for next tick (don't execute immediately)
-        state = state.__replace__(pending_signals=tuple(entry_signals))
+        state = state.__replace__(pending_signals=(entry_signals))
 
         # Stage 3: Check risk
         state = self._check_and_execute_risk(state, tick)
@@ -241,6 +262,8 @@ class FunctionalBacktestEngine:
 
     def _update_models(self, state: BacktestState, tick_group: Dict) -> BacktestState:
         """Update model state with new data."""
+        if not self.config.rolling_window_size:
+            return state
         # Simplified - just update price buffers
         prices = {sym: tick.close for sym, tick in tick_group.items()}
         new_buffers = state.model_state.price_buffers + (prices,)
@@ -249,10 +272,13 @@ class FunctionalBacktestEngine:
         if len(new_buffers) > self.config.rolling_window_size:
             new_buffers = new_buffers[-self.config.rolling_window_size :]
 
-        # Calculate z-score using OLS regression
-        z_score = 0.0
+        # Calculate z-score using OLS regression (only for pair trading strategies)
+        z_score: Optional[float] = None
         hedge_beta = 1.0
-        if len(new_buffers) >= self.config.rolling_window_size:
+        if (
+            self.config.strategy_type in ["pnd", "spread"]
+            and len(new_buffers) >= self.config.rolling_window_size
+        ):
             z_score, hedge_beta = self._calculate_z_score(new_buffers)
 
         new_model = ModelState(
@@ -273,11 +299,43 @@ class FunctionalBacktestEngine:
             pending_signals=state.pending_signals,
             model_state=new_model,
             risk_events=(),
+            candles=state.candles,
+        )
+
+    def _append_candle(self, state: BacktestState, tick: Tick):
+        new_row = pd.DataFrame(
+            {
+                "open": [tick.open],
+                "high": [tick.high],
+                "low": [tick.low],
+                "close": [tick.close],
+                "volume": [tick.volume],
+            },
+            index=pd.MultiIndex.from_tuples(
+                [(tick.symbol, tick.timestamp)], names=["symbol", "timestamp"]
+            ),
+        )
+
+        if state.candles.empty:
+            candles = new_row
+        else:
+            candles = pd.concat([state.candles, new_row])
+
+        return BacktestState(
+            portfolio=state.portfolio,
+            timestamp=state.timestamp,
+            pending_signals=state.pending_signals,
+            model_state=state.model_state,
+            risk_events=state.risk_events,
+            candles=candles,
         )
 
     def _calculate_z_score(self, buffers):
         """Calculate z-score from price buffers using OLS regression."""
         if len(buffers) < 2:
+            return 0.0, 1.0
+
+        if not self.config.rolling_window_size:
             return 0.0, 1.0
 
         # Get last two symbols
@@ -291,8 +349,6 @@ class FunctionalBacktestEngine:
 
         if len(prices1) < self.config.rolling_window_size:
             return 0.0, 1.0
-
-        from src.bt.zscore import calculate_rolling_z
 
         z, _, beta = calculate_rolling_z(
             pd.Series(prices1), pd.Series(prices2), self.config.rolling_window_size
@@ -333,9 +389,10 @@ class FunctionalBacktestEngine:
         return BacktestState(
             portfolio=portfolio,
             timestamp=state.timestamp,
-            pending_signals=(),  # All signals executed
+            pending_signals=[],  # All signals executed
             model_state=state.model_state,
             risk_events=state.risk_events,
+            candles=state.candles,
         )
 
     def _check_and_execute_risk(
@@ -358,6 +415,7 @@ class FunctionalBacktestEngine:
             pending_signals=state.pending_signals,
             model_state=state.model_state,
             risk_events=risk_events,
+            candles=state.candles,
         )
 
     def _update_prices(self, state: BacktestState, tick: Tick) -> BacktestState:
@@ -370,23 +428,22 @@ class FunctionalBacktestEngine:
             pending_signals=state.pending_signals,
             model_state=state.model_state,
             risk_events=state.risk_events,
+            candles=state.candles,
         )
 
     def _finalize(self, state: BacktestState) -> BacktestState:
         """Close all positions at end."""
-        from src.bt.state import ActionType
 
         portfolio = state.portfolio
 
         # Create close signals for all positions
-        for symbol, position in portfolio.positions.items():
+        for symbol, position in list(portfolio.positions.items()):
             close_signal = TradeSignal(
                 action=ActionType.close,
                 symbol=symbol,
                 timestamp=state.timestamp or pd.Timestamp.now(),
                 price=position.last_price,
-                z_score=0.0,
-                reason=None,
+                reason=TradeExitReason.end,
             )
 
             fill = FillEvent(
@@ -403,15 +460,14 @@ class FunctionalBacktestEngine:
         return BacktestState(
             portfolio=portfolio,
             timestamp=state.timestamp,
-            pending_signals=(),
+            pending_signals=[],
             model_state=state.model_state,
             risk_events=(),
+            candles=state.candles,
         )
 
     def _build_results(self, state: BacktestState, data_feed: DataFeed):
         """Build backtest results from final state."""
-        from src.bt.types import BacktestResults
-        from src.bt.metrics import calculate_portfolio_result
 
         # Calculate results from portfolio
         equity_series = pd.Series(
@@ -428,19 +484,31 @@ class FunctionalBacktestEngine:
             {"z": self.z_scores}, index=pd.DatetimeIndex(self.z_timestamps)
         )
 
+        # Call strategy plot function
+        plot_config = self._get_strategy_plot_fn(state)
+
         return BacktestResults(
             pf=pf_result,
             data=data_feed.candles_df,
             z_scores=z_df,
             regimes=None,
             final_state=state,
+            plot_config=plot_config,
         )
 
+    def _get_strategy_plot_fn(self, state: BacktestState) -> Optional[PlotConfig]:
+        """Call the strategy's plot function based on strategy type."""
+        if self.config.strategy_type == "ema_cross":
+            return ema_cross.plot(state, self.config)
+        elif self.config.strategy_type == "pnd":
+            return pairs_trading_functional.plot(state, self.config)
+        return None
 
-def create_functional_engine(config: StrategyConfig) -> FunctionalBacktestEngine:
+
+def create_engine(config: StrategyConfig) -> Engine:
     """Factory function to create engine with default production dependencies.
 
     This is the recommended way to create the engine in production.
-    For testing, inject dependencies directly via FunctionalBacktestEngine constructor.
+    For testing, inject dependencies directly via Engine constructor.
     """
-    return FunctionalBacktestEngine(config=config)
+    return Engine(config=config)

@@ -41,14 +41,14 @@ def apply_fill(
 
     if signal.action == ActionType.close:
         return _close_position(portfolio, fill)
-    else:
-        return _open_position(
-            portfolio,
-            fill,
-            position_size_pct=position_size_pct,
-            stop_loss_pct=stop_loss_pct,
-            take_profit_pct=take_profit_pct,
-        )
+
+    return _open_position(
+        portfolio,
+        fill,
+        position_size_pct=position_size_pct,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+    )
 
 
 def _open_position(
@@ -65,6 +65,8 @@ def _open_position(
     is_long = signal.action == ActionType.long
     base_qty = portfolio.cash * position_size_pct / fill.executed_price
     qty = round(base_qty * (signal.hedge_beta or 1.0), 4)
+    if qty <= 0:
+        return portfolio
 
     # Calculate SL/TP using config
     if is_long:
@@ -77,7 +79,7 @@ def _open_position(
     # Create position
     position = Position(
         symbol=signal.symbol,
-        qty=qty if is_long else -qty,
+        qty=qty,
         entry_price=fill.executed_price,
         entry_time=fill.timestamp,
         stop_loss=stop_loss,

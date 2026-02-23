@@ -1,20 +1,19 @@
-name: ma_vma_v
+name: ema-strat
 training_start: 2025-01-01
 training_end: 2025-02-01
 trading_start: 2025-02-02
-trading_end: 2026-02-20
-rolling_window_size: 50
+trading_end: 2026-01-01
 commission: 0.1
 initial_capital: 10000
 plot: false
 position_size: 0.2
-strategy_type: pnd
-stop_loss: 0.05
-take_profit: .1
+strategy_type: ema_cross
+stop_loss: 0.1
+take_profit: .5
 bar: 1h
+plot: true
 strategy_params:
-  entry_z: 3
-  exit_z: 0.5
+  fast: 14
+  slow: 50
 symbols:
-  - spy
   - qqq

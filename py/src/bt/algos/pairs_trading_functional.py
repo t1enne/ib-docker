@@ -3,7 +3,9 @@
 Pure functions that generate signals based on state.
 """
 
-from typing import Tuple, Optional, List
+from src.bt.algos.utils import close, open
+
+from typing import Tuple, Optional, List, TYPE_CHECKING
 from src.bt.state import (
     BacktestState,
     TradeSignal,
@@ -12,38 +14,14 @@ from src.bt.state import (
     Tick,
     Position,
 )
+from src.bt.types import PlotConfig
+import pandas as pd
+
+if TYPE_CHECKING:
+    from src.bt.types import StrategyConfig
 
 
-def _close(tick: Tick, position: Position, z: float) -> List[TradeSignal]:
-    return [
-        TradeSignal(
-            action=ActionType.close,
-            symbol=tick.symbol,
-            timestamp=tick.timestamp,
-            price=tick.close,
-            z_score=z,
-            qty=abs(position.qty),
-            reason=TradeExitReason.regression,
-        )
-    ]
-
-
-def _open(
-    tick: Tick, dir: ActionType, z: float, hedge: Optional[float] = None
-) -> List[TradeSignal]:
-    return [
-        TradeSignal(
-            action=dir,
-            symbol=tick.symbol,
-            timestamp=tick.timestamp,
-            price=tick.close,
-            z_score=z,
-            hedge_beta=hedge,
-        ),
-    ]
-
-
-def pairs_trading_on_tick(
+def on_tick(
     state: BacktestState,
     tick_group: dict,
     entry_z: float,
@@ -64,6 +42,10 @@ def pairs_trading_on_tick(
     signals = []
     z_score = state.model_state.z_score
     hedge = state.model_state.hedge_beta
+
+    # Check if z_score is available (pair trading strategies only)
+    if z_score is None:
+        return signals
 
     # Check if we have enough data
     if len(state.model_state.price_buffers) < 2:
@@ -88,8 +70,16 @@ def pairs_trading_on_tick(
     # If we have positions, check for exit
     if have_positions and is_regressed:
         # Exit signal
-        signal1 = _close(tick1, position1, z_score) if position1 else []
-        signal2 = _close(tick2, position2, z_score) if position2 else []
+        signal1 = (
+            close(tick1, position1, TradeExitReason.regression, z_score)
+            if position1
+            else []
+        )
+        signal2 = (
+            close(tick2, position2, TradeExitReason.regression, z_score)
+            if position2
+            else []
+        )
         return signals + signal1 + signal2
 
     # Only check for entry if we don't have positions
@@ -98,16 +88,28 @@ def pairs_trading_on_tick(
         # Check for entry
     if z_score < -entry_z:
         # Long sym1, short sym2
-        buy_signals = _open(tick1, ActionType.long, z_score) + _open(
+        buy_signals = open(tick1, ActionType.long, z_score) + open(
             tick2, ActionType.short, z_score, hedge
         )
         return signals + buy_signals
 
     if z_score > entry_z:
         # Short sym1, long sym2
-        buy_signals = _open(tick1, ActionType.short, z_score) + _open(
+        buy_signals = open(tick1, ActionType.short, z_score) + open(
             tick2, ActionType.long, z_score, hedge
         )
         return signals + buy_signals
 
     return signals
+
+
+def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
+    """Return z-score as a separate subplot."""
+    z_score = state.model_state.z_score
+    if z_score is None:
+        return PlotConfig()
+
+    timestamps = [buf.get("timestamp") for buf in state.model_state.price_buffers]
+    z_series = pd.Series([z_score], index=[timestamps[-1]] if timestamps else None)
+
+    return PlotConfig(subplots=[("Z-Score", z_series)])

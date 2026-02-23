@@ -3,7 +3,13 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, cast
-from src.bt.types import ActionType, PortfolioResult, StrategyConfig, BacktestResults
+from src.bt.types import (
+    ActionType,
+    PortfolioResult,
+    StrategyConfig,
+    BacktestResults,
+    PlotConfig,
+)
 
 
 @dataclass(frozen=True)
@@ -34,15 +40,23 @@ def plot_backtest_results(
     data = bt_results.data
     results = bt_results.pf
     symbols = config.symbols
-    entry_z = config.entry_z
-    exit_z = config.exit_z
+    entry_z = config.strategy_params.get("entry_z", 0.0)
+    exit_z = config.strategy_params.get("exit_z", 0.0)
     strategy = config.strategy_type
+    plot_config = bt_results.plot_config
 
     has_z_scores = _has_data(z_scores)
     has_regime = _has_data(regime_df)
+    has_strategy_subplots = bool(plot_config and len(plot_config.subplots) > 0)
 
     meta = _build_plot_meta(
-        symbols, has_z_scores, has_regime, entry_z, exit_z, strategy
+        symbols,
+        has_z_scores,
+        has_regime,
+        has_strategy_subplots,
+        entry_z,
+        exit_z,
+        strategy,
     )
     fig = make_subplots(
         rows=meta.num_rows,
@@ -57,13 +71,25 @@ def plot_backtest_results(
     for i, symbol in enumerate(symbols):
         row = i + 1
         _add_price_and_volume(fig, row, symbol, data[symbol])
+
+        # Add price overlays from strategy
+        if plot_config and symbol in plot_config.price_overlays:
+            for name, series in plot_config.price_overlays[symbol].items():
+                _add_overlay(fig, row, series, name)
+
         markers = _collect_trade_markers(results, symbol)
         _add_trade_markers(fig, row, markers)
         fig.update_yaxes(title_text="Price", row=row, col=1, secondary_y=False)
-        # fig.update_xaxes(title_text="Date", row=row, col=1)
 
     row_offset = len(symbols)
-    if has_z_scores:
+
+    # Add strategy-defined subplots (replaces hardcoded z-score)
+    if has_strategy_subplots:
+        assert plot_config is not None
+        for subplot_title, series in plot_config.subplots:
+            _add_series_subplot(fig, row_offset + 1, series, subplot_title)
+            row_offset += 1
+    elif has_z_scores:
         assert z_scores is not None
         _add_zscore_subplot(fig, row_offset + 1, z_scores, entry_z, exit_z)
         row_offset += 1
@@ -98,15 +124,22 @@ def _build_plot_meta(
     symbols: list[str],
     has_z_scores: bool,
     has_regime: bool,
+    has_strategy_subplots: bool,
     entry_z: float,
     exit_z: float,
     strategy: str,
 ) -> PlotMeta:
     num_rows = (
-        len(symbols) + 1 + (1 if has_z_scores else 0) + (1 if has_regime else 0) + 1
+        len(symbols)
+        + (1 if has_strategy_subplots else (1 if has_z_scores else 0))
+        + (1 if has_regime else 0)
+        + 1
+        + 1
     )
     titles = [f"{symbol} Price + Volume" for symbol in symbols]
-    if has_z_scores:
+    if has_strategy_subplots:
+        pass  # Titles will be added by strategy
+    elif has_z_scores:
         titles.append(f"Z-Score (Entry: ±{entry_z}, Exit: ±{exit_z})")
     if has_regime:
         titles.append("HMM Regime Probabilities")
@@ -114,7 +147,9 @@ def _build_plot_meta(
 
     specs: list[list[dict | None]] = []
     specs.extend([[{"secondary_y": True}] for _ in symbols])
-    if has_z_scores:
+    if has_strategy_subplots:
+        pass  # Specs will be added by strategy
+    elif has_z_scores:
         specs.append([{}])
     if has_regime:
         specs.append([{}])
@@ -139,7 +174,7 @@ def _add_price_and_volume(
             y=price_data.values,
             mode="lines",
             name=f"{symbol} Price",
-            line=dict(color="orange"),
+            line=dict(color="black", width=2),
             showlegend=False,
         ),
         row=row,
@@ -288,6 +323,37 @@ def _add_marker_trace(
     )
 
 
+def _add_overlay(fig: go.Figure, row: int, series: pd.Series, name: str):
+    """Add a series as an overlay on the price chart."""
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="lines",
+            name=name,
+            showlegend=False,
+        ),
+        row=row,
+        col=1,
+    )
+
+
+def _add_series_subplot(fig: go.Figure, row: int, series: pd.Series, title: str):
+    """Add a series as a separate subplot."""
+    fig.add_trace(
+        go.Scatter(
+            x=series.index,
+            y=series.values,
+            mode="lines",
+            name=title,
+            showlegend=False,
+        ),
+        row=row,
+        col=1,
+    )
+    fig.update_yaxes(title_text=title, row=row, col=1)
+
+
 def _add_zscore_subplot(
     fig: go.Figure,
     row_z: int,
@@ -430,7 +496,7 @@ def _add_equity_subplot(fig: go.Figure, row: int, equity_series: pd.Series) -> N
             y=equity_series.values,
             mode="lines",
             name="Equity Curve",
-            line=dict(color="green"),
+            line=dict(color="green", width=2),
             showlegend=False,
         ),
         row=row,

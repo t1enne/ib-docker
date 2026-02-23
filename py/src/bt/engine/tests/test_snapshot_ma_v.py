@@ -27,8 +27,6 @@ def ma_v_config():
         trading_end="2026-02-20",
         rolling_window_size=50,
         commission=0.1,
-        entry_z=3,
-        exit_z=0.5,
         initial_capital=10000,
         plot=False,
         position_size=0.2,
@@ -36,6 +34,10 @@ def ma_v_config():
         stop_loss=0.05,
         take_profit=0.1,
         bar="1h",
+        strategy_params={
+            "entry_z": 3,
+            "exit_z": 0.5,
+        },
         symbols=["spy", "qqq"],
     )
 
@@ -44,7 +46,7 @@ def ma_v_config():
 async def test_ma_v_snapshot(ma_v_config):
     """Test that ma_v backtest output matches snapshot."""
     # Run backtest with return_output=True
-    output = await backtest(ma_v_config, return_output=True, plot=False)
+    output = await backtest(ma_v_config)
     assert output is not None, "backtest returned None"
     output = output.rstrip("\n")  # Normalize trailing newlines
 

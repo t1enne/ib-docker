@@ -1,0 +1,113 @@
+training_start: 2012-01-01
+training_end: 2019-12-31
+trading_start: 2020-01-01
+trading_end: 2026-01-01
+
+initial_capital: 1000000
+base_currency: USD
+
+commission: 0.0005
+slippage: 0.0007
+
+strategy_type: volatility_expansion_pullback_continuation
+bar: 1d
+plot: true
+
+max_concurrent_positions: 5
+max_gross_exposure: 1.0
+
+risk_management:
+  risk_per_trade: 0.01
+  max_position_weight: 0.10
+  monthly_drawdown_threshold: 0.10
+  reduced_risk_multiplier: 0.5
+  portfolio_volatility_cap: 0.25
+
+universe:
+  selection_method: top_market_cap
+  top_n: 200
+  min_price: 15
+  min_adv_usd: 30000000
+  exclude_leveraged: true
+  exclude_inverse: true
+  exclude_etn: true
+
+strategy_params:
+  compression:
+    atr_short: 14
+    atr_long: 100
+    compression_threshold: 0.6
+
+  breakout:
+    breakout_lookback_days: 20
+    true_range_multiplier: 1.5
+    volume_multiplier: 1.5
+    volume_lookback_days: 30
+
+  pullback:
+    ema_short_period: 5
+    ema_long_period: 10
+    retracement_min: 0.3
+    retracement_max: 0.5
+    max_pullback_days: 4
+
+  continuation_trigger:
+    require_close_above_prev_high: true
+    allow_bullish_engulfing: true
+
+  trend_filter:
+    ma_fast: 20
+    ma_slow: 50
+    require_positive_slope: true
+    momentum_lookback_days: 63
+    require_positive_return: true
+
+  stops:
+    initial_atr_multiple: 2.5
+    trailing_atr_multiple: 3.0
+    time_stop_days: 20
+    ema_exit_period: 20
+    partial_take_profit_enabled: true
+    partial_take_profit_R: 2.0
+    partial_take_fraction: 0.5
+
+  correlation_filter:
+    enabled: true
+    lookback_days: 90
+    max_pairwise_correlation: 0.8
+
+  volatility_filter:
+    vix_symbol: VIX
+    disable_entries_above: 35
+    enabled: false
+
+model_params:
+  volatility_model:
+    type: rolling_atr
+    atr_period: 14
+
+  covariance_model:
+    type: rolling
+    lookback_days: 90
+
+  volume_model:
+    type: rolling_mean
+    lookback_days: 30
+
+execution_model:
+  order_type: market
+  participation_rate: 0.1
+  volume_limit: 0.25
+
+symbols:
+  - SPY
+  - QQQ
+  - IWM
+  - XLF
+  - XLK
+  - XLE
+  - SMH
+  - ARKK
+  - XBI
+  - GDX
+  # Universe dynamically expanded to top 200 ETFs by market cap

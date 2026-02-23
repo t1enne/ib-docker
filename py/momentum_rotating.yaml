@@ -1,0 +1,104 @@
+training_start: 2010-01-01
+training_end: 2018-12-31
+trading_start: 2019-01-01
+trading_end: 2026-01-01
+
+commission: 0.0005 # 5 bps per trade
+slippage: 0.0005 # modeled slippage
+initial_capital: 1000000
+base_currency: USD
+
+strategy_type: cross_sectional_momentum_rotating
+bar: 1d
+plot: true
+
+rebalance_frequency: 1M
+turnover_cap: 0.5
+max_gross_leverage: 1.5
+min_gross_leverage: 0.5
+
+risk_limits:
+  max_position_weight: 0.25
+  min_position_weight: 0.05
+  max_drawdown_cut: 0.20
+  drawdown_exposure_multiplier: 0.5
+
+regime_filter:
+  enabled: true
+  benchmark_symbol: SPY
+  ma_period: 200
+  exposure_multiplier_below_ma: 0.5
+
+universe:
+  selection_method: top_market_cap
+  top_n: 200
+  min_price: 10
+  min_adv_usd: 20000000
+  exclude_leveraged: true
+  exclude_inverse: true
+  exclude_etn: true
+
+strategy_params:
+  top_selection_n: 10
+  use_absolute_momentum: true
+  absolute_momentum_lookback_days: 252
+
+  momentum:
+    skip_recent_days: 21
+    lookbacks_days:
+      - 252 # 12m
+      - 126 # 6m
+      - 63 # 3m
+      - 21 # 1m
+    weights:
+      - 0.4
+      - 0.3
+      - 0.2
+      - 0.1
+    use_vol_adjustment: true
+    volatility_lookback_days: 126
+
+  correlation_filter:
+    enabled: true
+    lookback_days: 90
+    max_pairwise_correlation: 0.8
+
+  volatility_targeting:
+    enabled: true
+    target_annual_vol: 0.12
+    leverage_clamp_min: 0.5
+    leverage_clamp_max: 1.5
+
+model_params:
+  covariance_model:
+    type: rolling
+    lookback_days: 90
+    ewma_lambda: 0.94
+
+  volatility_model:
+    type: rolling_std
+    lookback_days: 126
+    annualize: true
+
+  beta_model:
+    enabled: false
+    benchmark_symbol: SPY
+    lookback_days: 126
+
+execution_model:
+  order_type: market
+  participation_rate: 0.1
+  volume_limit: 0.2
+
+symbols:
+  - SPY
+  - QQQ
+  - IWM
+  - EFA
+  - EEM
+  - TLT
+  - LQD
+  - HYG
+  - GLD
+  - DBC
+  # Universe dynamically expanded to top 200 by market cap

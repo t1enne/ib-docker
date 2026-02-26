@@ -149,6 +149,9 @@ class Engine:
         else:
             data_feed = DataFeed(self.config, self._window)
 
+        # sync data
+        await data_feed.load(self.config, self._window)
+
         return await self.run_with_data_feed(data_feed)
 
     async def run_with_data_feed(self, data_feed: DataFeed) -> "BacktestResults":

@@ -11,7 +11,7 @@ _DEFAULT_START = pd.Timestamp("2020-01-01")
 _DEFAULT_END = pd.Timestamp("2099-01-01")
 
 
-def read_candles(
+def get_local_candles(
     symbol: str,
     start_date: Optional[pd.Timestamp] = None,
     end_date: Optional[pd.Timestamp] = None,

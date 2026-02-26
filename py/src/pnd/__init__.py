@@ -1,10 +1,10 @@
 import pandas as pd
-from src.utils import get_ols_fit_model, read_candles
+from src.utils import get_ols_fit_model, get_local_candles
 
 
 def pnd(symbols: list[str]):
-    df1 = read_candles(symbols[0].upper())
-    df2 = read_candles(symbols[1].upper())
+    df1 = get_local_candles(symbols[0].upper())
+    df2 = get_local_candles(symbols[1].upper())
     s1 = df1["Close"]
     s2 = df2["Close"]
     model = get_ols_fit_model(s1, s2)

@@ -28,7 +28,7 @@ async def _get_symbol_for_ticker(ticker: str) -> ISymbol:
     return symbol_info
 
 
-def _get_symbols(tickers: list[str]):
+def get_symbols(tickers: list[str]):
     semaphore = asyncio.Semaphore(2)
 
     async def bounded_resolve(ticker: str) -> Optional[ISymbol]:
@@ -53,9 +53,9 @@ async def _get_candles(symbols: list[ISymbol], from_date: date):
         print(f"Error syncing {symbols}: {e}")
 
 
-async def sync_data(config: UniverseConf):
-    from_date = config.from_date or date.today()
-    _symbols: list[ISymbol] = await asyncio.gather(*_get_symbols(config.universe))
+async def sync_data(tickers: list[str], from_date: Optional[date] = None):
+    from_date = from_date or date.today()
+    _symbols: list[ISymbol] = await asyncio.gather(*get_symbols(tickers))
     symbols = [s for s in _symbols if s is not None]
     await _get_candles(symbols, from_date)
 
@@ -66,4 +66,4 @@ def load_universe_config(file_path: str) -> UniverseConf:
     return UniverseConf(**data)
 
 
-__all__ = ["sync_data", "load_universe_config"]
+__all__ = ["sync_data", "load_universe_config", "get_symbols"]

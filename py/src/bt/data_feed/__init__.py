@@ -1,11 +1,14 @@
 # Data feed module
+import asyncio
+from src.db.models import ISymbol
+from src.syncm import get_symbols, sync_data
 
 import pandas as pd
 from pandas import Timestamp
 
 from src.bt.types import StrategyConfig, EngineWindow
 from src.bt.state import Tick
-from src import read_candles
+from src import get_local_candles
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, cast
 
 
@@ -15,9 +18,12 @@ class DataFeed:
     def __init__(self, config: StrategyConfig, window: EngineWindow):
         self.symbols = config.symbols
         self.bar = config.bar
+
+    async def load(self, config: StrategyConfig, window: EngineWindow):
+        await sync_data(config.symbols, window.train_start)
         self.time_series = [
-            read_candles(x, window.train_start, window.test_end, self.bar)
-            for x in self.symbols
+            get_local_candles(x, window.train_start, window.test_end, self.bar)
+            for x in config.symbols
         ]
         self.candles_df = pd.concat(self.time_series, axis=1, keys=self.symbols)
 

@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.hmm.hmm import MarketRegimeHMM
-from src.utils import read_candles, parse_timestamp
+from src.utils import get_local_candles, parse_timestamp
 
 
 # Regime colors for visualization
@@ -342,7 +342,7 @@ def hmm(
     print(f"Loading data for {symbol}...")
     _start = parse_timestamp(start) if start else None
     _end = parse_timestamp(end) if end else None
-    df = read_candles(symbol.upper(), _start, _end)
+    df = get_local_candles(symbol.upper(), _start, _end)
 
     if df.empty:
         print(f"No data found for {symbol}")

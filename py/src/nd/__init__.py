@@ -1,9 +1,9 @@
 import plotly.express as px
-from src.utils import get_log_returns, read_candles
+from src.utils import get_log_returns, get_local_candles
 
 
 def nd(symbol: str, ma: int):
-    df = get_log_returns(read_candles(symbol.upper()))
+    df = get_log_returns(get_local_candles(symbol.upper()))
     col = "Close"
     series = df[col]
     rolling_series = series.rolling(window=ma).mean()

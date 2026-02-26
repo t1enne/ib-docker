@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import yaml
 
-from src.utils import get_log_returns, read_candles, symmetric_cointegration_p
+from src.utils import get_log_returns, get_local_candles, symmetric_cointegration_p
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -41,7 +41,8 @@ def matrix(
 
     input_symbols = list(map(lambda s: s.upper(), input_symbols))
     candles_by_sym = {
-        sym: read_candles(sym.upper(), start, end, bar="1h") for sym in input_symbols
+        sym: get_local_candles(sym.upper(), start, end, bar="1h")
+        for sym in input_symbols
     }
 
     candlex_ref_amount = len(candles_by_sym[input_symbols[0]])

@@ -22,8 +22,8 @@ def on_tick(
     if len(closes) < slow:
         return []
 
-    ema_fast = ta.ema(closes, fast)
-    ema_slow = ta.ema(closes, slow)
+    ema_fast = ta.ema(closes, fast).iloc[-1]
+    ema_slow = ta.ema(closes, slow).iloc[-1]
 
     crossed_below = ema_slow > ema_fast
     if position and crossed_below:
@@ -47,12 +47,9 @@ def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
         if len(closes) < slow:
             continue
 
-        ema_fast = closes.ewm(span=fast, adjust=False).mean()
-        ema_slow = closes.ewm(span=slow, adjust=False).mean()
-
         price_overlays[symbol] = {
-            f"ema_{fast}": ema_fast,
-            f"ema_{slow}": ema_slow,
+            f"ema_{fast}": ta.ema(closes, fast),
+            f"ema_{slow}": ta.ema(closes, slow),
         }
 
     return PlotConfig(price_overlays=price_overlays)

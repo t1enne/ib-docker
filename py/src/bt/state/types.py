@@ -189,6 +189,7 @@ class ModelState:
     price_buffers: Tuple[Dict[str, float], ...]
     market_data: MarketDataState
     hedge_beta: float = 1.0
+    correlation_model: Optional[Any] = None
 
 
 @dataclass(frozen=True)

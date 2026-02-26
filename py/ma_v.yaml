@@ -6,12 +6,13 @@ trading_end: 2026-02-20
 rolling_window_size: 50
 commission: 0.1
 initial_capital: 10000
-plot: false
+plot: true
 position_size: 0.2
 strategy_type: pnd
 stop_loss: 0.05
 take_profit: .1
 bar: 1h
+model_params: false
 strategy_params:
   entry_z: 3
   exit_z: 0.5

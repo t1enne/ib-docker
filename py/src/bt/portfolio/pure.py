@@ -76,6 +76,10 @@ def _open_position(
         stop_loss = round(fill.executed_price * (1 + stop_loss_pct), 2)
         take_profit = round(fill.executed_price * (1 - take_profit_pct), 2)
 
+    # TODO: Partial take profit support - for strategies like vol_extension_pullback
+    # that want to take 50% profit at 2R and trail the remainder.
+    # This would require modifying Position to track partial fills and remaining qty.
+
     # Create position
     position = Position(
         symbol=signal.symbol,

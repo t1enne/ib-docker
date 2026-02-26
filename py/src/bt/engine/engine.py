@@ -15,7 +15,8 @@ from src.bt.types import PlotConfig
 from src.bt.zscore import calculate_rolling_z
 
 from src.bt.data_feed import DataFeed
-from src.bt.algos import ema_cross, pairs_trading_functional
+from src.bt.algos import ema_cross, pairs_trading_functional, vol_extension_pullback
+from src.bt.models.correlation_model import CorrelationModel
 
 from typing import Iterator, Optional, Dict, Any, Callable, List
 from collections import defaultdict
@@ -214,6 +215,13 @@ class Engine:
                 )
             elif self.config.strategy_type == "ema_cross":
                 return ema_cross.on_tick(state, tick, self.config.strategy_params)
+            elif (
+                self.config.strategy_type
+                == "volatility_expansion_pullback_continuation"
+            ):
+                return vol_extension_pullback.on_tick(
+                    state, tick, self.config.strategy_params
+                )
 
             raise ValueError("Unrecognized strat")
 
@@ -281,12 +289,29 @@ class Engine:
         ):
             z_score, hedge_beta = self._calculate_z_score(new_buffers)
 
+        # Calculate correlation matrix for volatility expansion strategy
+        correlation_model: Optional[CorrelationModel] = None
+        if (
+            self.config.strategy_type == "volatility_expansion_pullback_continuation"
+            and len(new_buffers) >= self.config.rolling_window_size
+        ):
+            existing = state.model_state.correlation_model
+            if existing is not None:
+                correlation_model = existing
+            else:
+                correlation_model = CorrelationModel(
+                    self.symbols, self.config.rolling_window_size
+                )
+            if correlation_model is not None:
+                correlation_model.calculate_correlation_matrix(list(new_buffers))
+
         new_model = ModelState(
             z_score=z_score,
             current_regime=state.model_state.current_regime,
             price_buffers=new_buffers,
             market_data=state.model_state.market_data,
             hedge_beta=hedge_beta,
+            correlation_model=correlation_model,
         )
 
         # Track z-scores for results
@@ -502,6 +527,8 @@ class Engine:
             return ema_cross.plot(state, self.config)
         elif self.config.strategy_type == "pnd":
             return pairs_trading_functional.plot(state, self.config)
+        elif self.config.strategy_type == "volatility_expansion_pullback_continuation":
+            return vol_extension_pullback.plot(state, self.config)
         return None
 
 

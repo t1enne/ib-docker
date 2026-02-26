@@ -24,10 +24,9 @@ import pandas as pd
 import numpy as np
 
 
-def ema(data: pd.Series, span: int) -> int:
+def ema(data: pd.Series, span: int) -> pd.Series:
     """Calculate Exponential Moving Average(s)."""
-    mean = data.ewm(span=span, adjust=False).mean()
-    return round(mean.iloc[-1], 3)
+    return data.ewm(span=span, adjust=False).mean()
 
 
 def sma(data: pd.Series, window: int) -> pd.Series:

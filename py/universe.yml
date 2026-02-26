@@ -1,14 +1,36 @@
-from_date: 2025-01-01
+from_date: 2024-01-01
 universe:
-  - VOO
-  - IVV
   - SPY
-  - VTI
   - QQQ
-  - VEA
-  - VUG
-  # # - IEFA
-  # - GLD
+  # Long-term Treasury Bonds - Safe haven asset, negative correlation to stocks during risk-off periods
+  - TLT
+  # Gold - Precious metal, store of value, hedge against inflation and currency debasement
+  - GLD
+  # Silver - Industrial + monetary metal, different drivers than equities
+  - SLV
+  # Gold Miners - Leveraged play on gold, can diverge from broad market
+  - GDX
+  # Energy Sector - Tied to oil prices and global supply/demand, different cycle than tech/growth
+  - XLE
+  # US Dollar Index - Dollar strength often inversely correlated with risk assets
+  - UUP
+  # VIX Short-Term Futures - Volatility product, spikes during market crashes, strongly negative correlation
+  - VIXY
+  # Managed Futures - Trend-following CTA strategy, uncorrelated to both stocks and bonds
+  # - KMLM
+  # # Managed Futures - Alternative beta strategy, thrives during volatility and regime changes
+  # - CTA
+  # # Long-term Treasury Bonds - Alternative gold proxy, same behavior as TLT (lower duration option)
+  # - IAU
+
+  # - VOO
+  # - IVV
+  # - SPY
+  # - VTI
+  # - QQQ
+  # - VEA
+  # - VUG
+  # - IEFA
   # - VTV
   # - BND
   # - IEMG
@@ -28,7 +50,6 @@ universe:
   # - RSP
   # - SCHD
   # - ITOT
-  # - IAU
   # - EFA
   # - BNDX
   # - IWM
@@ -55,7 +76,6 @@ universe:
   # - VV
   # - IWB
   # - SMH
-  # - TLT
   # - DIA
   # - JEPI
   # - VTEB
@@ -68,14 +88,12 @@ universe:
   # - VCSH
   # - IGLN.L
   # - MBB
-  # - SLV
   # - VGIT
   # - DGRO
   # - SCHB
   # - IS3N.DE
   # - SPDW
   # - JPST
-  # - XLE
   # - VONG
   # - VNQ
   # - GOVT
@@ -84,7 +102,6 @@ universe:
   # - VBR
   # - JEPQ
   # - SPYV
-  # - GDX
   # - DYNF
   # - GLDM
   # - VGK

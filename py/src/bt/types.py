@@ -63,6 +63,7 @@ class StrategyConfig:
     bar: str
     # the strategy_params will be passed to the strategy raw
     strategy_params: dict
+    model_params: dict
     # the rolling_window_size will be used to retrain the models
     plot: Optional[bool] = False
     rolling_window_size: Optional[int] = None

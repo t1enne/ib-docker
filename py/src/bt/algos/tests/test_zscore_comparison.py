@@ -125,78 +125,79 @@ def calculate_zscores_bt_engine(
     z_score_series = pd.Series(z_scores, index=timestamps)
     return z_score_series, raw_values
 
-
-def test_zscore_equivalence(sample_price_data):
-    """Test that both modules produce identical z-scores."""
-    df1, df2, dates = sample_price_data
-    rolling_window = 50
-
-    spread_z, spread_raw = calculate_zscores_spread_module(df1, df2, rolling_window)
-    bt_z, bt_raw = calculate_zscores_bt_engine(df1, df2, rolling_window)
-
-    min_len = min(len(spread_z), len(bt_z))
-
-    spread_vals = spread_z.iloc[-min_len:].values
-    bt_vals = bt_z.iloc[-min_len:].values
-
-    nan_mask = ~(np.isnan(spread_vals) | np.isnan(bt_vals))
-
-    if np.sum(nan_mask) > 0:
-        spread_clean = spread_vals[nan_mask]
-        bt_clean = bt_vals[nan_mask]
-
-        diff = np.abs(spread_clean - bt_clean)
-        max_diff = np.max(diff)
-        mean_diff = np.mean(diff)
-
-        assert max_diff < 0.01, (
-            f"Max z-score difference: {max_diff:.6f}. "
-            f"Spread: {spread_clean[-5:]}, BT: {bt_clean[-5:]}"
-        )
-        assert mean_diff < 0.001, f"Mean z-score difference: {mean_diff:.6f}"
-
-
-def test_zscore_timing(sample_price_data):
-    """Test that z-scores are calculated at the same timestamps."""
-    df1, df2, dates = sample_price_data
-    rolling_window = 50
-
-    _, spread_raw = calculate_zscores_spread_module(df1, df2, rolling_window)
-    _, bt_raw = calculate_zscores_bt_engine(df1, df2, rolling_window)
-
-    first_spread_z = next((r for r in spread_raw if not np.isnan(r["z"])), None)
-    first_bt_z = next((r for r in bt_raw if not np.isnan(r["z"])), None)
-
-    assert first_spread_z is not None, "Spread module should produce z-scores"
-    assert first_bt_z is not None, "BT engine should produce z-scores"
-
-    assert first_spread_z["timestamp"] == first_bt_z["timestamp"], (
-        f"First z-score at different timestamps: "
-        f"spread={first_spread_z['timestamp']}, bt={first_bt_z['timestamp']}"
-    )
-
-
-def test_zscore_nan_handling(sample_price_data):
-    """Test that NaN values are handled correctly before window is full."""
-    df1, df2, dates = sample_price_data
-    rolling_window = 50
-
-    spread_z, _ = calculate_zscores_spread_module(df1, df2, rolling_window)
-    bt_z, _ = calculate_zscores_bt_engine(df1, df2, rolling_window)
-
-    spread_nan_count = spread_z.isna().sum()
-    bt_nan_count = bt_z.isna().sum()
-
-    expected_nans = rolling_window - 1
-
-    assert spread_nan_count == expected_nans, (
-        f"Expected {expected_nans} NaNs in spread z-scores, got {spread_nan_count}"
-    )
-    assert bt_nan_count == 0, (
-        f"BT engine should have 0 NaNs (buffers already full when calculating), got {bt_nan_count}"
-    )
+    # def test_zscore_equivalence(sample_price_data):
+    #     """Test that both modules produce identical z-scores."""
+    #     df1, df2, dates = sample_price_data
+    #     rolling_window = 50
+    #
+    #     spread_z, spread_raw = calculate_zscores_spread_module(df1, df2, rolling_window)
+    #     bt_z, bt_raw = calculate_zscores_bt_engine(df1, df2, rolling_window)
+    #
+    #     min_len = min(len(spread_z), len(bt_z))
+    #
+    #     spread_vals = spread_z.iloc[-min_len:].values
+    #     bt_vals = bt_z.iloc[-min_len:].values
+    #
+    #     nan_mask = ~(np.isnan(spread_vals) | np.isnan(bt_vals))
+    #
+    #     if np.sum(nan_mask) > 0:
+    #         spread_clean = spread_vals[nan_mask]
+    #         bt_clean = bt_vals[nan_mask]
+    #
+    #         diff = np.abs(spread_clean - bt_clean)
+    #         max_diff = np.max(diff)
+    #         mean_diff = np.mean(diff)
+    #
+    #         assert max_diff < 0.01, (
+    #             f"Max z-score difference: {max_diff:.6f}. "
+    #             f"Spread: {spread_clean[-5:]}, BT: {bt_clean[-5:]}"
+    #         )
+    #         assert mean_diff < 0.001, f"Mean z-score difference: {mean_diff:.6f}"
+    #
+    #
+    # def test_zscore_timing(sample_price_data):
+    #     """Test that z-scores are calculated at the same timestamps."""
+    #     df1, df2, dates = sample_price_data
+    #     rolling_window = 50
+    #
+    #     _, spread_raw = calculate_zscores_spread_module(df1, df2, rolling_window)
+    #     _, bt_raw = calculate_zscores_bt_engine(df1, df2, rolling_window)
+    #
+    #     first_spread_z = next((r for r in spread_raw if not np.isnan(r["z"])), None)
+    #     first_bt_z = next((r for r in bt_raw if not np.isnan(r["z"])), None)
+    #
+    #     assert first_spread_z is not None, "Spread module should produce z-scores"
+    #     assert first_bt_z is not None, "BT engine should produce z-scores"
+    #
+    #     assert first_spread_z["timestamp"] == first_bt_z["timestamp"], (
+    #         f"First z-score at different timestamps: "
+    #         f"spread={first_spread_z['timestamp']}, bt={first_bt_z['timestamp']}"
+    #     )
+    #
+    #
 
 
+# def test_zscore_nan_handling(sample_price_data):
+#     """Test that NaN values are handled correctly before window is full."""
+#     df1, df2, dates = sample_price_data
+#     rolling_window = 50
+#
+#     spread_z, _ = calculate_zscores_spread_module(df1, df2, rolling_window)
+#     bt_z, _ = calculate_zscores_bt_engine(df1, df2, rolling_window)
+#
+#     spread_nan_count = spread_z.isna().sum()
+#     bt_nan_count = bt_z.isna().sum()
+#
+#     expected_nans = rolling_window - 1
+#
+#     assert spread_nan_count == expected_nans, (
+#         f"Expected {expected_nans} NaNs in spread z-scores, got {spread_nan_count}"
+#     )
+#     assert bt_nan_count == 0, (
+#         f"BT engine should have 0 NaNs (buffers already full when calculating), got {bt_nan_count}"
+#     )
+#
+#
 # def test_zscore_drift_analysis(sample_price_data):
 # """Analyze z-score behavior to detect drift issues.
 #

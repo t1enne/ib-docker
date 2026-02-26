@@ -151,51 +151,21 @@ def patch_test_db(test_db):
     """Patch the production database with test database for candles module."""
     from src.db.models import SymbolSchema, CandleSchema
     import src.db as db_module
-    from unittest.mock import patch
+    from src.db.models import CandleSchema as CandleModel
 
-    # Create models bound to test database
-    test_models = {}
-
-    def patched_get_ohlcv_model(bar: str):
-        """Return OHLCV model bound to test database."""
-        if bar in test_models:
-            return test_models[bar]
-
-        class Meta:
-            database = test_db
-            table_name = f"ohlcv_{bar}"
-
-        model = type(f"OHLCV{bar}", (CandleSchema,), {"Meta": Meta})
-        test_models[bar] = model
-        return model
-
-    # Bind Symbol model to test database
-    test_db.bind([SymbolSchema])
+    # Bind models to test database
+    test_db.bind([SymbolSchema, CandleModel])
 
     # Patch the db module's db object
     original_db = db_module.db
     db_module.db = test_db
 
-    # Only patch if get_ohlcv_model exists
-    import src.db.models as models_module
+    # Also patch CandleSchema's Meta.database
+    original_candle_meta_db = CandleSchema._meta.database
+    CandleSchema._meta.database = test_db
 
-    has_get_ohlcv_model = hasattr(models_module, "get_ohlcv_model")
-
-    if has_get_ohlcv_model:
-        with patch(
-            "src.db.models.get_ohlcv_model", side_effect=patched_get_ohlcv_model
-        ):
-            with patch(
-                "src.syncm.ibkr_layer.candles.get_ohlcv_model",
-                side_effect=patched_get_ohlcv_model,
-            ):
-                yield test_db
-    else:
-        with patch(
-            "src.syncm.ibkr_layer.candles.get_ohlcv_model",
-            side_effect=patched_get_ohlcv_model,
-        ):
-            yield test_db
+    yield test_db
 
     # Restore original db
     db_module.db = original_db
+    CandleSchema._meta.database = original_candle_meta_db

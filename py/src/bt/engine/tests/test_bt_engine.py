@@ -92,6 +92,7 @@ def strategy_config():
             "entry_z": 2.0,
             "exit_z": 0.0,
         },
+        model_params={},
         bar="1d",
     )
 
@@ -160,7 +161,7 @@ def sample_df():
 @pytest.mark.asyncio
 async def test_run(mock_strategy, sample_df, strategy_config):
     """Test Engine.run processes ticks and returns results."""
-    with patch("src.read_candles", return_value=sample_df):
+    with patch("src.get_local_candles", return_value=sample_df):
         engine = Engine(strategy_config)
 
         signal = TradeSignal(
@@ -184,7 +185,7 @@ async def test_run(mock_strategy, sample_df, strategy_config):
 
 def test_finalize_results(sample_df, strategy_config):
     """Test Engine._finalize constructs PortfolioResult."""
-    with patch("src.read_candles", return_value=sample_df):
+    with patch("src.get_local_candles", return_value=sample_df):
         engine = Engine(strategy_config)
         signal = TradeSignal(
             action=ActionType.long,
@@ -249,7 +250,7 @@ def _make_engine(strategy_config):
         },
         index=pd.Index([get_ts("2025-01-01")], dtype="datetime64[ns]"),
     )
-    with patch("src.read_candles", return_value=sample_df):
+    with patch("src.get_local_candles", return_value=sample_df):
         return Engine(strategy_config)
 
 

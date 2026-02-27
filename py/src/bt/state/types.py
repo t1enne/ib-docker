@@ -190,6 +190,8 @@ class ModelState:
     market_data: MarketDataState
     hedge_beta: float = 1.0
     correlation_model: Optional[Any] = None
+    resample_cache: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    resample_anchor: Dict[str, pd.Timestamp] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

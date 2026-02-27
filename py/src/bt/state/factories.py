@@ -50,6 +50,8 @@ def create_initial_model_state(
         price_buffers=(),
         market_data=create_empty_market_data(symbols),
         hedge_beta=1.0,
+        resample_cache={},
+        resample_anchor={},
     )
 
 

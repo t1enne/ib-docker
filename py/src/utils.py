@@ -1,4 +1,5 @@
-from typing import Any, Dict, List, Optional, Union
+from pandas.core.arrays import ExtensionArray
+from typing import Any, Dict, List, Optional, Union, cast
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -218,3 +219,7 @@ def get_days_from_now(from_date: date) -> int:
     now = date.today()
     diff = now - from_date
     return diff.days
+
+
+def list_to_axes(l: list[str]) -> ExtensionArray:
+    return cast(ExtensionArray, l)

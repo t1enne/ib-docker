@@ -16,6 +16,7 @@ from src.bt.zscore import calculate_rolling_z
 
 from src.bt.data_feed import DataFeed
 from src.bt.algos import ema_cross, pairs_trading_functional, vol_extension_pullback
+from src.market_data.cache import update_resample_cache, ResampleCache
 from src.bt.models.correlation_model import CorrelationModel
 
 from typing import Iterator, Optional, Dict, Any, Callable, List
@@ -101,11 +102,35 @@ class Engine:
         self._window = window if window is not None else self._build_window(config)
         self._data_feed_factory = data_feed_factory
 
+        # Initialize resample cache from config
+        self._init_resample_cache()
+
         # Data storage for results
         self.z_scores = []
         self.z_timestamps = []
         self.regime_labels = []
         self.regime_timestamps = []
+
+    def _init_resample_cache(self) -> None:
+        """Initialize resample cache with timeframes from config."""
+        timeframes = self.config.strategy_params.get("resample_timeframes", [])
+        if not timeframes:
+            return
+
+        cache: Dict[str, pd.DataFrame] = {}
+        anchor: Dict[str, pd.Timestamp] = {}
+
+        self._state = BacktestState(
+            portfolio=self._state.portfolio,
+            timestamp=self._state.timestamp,
+            pending_signals=self._state.pending_signals,
+            model_state=self._state.model_state.__replace__(
+                resample_cache=cache,
+                resample_anchor=anchor,
+            ),
+            risk_events=self._state.risk_events,
+            candles=self._state.candles,
+        )
 
     @property
     def state(self) -> BacktestState:
@@ -148,9 +173,9 @@ class Engine:
             data_feed = self._data_feed_factory()
         else:
             data_feed = DataFeed(self.config, self._window)
-
         # sync data
         await data_feed.load(self.config, self._window)
+        breakpoint()
 
         return await self.run_with_data_feed(data_feed)
 
@@ -202,6 +227,9 @@ class Engine:
             state = self._update_models(state, tick_group)
 
         state = self._append_candle(state, tick)
+
+        if state.model_state.resample_cache:
+            state = self._update_resample_cache(state, tick)
 
         # Stage 1: Execute pending signals from PREVIOUS tick
         state = self._execute_signals(state, tick_group)
@@ -356,6 +384,42 @@ class Engine:
             model_state=state.model_state,
             risk_events=state.risk_events,
             candles=candles,
+        )
+
+    def _update_resample_cache(self, state: BacktestState, tick: Tick) -> BacktestState:
+        """Update resample cache when higher-timeframe bucket completes.
+
+        Only updates when anchor changes (new bucket started), ensuring no lookahead.
+        """
+        timeframes = list(state.model_state.resample_cache.keys())
+
+        if not timeframes:
+            return state
+
+        cache_obj = ResampleCache(
+            cache=state.model_state.resample_cache,
+            anchor=state.model_state.resample_anchor,
+        )
+
+        new_cache = update_resample_cache(
+            cache_obj,
+            state.candles,
+            timeframes,
+            tick.timestamp,
+        )
+
+        new_model_state = state.model_state.__replace__(
+            resample_cache=new_cache.cache,
+            resample_anchor=new_cache.anchor,
+        )
+
+        return BacktestState(
+            portfolio=state.portfolio,
+            timestamp=state.timestamp,
+            pending_signals=state.pending_signals,
+            model_state=new_model_state,
+            risk_events=state.risk_events,
+            candles=state.candles,
         )
 
     def _calculate_z_score(self, buffers):

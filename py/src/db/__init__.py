@@ -1,6 +1,7 @@
 import os
 import signal
 import sys
+import atexit
 from peewee import SqliteDatabase
 
 db_path = os.path.join(os.getcwd(), "..", "data", "db.sqlite")
@@ -12,5 +13,8 @@ def close_db():
     db.close()
 
 
-signal.signal(signal.SIGTERM, lambda signum, frame: (close_db(), sys.exit(0)))
-signal.signal(signal.SIGINT, lambda signum, frame: (close_db(), sys.exit(0)))
+atexit.register(close_db)
+
+
+# signal.signal(signal.SIGTERM, lambda signum, frame: (close_db(), sys.exit(0)))
+# signal.signal(signal.SIGINT, lambda signum, frame: (close_db(), sys.exit(0)))

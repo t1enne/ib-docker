@@ -12,7 +12,7 @@ from src.syncm.ibkr_layer import get_contract_info, lookup
 
 @dataclass
 class UniverseConf:
-    universe: List[str]
+    symbols: List[str]
     from_date: Optional[date] = None
 
 

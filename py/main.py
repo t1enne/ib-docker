@@ -1,8 +1,10 @@
+import os
 from src.utils import get_ts
 from typing import Optional
 import click
 import yaml
 import asyncio
+import subprocess
 
 import src.mx as mx_mod
 import src.spread as spread_mod
@@ -133,7 +135,14 @@ def bt(strategy_file: str):
 @click.option("--universe", default="universe.yml", help="Path to universe config file")
 def sync(universe: str):
     data = sync_mod.load_universe_config(universe)
-    asyncio.run(sync_mod.sync_data(data))
+    asyncio.run(sync_mod.sync_data(data.symbols, data.from_date))
+
+
+@main.command(help="view historical data in browser")
+def view():
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.getcwd()
+    subprocess.run(["streamlit", "run", "src/view.py"], env=env)
 
 
 if __name__ == "__main__":

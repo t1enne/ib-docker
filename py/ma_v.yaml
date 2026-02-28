@@ -14,8 +14,8 @@ take_profit: .1
 bar: 1h
 model_params: false
 strategy_params:
-  entry_z: 3
+  entry_z: 2.5
   exit_z: 0.5
 symbols:
-  - spy
   - qqq
+  - xle

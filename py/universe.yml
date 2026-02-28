@@ -1,5 +1,5 @@
 from_date: 2024-01-01
-universe:
+symbols:
   - SPY
   - QQQ
   # Long-term Treasury Bonds - Safe haven asset, negative correlation to stocks during risk-off periods
@@ -15,14 +15,13 @@ universe:
   # US Dollar Index - Dollar strength often inversely correlated with risk assets
   - UUP
   # VIX Short-Term Futures - Volatility product, spikes during market crashes, strongly negative correlation
-  - VIXY
+  # - VIXY
   # Managed Futures - Trend-following CTA strategy, uncorrelated to both stocks and bonds
   # - KMLM
   # # Managed Futures - Alternative beta strategy, thrives during volatility and regime changes
   # - CTA
   # # Long-term Treasury Bonds - Alternative gold proxy, same behavior as TLT (lower duration option)
   # - IAU
-
   # - VOO
   # - IVV
   # - SPY

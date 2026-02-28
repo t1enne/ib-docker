@@ -175,7 +175,6 @@ class Engine:
             data_feed = DataFeed(self.config, self._window)
         # sync data
         await data_feed.load(self.config, self._window)
-        breakpoint()
 
         return await self.run_with_data_feed(data_feed)
 

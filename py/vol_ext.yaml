@@ -79,12 +79,10 @@ model_params:
     lookback_days: 90
 
 symbols:
-  - SPY
+  # - SPY
   - QQQ
-  - TLT
-  - GLD
-  - SLV
-  - GDX
+  # - TLT
+  # - GLD
+  # - SLV
+  # - GDX
   - XLE
-  - UUP
-  - VIXY

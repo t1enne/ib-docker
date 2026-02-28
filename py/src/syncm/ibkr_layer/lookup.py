@@ -24,7 +24,6 @@ async def lookup(ticker: str) -> SecdefSearchResponseItem:
         if not isinstance(r, list):
             raise ValueError(f"Failed to search contract for {ticker}")
 
-        print(r)
         data = [item for item in r if _is_usd_stock(item)]
         first = data[0]
         if not data or not first:

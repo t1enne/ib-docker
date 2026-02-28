@@ -20,7 +20,10 @@ class DataFeed:
         self.bar = config.bar
 
     async def load(self, config: StrategyConfig, window: EngineWindow):
-        await sync_data(config.symbols, window.train_start)
+        from_date = window.train_start.date()
+        await sync_data(
+            config.symbols,
+        )
         self.time_series = [
             get_local_candles(x, window.train_start, window.test_end, self.bar)
             for x in config.symbols
@@ -30,24 +33,32 @@ class DataFeed:
     async def get_data_stream(self) -> AsyncGenerator[Optional[Tick]]:
         """Returns an async generator that yields market data ticks for all symbols."""
         data = self.time_series
-        ticks = []
-        for i in range(len(data)):
-            df = data[i]
-            symbol = self.symbols[i]
-            for idx, row in df.iterrows():
-                ticks.append(
-                    Tick(
-                        timestamp=cast(Timestamp, idx),
-                        symbol=symbol,
+        if not data or not len(data[0].index):
+            raise ValueError("no timestamps")
+
+        has_equal_ts = all(df.index.equals(data[0].index) for df in data[1:])
+        if not has_equal_ts:
+            print("timestamps not in sync")
+
+        # Get union of all timestamps
+        all_timestamps = sorted(set().union(*[set(df.index) for df in data]))
+
+        # Create a lookup for faster existence checking
+        # This is more memory efficient than filtering all dataframes
+        for timestamp in all_timestamps:
+            for j, df in enumerate(data):
+                try:
+                    print(self.symbols[j])
+                    row = df.loc[timestamp]
+                    yield Tick(
+                        timestamp=cast(Timestamp, timestamp),
+                        symbol=self.symbols[j],
                         open=float(row["Open"]),
                         high=float(row["High"]),
                         low=float(row["Low"]),
                         close=float(row["Close"]),
                         volume=float(row["Volume"]),
                     )
-                )
-
-        ticks.sort(key=lambda x: x.timestamp)
-
-        for tick in ticks:
-            yield tick
+                except KeyError:
+                    # This symbol doesn't have data for this timestamp, skip
+                    continue

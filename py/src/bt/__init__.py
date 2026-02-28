@@ -1,3 +1,9 @@
+# beartype workaround
+import collections.abc
+
+collections.abc.ByteString = bytes  # type: ignore
+
+from beartype.claw import beartype_this_package as roar
 from src.bt.plotting.plotting import plot_backtest_results
 from datetime import date
 import logging
@@ -10,8 +16,7 @@ from src.bt.metrics import get_backtest_results_analysis
 from src.bt.types import StrategyConfig, StrategyType
 from src.bt.types import PortfolioResult
 
-
-logger = logging.getLogger(__name__)
+roar()
 
 
 def load_strategy(path: str) -> StrategyConfig:

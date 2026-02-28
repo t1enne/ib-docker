@@ -64,7 +64,6 @@ def main():
             return
 
         print(f"\nFound {len(ranges)} contiguous range(s) for {args.ticker}:\n")
-        print_table(ranges)
     finally:
         db.close()
 

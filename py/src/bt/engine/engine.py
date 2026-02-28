@@ -169,10 +169,12 @@ class Engine:
         Creates data feed internally or uses injected factory.
         """
         # Create data feed using factory if provided
-        if self._data_feed_factory is not None:
-            data_feed = self._data_feed_factory()
-        else:
-            data_feed = DataFeed(self.config, self._window)
+
+        data_feed = (
+            self._data_feed_factory()
+            if self._data_feed_factory is not None
+            else DataFeed(self.config, self._window)
+        )
         # sync data
         await data_feed.load(self.config, self._window)
 

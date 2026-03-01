@@ -12,7 +12,7 @@ from ib_rest_api_client.models import (
 import math
 import re
 import pandas as pd
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, cast
 from src.consts import BAR_INTERVAL
 from src.db import db
@@ -42,31 +42,31 @@ def date_to_timestamp(d: date) -> int:
     return int(datetime.combine(d, datetime.min.time()).timestamp() * 1000)
 
 
-def timestamp_to_date(ts: int) -> date:
-    return datetime.fromtimestamp(ts / 1000).date()
+def timestamp_to_datetime(ts: int) -> datetime:
+    return datetime.fromtimestamp(ts / 1000)
 
 
 def calculate_gaps(
-    requested_from: date,
-    requested_to: date,
+    requested_from: datetime,
+    requested_to: datetime,
     oldest_existing: Optional[int],
     newest_existing: Optional[int],
-) -> list[tuple[date, date]]:
+) -> list[tuple[datetime, datetime]]:
     """Calculate gaps between requested date range and existing data.
 
     Pure function that returns a list of (start, end) tuples representing
     missing date ranges that need to be fetched.
 
     Args:
-        requested_from: Start of the requested date range
-        requested_to: End of the requested date range
+        requested_from: Start of the requested datetime range
+        requested_to: End of the requested datetime range
         oldest_existing: Oldest timestamp in DB (ms), or None if empty
         newest_existing: Newest timestamp in DB (ms), or None if empty
 
     Returns:
-        List of (start_date, end_date) tuples for gaps to fetch
+        List of (start_datetime, end_datetime) tuples for gaps to fetch
     """
-    gaps: list[tuple[date, date]] = []
+    gaps: list[tuple[datetime, datetime]] = []
     if oldest_existing is None and newest_existing is None:
         return [(requested_from, requested_to)]
 
@@ -76,19 +76,21 @@ def calculate_gaps(
     if newest_existing is None:
         newest_existing = oldest_existing
 
-    existing_from = timestamp_to_date(cast(int, oldest_existing))
-    existing_to = timestamp_to_date(cast(int, newest_existing))
+    existing_from = timestamp_to_datetime(cast(int, oldest_existing))
+    existing_to = timestamp_to_datetime(cast(int, newest_existing))
 
     backward_gap_start = requested_from
-    backward_gap_end = existing_from + timedelta(days=1)
+    backward_gap_end = existing_from.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    if backward_gap_start <= backward_gap_end:
+    if backward_gap_start < backward_gap_end:
         gaps.append((backward_gap_start, backward_gap_end))
 
-    forward_gap_start = existing_to - timedelta(days=1)
+    forward_gap_start = (existing_to + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     forward_gap_end = requested_to
 
-    if forward_gap_start <= forward_gap_end:
+    if forward_gap_start < forward_gap_end:
         gaps.append((forward_gap_start, forward_gap_end))
 
     return gaps
@@ -113,26 +115,27 @@ def get_existing_range_sync(ticker: str) -> tuple[Optional[int], Optional[int]]:
 async def _fetch_candles_iterative(
     conid: int,
     bar: str,
-    from_date: date,
-    to_date: date,
+    from_datetime: datetime,
+    to_datetime: datetime,
     data: list[dict] = [],
 ) -> list[dict]:
-    """Iteratively fetch candles from IBKR API for a given date range.
+    """Iteratively fetch candles from IBKR API for a given datetime range.
 
-    Fetches candles going backwards from to_date until from_date is reached.
+    Fetches candles going backwards from to_datetime until from_datetime is reached.
     """
-    current_to = to_date
+    current_to = to_datetime
     accumulated_data = data
 
-    while current_to > from_date:
-        days_to_fetch = (current_to - from_date).days
+    while current_to > from_datetime:
+        datetime_to_fetch = current_to - from_datetime
+        days_to_fetch = max(1, datetime_to_fetch.days)
         if days_to_fetch <= 0:
             break
 
         symbol_info = await get_contract_info(conid)
         print(
             f"Getting candles for {symbol_info.ticker} for days {days_to_fetch}, "
-            f"from {from_date}, to {current_to}"
+            f"from {from_datetime}, to {current_to}"
         )
 
         r = await get_iserver_marketdata_history.asyncio(
@@ -169,12 +172,12 @@ async def _fetch_candles_iterative(
             for item in r.data
         ]
 
-        oldest_date = timestamp_to_date(oldest_ts)
-        print(f"Got {len(r.data)} candles, oldest: {oldest_date}")
+        oldest_datetime = timestamp_to_datetime(oldest_ts)
+        print(f"Got {len(r.data)} candles, oldest: {oldest_datetime}")
 
-        if oldest_date >= current_to or oldest_date <= from_date:
+        if oldest_datetime >= current_to or oldest_datetime <= from_datetime:
             break
-        current_to = oldest_date
+        current_to = oldest_datetime
 
     return accumulated_data
 
@@ -182,8 +185,8 @@ async def _fetch_candles_iterative(
 @with_retry(max_retries=3, base_delay_ms=1000, max_delay_ms=10000)
 async def candles(
     conid: int,
-    from_date: date,
-    to_date: Optional[date] = None,
+    from_datetime: datetime,
+    to_datetime: Optional[datetime] = None,
     bar: str = "1h",
     force_fetch: bool = False,
     ticker: Optional[str] = None,
@@ -192,14 +195,14 @@ async def candles(
 
     Args:
         conid: Contract ID
-        from_date: Start date for fetching
-        to_date: End date for fetching (defaults to today)
+        from_datetime: Start datetime for fetching
+        to_datetime: End datetime for fetching (defaults to now)
         bar: Bar size (e.g., "1h", "1d")
         force_fetch: If True, ignore existing data and fetch all (default: False)
         ticker: Optional ticker symbol. If not provided, will fetch from API.
     """
-    if to_date is None:
-        to_date = date.today()
+    if to_datetime is None:
+        to_datetime = datetime.now()
 
     if ticker is None:
         symbol_info = await get_contract_info(conid)
@@ -208,9 +211,11 @@ async def candles(
     oldest_existing, newest_existing = get_existing_range_sync(ticker)
 
     gaps = (
-        [(from_date, to_date)]
+        [(from_datetime, to_datetime)]
         if force_fetch
-        else calculate_gaps(from_date, to_date, oldest_existing, newest_existing)
+        else calculate_gaps(
+            from_datetime, to_datetime, oldest_existing, newest_existing
+        )
     )
 
     if not gaps:
@@ -246,8 +251,8 @@ async def candles(
 async def candles_batch(
     conids: list[int],
     lookback: int,
-    from_date: date,
-    to_date: Optional[date] = None,
+    from_datetime: datetime,
+    to_datetime: Optional[datetime] = None,
     max_concurrent: int = 2,
     bar: str = "1h",
 ) -> list[int]:
@@ -256,8 +261,8 @@ async def candles_batch(
     Args:
         conids: List of conids to fetch candles for
         lookback: Number of days to look back
-        from_date: Start date for fetching
-        to_date: End date for fetching (defaults to today)
+        from_datetime: Start datetime for fetching
+        to_datetime: End datetime for fetching (defaults to now)
         max_concurrent: Maximum concurrent requests
         bar: Bar size (e.g., "1h", "1d")
 
@@ -270,7 +275,7 @@ async def candles_batch(
     async def fetch_with_limit(c: int) -> int | None:
         try:
             async with semaphore:
-                await candles(c, from_date, to_date, bar)
+                await candles(c, from_datetime, to_datetime, bar)
                 return c
         except Exception as e:
             print(f"Failed to fetch candles for conid {c}: {e}")

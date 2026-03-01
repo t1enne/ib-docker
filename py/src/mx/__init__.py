@@ -11,7 +11,7 @@ from plotly.subplots import make_subplots
 
 def get_metrics(df1: pd.DataFrame, df2: pd.DataFrame):
     corr = np.corrcoef(df1["Returns"], df2["Returns"])[0, 1]
-    p_value = symmetric_cointegration_p(df1["Close"], df2["Close"])
+    p_value = symmetric_cointegration_p(df1["close"], df2["Close"])
     return round(corr, 2), round(p_value, 3)
 
 

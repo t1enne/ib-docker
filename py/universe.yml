@@ -1,5 +1,6 @@
 from_date: 2024-01-01
 symbols:
+  - COIN
   - SPY
   - QQQ
   # Long-term Treasury Bonds - Safe haven asset, negative correlation to stocks during risk-off periods

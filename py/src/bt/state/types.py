@@ -63,6 +63,7 @@ class Position:
     stop_loss: Optional[float]
     take_profit: Optional[float]
     last_price: float
+    type: ActionType
 
 
 @dataclass

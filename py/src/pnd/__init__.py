@@ -5,8 +5,8 @@ from src.utils import get_ols_fit_model, get_local_candles
 def pnd(symbols: list[str]):
     df1 = get_local_candles(symbols[0].upper())
     df2 = get_local_candles(symbols[1].upper())
-    s1 = df1["Close"]
-    s2 = df2["Close"]
+    s1 = df1["close"]
+    s2 = df2["close"]
     model = get_ols_fit_model(s1, s2)
     alpha, beta = model.params
     scaled_s2 = alpha + beta * s2

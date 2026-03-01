@@ -21,15 +21,15 @@ def spread(
     df1 = get_local_candles(sym1.upper(), _start, _end)
     df2 = get_local_candles(sym2.upper(), _start, _end)
 
-    prices1 = df1["Close"].tolist()
-    prices2 = df2["Close"].tolist()
+    prices1 = df1["close"].tolist()
+    prices2 = df2["close"].tolist()
     dates = df1.index
 
     ratio = pd.DataFrame(
         {
-            "ratio": df1["Close"] / df2["Close"],
-            f"{sym1}": df1["Close"],
-            f"{sym2}": df2["Close"],
+            "ratio": df1["close"] / df2["Close"],
+            f"{sym1}": df1["close"],
+            f"{sym2}": df2["close"],
         },
         index=dates,
     )

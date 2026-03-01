@@ -66,6 +66,7 @@ class TestApplyFill:
             stop_loss=95.0,
             take_profit=110.0,
             last_price=100.0,
+            type=ActionType.long,
         )
 
         portfolio = PortfolioState(
@@ -216,6 +217,7 @@ class TestUpdatePrices:
             stop_loss=95.0,
             take_profit=110.0,
             last_price=100.0,
+            type=ActionType.long,
         )
 
         portfolio = PortfolioState(

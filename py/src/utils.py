@@ -1,3 +1,4 @@
+from src.market_data import resample_ohlcv
 from pandas.core.arrays import ExtensionArray
 from typing import Any, Dict, List, Optional, Union, cast
 import pandas as pd
@@ -45,18 +46,21 @@ def get_local_candles(
     con.close()
     columns = pd.Index(
         [
-            "Symbol",
-            "Timestamp",
-            "Open",
-            "High",
-            "Low",
-            "Close",
-            "Volume",
+            "symbol",
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
         ]
     )
     df = pd.DataFrame(data, columns=columns)
-    df = df.assign(Date=pd.to_datetime(df["Timestamp"], unit="ms"))
-    df = df.set_index("Date").drop(columns=["Timestamp"])
+    df = df.assign(Date=pd.to_datetime(df["timestamp"], unit="ms"))
+    df = df.set_index("Date").drop(columns=["timestamp"])
+    # if bar != "1h":
+    #     df = resample_ohlcv(df, bar, completed_only=True)
+
     return df
 
 
@@ -71,7 +75,7 @@ def _parse_date(date_str: str) -> datetime:
 
 
 def get_log_returns(df: pd.DataFrame) -> pd.DataFrame:
-    df.loc[:, "Returns"] = np.log(df["Close"] / df["Close"].shift(1)).round(4)
+    df.loc[:, "Returns"] = np.log(df["close"] / df["close"].shift(1)).round(4)
     return df.dropna()
 
 

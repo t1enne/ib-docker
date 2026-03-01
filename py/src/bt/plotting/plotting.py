@@ -165,8 +165,8 @@ def _add_price_and_volume(
     symbol: str,
     df: pd.DataFrame,
 ) -> None:
-    price_data = df["Close"]
-    volume_data = df["Volume"]
+    price_data = df["close"]
+    volume_data = df["volume"]
 
     fig.add_trace(
         go.Scatter(
@@ -186,7 +186,7 @@ def _add_price_and_volume(
             x=volume_data.index,
             y=volume_data.values,
             name=f"{symbol} Volume",
-            marker_color="rgba(100, 100, 200, 0.3)",
+            marker_color="rgba(100, 100, 200, 0.5)",
             showlegend=False,
         ),
         row=row,
@@ -332,6 +332,7 @@ def _add_overlay(fig: go.Figure, row: int, series: pd.Series, name: str):
             mode="lines",
             name=name,
             showlegend=False,
+            opacity=0.5,
         ),
         row=row,
         col=1,

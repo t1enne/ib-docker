@@ -63,6 +63,7 @@ def test_stop_loss_triggered_long(risk_config):
         stop_loss=90.0,
         take_profit=120.0,
         last_price=100.0,
+        type=ActionType.long,
     )
 
     tick = Tick(
@@ -93,6 +94,7 @@ def test_take_profit_triggered_long(risk_config):
         stop_loss=90.0,
         take_profit=120.0,
         last_price=100.0,
+        type=ActionType.long,
     )
 
     tick = Tick(
@@ -123,6 +125,7 @@ def test_stop_loss_triggered_short(risk_config):
         stop_loss=110.0,
         take_profit=80.0,
         last_price=100.0,
+        type=ActionType.short,
     )
 
     tick = Tick(
@@ -153,6 +156,7 @@ def test_take_profit_triggered_short(risk_config):
         stop_loss=110.0,
         take_profit=80.0,
         last_price=100.0,
+        type=ActionType.short,
     )
 
     tick = Tick(
@@ -183,6 +187,7 @@ def test_no_trailing_sl_update_when_sl_triggered(risk_config):
         stop_loss=90.0,
         take_profit=120.0,
         last_price=100.0,
+        type=ActionType.long,
     )
 
     tick = Tick(
@@ -218,6 +223,7 @@ def test_trailing_sl_updates_for_long(risk_config):
         stop_loss=90.0,
         take_profit=120.0,
         last_price=100.0,
+        type=ActionType.long,
     )
 
     # Price goes up
@@ -256,6 +262,7 @@ def test_trailing_sl_updates_for_short(risk_config):
         stop_loss=110.0,
         take_profit=80.0,
         last_price=100.0,
+        type=ActionType.short,
     )
 
     # Price goes down
@@ -287,6 +294,7 @@ def test_different_symbol_no_trigger(risk_config, portfolio_state):
         stop_loss=90.0,
         take_profit=120.0,
         last_price=100.0,
+        type=ActionType.long,
     )
 
     # Create portfolio with GOOGL position

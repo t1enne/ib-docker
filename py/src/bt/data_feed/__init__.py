@@ -48,16 +48,15 @@ class DataFeed:
         for timestamp in all_timestamps:
             for j, df in enumerate(data):
                 try:
-                    print(self.symbols[j])
                     row = df.loc[timestamp]
                     yield Tick(
                         timestamp=cast(Timestamp, timestamp),
                         symbol=self.symbols[j],
-                        open=float(row["Open"]),
-                        high=float(row["High"]),
-                        low=float(row["Low"]),
-                        close=float(row["Close"]),
-                        volume=float(row["Volume"]),
+                        open=float(row["open"]),
+                        high=float(row["high"]),
+                        low=float(row["low"]),
+                        close=float(row["close"]),
+                        volume=float(row["volume"]),
                     )
                 except KeyError:
                     # This symbol doesn't have data for this timestamp, skip

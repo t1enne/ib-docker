@@ -186,7 +186,7 @@ def _add_price_trace(
     fig.add_trace(
         go.Scatter(
             x=df.index,
-            y=df["Close"],
+            y=df["close"],
             mode="lines",
             name=f"{symbol} Price",
             line=dict(color="black", width=1.5),
@@ -371,19 +371,19 @@ def hmm(
     )
 
     try:
-        model.fit(df["Close"])
+        model.fit(df["close"])
     except Exception as e:
         print(f"Error fitting model: {e}")
         return
 
     # Predict regimes and probabilities
     print("Predicting regimes...")
-    regimes = model.predict(df["Close"])
-    probabilities = model.predict_proba(df["Close"])
+    regimes = model.predict(df["close"])
+    probabilities = model.predict_proba(df["close"])
 
     # Calculate statistics
     print("Calculating regime statistics...")
-    stats = model.get_regime_statistics(df["Close"])
+    stats = model.get_regime_statistics(df["close"])
     transmat = model.get_transition_matrix()
 
     # Print statistics to console

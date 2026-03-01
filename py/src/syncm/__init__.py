@@ -6,7 +6,7 @@ import asyncio
 from datetime import date, datetime
 import yaml
 
-from src.syncm.ibkr_layer.candles import candles_batch
+from src.syncm.ibkr_layer.candles import candles_batch, date_to_timestamp
 from src.syncm.ibkr_layer import get_contract_info, lookup
 
 
@@ -47,7 +47,7 @@ async def _get_candles(symbols: list[ISymbol], from_date: date):
         await candles_batch(
             [symbol.conid for symbol in symbols],
             lookback=get_days_from_now(from_date),
-            from_date=from_date,
+            from_datetime=datetime.combine(from_date, datetime.min.time()),
         )
     except Exception as e:
         print(f"Error syncing {symbols}: {e}")

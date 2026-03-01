@@ -31,11 +31,7 @@ def resample_ohlcv(
     if df.empty:
         return pd.DataFrame(columns=OHLCV_COLS)  # type: ignore[arg-type]
 
-    required_cols = {"open", "high", "low", "close", "volume"}
-    if not required_cols.issubset(df.columns):
-        missing = required_cols - set(df.columns)
-        raise ValueError(f"Missing required columns: {missing}")
-
+    print("resampling")
     resampled = df.resample(freq).agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     )

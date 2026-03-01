@@ -30,10 +30,11 @@ def check_risk(portfolio: PortfolioState, tick: Tick, config: RiskConfig) -> Tup
 
 
 def check_position_risk(
-    position: Position, tick: Tick, config: RiskConfig
+    _position: Position, tick: Tick, config: RiskConfig
 ) -> Optional[Union[StopLossEvent, TakeProfitEvent]]:
     """Check single position for SL/TP triggers."""
-    is_long = position.qty > 0
+    position = update_trailing_stop(_position, tick, config)
+    is_long = position.type == ActionType.long
 
     # Check stop loss
     if is_long and position.stop_loss and tick.close <= position.stop_loss:
@@ -92,6 +93,7 @@ def update_trailing_stop(
                 stop_loss=new_stop,
                 take_profit=position.take_profit,
                 last_price=position.last_price,
+                type=position.type,
             )
     else:
         new_stop = tick.low * (1 + config.stop_loss_pct)
@@ -104,6 +106,7 @@ def update_trailing_stop(
                 stop_loss=new_stop,
                 take_profit=position.take_profit,
                 last_price=position.last_price,
+                type=position.type,
             )
 
     return position

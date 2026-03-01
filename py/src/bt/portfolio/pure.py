@@ -89,6 +89,7 @@ def _open_position(
         stop_loss=stop_loss,
         take_profit=take_profit,
         last_price=fill.executed_price,
+        type=signal.action,
     )
 
     # Calculate new cash
@@ -199,6 +200,7 @@ def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
             stop_loss=position.stop_loss,
             take_profit=position.take_profit,
             last_price=tick.close,
+            type=position.type,
         )
         new_positions[symbol] = updated_position
 

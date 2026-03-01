@@ -15,7 +15,12 @@ from src.bt.types import PlotConfig
 from src.bt.zscore import calculate_rolling_z
 
 from src.bt.data_feed import DataFeed
-from src.bt.algos import ema_cross, pairs_trading_functional, vol_extension_pullback
+from src.bt.algos import (
+    ema_cross,
+    pairs_trading_functional,
+    vol_extension_pullback,
+    yesterday_high_breakout,
+)
 from src.market_data.cache import update_resample_cache, ResampleCache
 from src.bt.models.correlation_model import CorrelationModel
 
@@ -229,8 +234,8 @@ class Engine:
 
         state = self._append_candle(state, tick)
 
-        if state.model_state.resample_cache:
-            state = self._update_resample_cache(state, tick)
+        # if state.model_state.resample_cache:
+        #     state = self._update_resample_cache(state, tick)
 
         # Stage 1: Execute pending signals from PREVIOUS tick
         state = self._execute_signals(state, tick_group)
@@ -252,6 +257,10 @@ class Engine:
                 == "volatility_expansion_pullback_continuation"
             ):
                 return vol_extension_pullback.on_tick(
+                    state, tick, self.config.strategy_params
+                )
+            elif self.config.strategy_type == "yesterday_high":
+                return yesterday_high_breakout.on_tick(
                     state, tick, self.config.strategy_params
                 )
 
@@ -597,6 +606,8 @@ class Engine:
             return pairs_trading_functional.plot(state, self.config)
         elif self.config.strategy_type == "volatility_expansion_pullback_continuation":
             return vol_extension_pullback.plot(state, self.config)
+        elif self.config.strategy_type == "yesterday_high":
+            return yesterday_high_breakout.plot(state, self.config)
         return None
 
 

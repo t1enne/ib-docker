@@ -343,55 +343,7 @@ def get_backtest_results_analysis(
     print(f"\n{title}")
     print("=" * 80)
 
-    first_date = equity_curve.index[0]
-    last_date = equity_curve.index[-1]
-    first_str = _safe_date_str(first_date)
-    last_str = _safe_date_str(last_date)
-
-    print(f"\nData Start Date: {first_str}")
-    print(f"Data End Date: {last_str}")
-
-    n_periods = len(equity_curve)
-    duration_desc = f"{n_periods} periods"
-    if isinstance(equity_curve.index, pd.DatetimeIndex) and n_periods > 1:
-        start = equity_curve.index[0]
-        end = equity_curve.index[-1]
-        try:
-            elapsed_days = (end - start).total_seconds() / (24 * 60 * 60)
-        except AttributeError:
-            elapsed_days = 0.0
-        if elapsed_days > 0:
-            months = elapsed_days / 30.44
-            duration_desc = f"{n_periods} periods ({months:.1f} months)"
-    print(f"\nBacktest Duration: {duration_desc}")
-
-    print(f"\n{'Metric':<25} {'Value':>15}")
-    print("-" * 42)
-    print(f"{'Annual Return':<25} {metrics.annual_return:>14.2%}")
-    print(f"{'Annual Volatility':<25} {metrics.annual_volatility:>14.2%}")
-    print(f"{'Sharpe Ratio':<25} {metrics.sharpe_ratio:>15.2f}")
-    print(f"{'Calmar Ratio':<25} {metrics.calmar_ratio:>15.2f}")
-    print(f"{'Sortino Ratio':<25} {metrics.sortino_ratio:>15.2f}")
-    print(f"{'Omega Ratio':<25} {metrics.omega_ratio:>15.2f}")
-    print(f"{'Max Drawdown':<25} {metrics.max_drawdown:>14.2%}")
-    print(f"{'Stability':<25} {metrics.stability:>15.2f}")
-    print(f"{'Skewness':<25} {metrics.skewness:>15.2f}")
-    print(f"{'Kurtosis':<25} {metrics.kurtosis:>15.2f}")
-    print(f"{'Alpha':<25} {metrics.alpha:>15.2f}")
-    print(f"{'Beta':<25} {metrics.beta:>15.2f}")
-
     trades = result.trades
-    closed_trades = [t for t in trades if t.status.value == "closed"]
-    profitable = [t for t in closed_trades if t.pnl > 0] if closed_trades else []
-    win_rate = len(profitable) / len(closed_trades) if closed_trades else 0.0
-
-    print(f"\n{'Trading Statistics':<25}")
-    print("-" * 42)
-    print(f"{'Starting Capital':<25} {equity_curve.iloc[0]:>15}")
-    print(f"{'Total Trades':<25} {len(trades):>15}")
-    print(f"{'Closed Trades':<25} {len(closed_trades):>15}")
-    print(f"{'Win Rate':<25} {win_rate:>14.2%}")
-    print(f"{'Total P&L':<25} {equity_curve.iloc[-1] - equity_curve.iloc[0]:>15.2f}")
 
     dds = drawdown_periods(equity_curve)
     if drawdown_periods:
@@ -428,6 +380,55 @@ def get_backtest_results_analysis(
             f"{str(t.close_reason):<15} "
             f"{sl_tp_str:<15}"
         )
+
+    closed_trades = [t for t in trades if t.status.value == "closed"]
+    profitable = [t for t in closed_trades if t.pnl > 0] if closed_trades else []
+    win_rate = len(profitable) / len(closed_trades) if closed_trades else 0.0
+
+    print(f"\n{'Trading Statistics':<25}")
+    print("-" * 42)
+    print(f"{'Starting Capital':<25} {equity_curve.iloc[0]:>15}")
+    print(f"{'Total Trades':<25} {len(trades):>15}")
+    print(f"{'Closed Trades':<25} {len(closed_trades):>15}")
+    print(f"{'Win Rate':<25} {win_rate:>14.2%}")
+    print(f"{'Total P&L':<25} {equity_curve.iloc[-1] - equity_curve.iloc[0]:>15.2f}")
+
+    first_date = equity_curve.index[0]
+    last_date = equity_curve.index[-1]
+    first_str = _safe_date_str(first_date)
+    last_str = _safe_date_str(last_date)
+
+    print(f"\nData Start Date: {first_str}")
+    print(f"Data End Date: {last_str}")
+
+    n_periods = len(equity_curve)
+    duration_desc = f"{n_periods} periods"
+    if isinstance(equity_curve.index, pd.DatetimeIndex) and n_periods > 1:
+        start = equity_curve.index[0]
+        end = equity_curve.index[-1]
+        try:
+            elapsed_days = (end - start).total_seconds() / (24 * 60 * 60)
+        except AttributeError:
+            elapsed_days = 0.0
+        if elapsed_days > 0:
+            months = elapsed_days / 30.44
+            duration_desc = f"{n_periods} periods ({months:.1f} months)"
+    print(f"\nBacktest Duration: {duration_desc}")
+
+    print(f"\n{'Metric':<25} {'Value':>15}")
+    print("-" * 42)
+    print(f"{'Annual Return':<25} {metrics.annual_return:>14.2%}")
+    print(f"{'Annual Volatility':<25} {metrics.annual_volatility:>14.2%}")
+    print(f"{'Sharpe Ratio':<25} {metrics.sharpe_ratio:>15.2f}")
+    print(f"{'Calmar Ratio':<25} {metrics.calmar_ratio:>15.2f}")
+    print(f"{'Sortino Ratio':<25} {metrics.sortino_ratio:>15.2f}")
+    print(f"{'Omega Ratio':<25} {metrics.omega_ratio:>15.2f}")
+    print(f"{'Max Drawdown':<25} {metrics.max_drawdown:>14.2%}")
+    print(f"{'Stability':<25} {metrics.stability:>15.2f}")
+    print(f"{'Skewness':<25} {metrics.skewness:>15.2f}")
+    print(f"{'Kurtosis':<25} {metrics.kurtosis:>15.2f}")
+    print(f"{'Alpha':<25} {metrics.alpha:>15.2f}")
+    print(f"{'Beta':<25} {metrics.beta:>15.2f}")
 
     # Restore stdout and return output if requested
     sys.stdout = original_stdout

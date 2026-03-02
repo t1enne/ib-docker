@@ -85,7 +85,9 @@ def calculate_gaps(
     if backward_gap_start < backward_gap_end:
         gaps.append((backward_gap_start, backward_gap_end))
 
-    forward_gap_start = (existing_to).replace(hour=0, minute=0, second=0, microsecond=0)
+    forward_gap_start = (existing_to).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) + timedelta(days=1)
     forward_gap_end = requested_to
 
     if forward_gap_start < forward_gap_end:

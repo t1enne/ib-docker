@@ -19,7 +19,8 @@ def execute_signal(
     Pure function - no side effects.
     """
     signal_price = signal.price
-    base_spread = signal_price * (params.spread_bps / 10000)
+    spread_bps = params.spread_bps or 0.01
+    base_spread = signal_price * (spread_bps / 10000)
 
     # Calculate base price with spread
     if signal.action == ActionType.long:

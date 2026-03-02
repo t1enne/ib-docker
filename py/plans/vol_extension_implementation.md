@@ -46,10 +46,10 @@ class ModelState:
     correlation_model: Optional[Any] = None  # NEW
 ```
 
-### 1.3 Update `src/bt/engine/engine.py`
+### 1.3 Update `src/bt/engine/backtest.py`
 
 - **Import**: Add `from src.bt.models.correlation_model import CorrelationModel`
-- **_update_models()**: Add conditional to create/update correlation model for `volatility_expansion_pullback_continuation` strategy
+- **\_update_models()**: Add conditional to create/update correlation model for `volatility_expansion_pullback_continuation` strategy
 - Pass correlation model to ModelState
 
 ---
@@ -60,13 +60,13 @@ class ModelState:
 
 #### Signal Phases (per symbol)
 
-| Phase | Description |
-|-------|-------------|
-| `COMPRESSION` | Watching for volatility compression (ATR ratio < 0.6) |
-| `BREAKOUT` | Breakout detected, waiting for pullback |
-| `PULLBACK` | In pullback window (2-4 days), waiting for entry trigger |
-| `ENTERED` | Position open, managing with trailing stop |
-| `CLOSED` | Position closed, reset to COMPRESSION |
+| Phase         | Description                                              |
+| ------------- | -------------------------------------------------------- |
+| `COMPRESSION` | Watching for volatility compression (ATR ratio < 0.6)    |
+| `BREAKOUT`    | Breakout detected, waiting for pullback                  |
+| `PULLBACK`    | In pullback window (2-4 days), waiting for entry trigger |
+| `ENTERED`     | Position open, managing with trailing stop               |
+| `CLOSED`      | Position closed, reset to COMPRESSION                    |
 
 #### State Tracking
 
@@ -89,16 +89,16 @@ signal_state: Dict[str, dict] = {
 
 From `strategy_params` in vol_ext.yaml:
 
-| Indicator | Purpose |
-|-----------|---------|
+| Indicator         | Purpose               |
+| ----------------- | --------------------- |
 | ATR(14), ATR(100) | Compression detection |
-| Highest High(20) | Breakout confirmation |
-| Volume(30) avg | Volume confirmation |
-| EMA(5), EMA(10) | Pullback measurement |
-| MA(20), MA(50) | Trend filter |
-| 63-day return | Momentum filter |
-| EMA(20) | Exit signal |
-| 10-day low | Exit signal |
+| Highest High(20)  | Breakout confirmation |
+| Volume(30) avg    | Volume confirmation   |
+| EMA(5), EMA(10)   | Pullback measurement  |
+| MA(20), MA(50)    | Trend filter          |
+| 63-day return     | Momentum filter       |
+| EMA(20)           | Exit signal           |
+| 10-day low        | Exit signal           |
 
 #### Entry Logic (per plan doc)
 
@@ -185,20 +185,23 @@ import src.bt.algos.vol_extension_pullback
 __all__ = ["pairs_trading_functional", "ema_cross", "vol_extension_pullback"]
 ```
 
-### 3.2 Update `src/bt/engine/engine.py`
+### 3.2 Update `src/bt/engine/backtest.py`
 
 **Import (line ~18)**:
+
 ```python
 from src.bt.algos import ema_cross, pairs_trading_functional, vol_extension_pullback
 ```
 
-**_strat_wrap() (line ~215)**:
+**\_strat_wrap() (line ~215)**:
+
 ```python
 elif self.config.strategy_type == "volatility_expansion_pullback_continuation":
     return vol_extension_pullback.on_tick(state, tick, self.config.strategy_params)
 ```
 
-**_get_strategy_plot_fn() (line ~499)**:
+**\_get_strategy_plot_fn() (line ~499)**:
+
 ```python
 elif self.config.strategy_type == "volatility_expansion_pullback_continuation":
     return vol_extension_pullback.plot(state, self.config)
@@ -217,10 +220,10 @@ elif self.config.strategy_type == "volatility_expansion_pullback_continuation":
 
 ## Files to Create/Modify
 
-| File | Action |
-|------|--------|
-| `src/bt/models/correlation_model.py` | Create |
-| `src/bt/state/types.py` | Modify - add correlation_model field |
-| `src/bt/engine/engine.py` | Modify - integrate correlation model + new strategy |
-| `src/bt/algos/vol_extension_pullback.py` | Create |
-| `src/bt/algos/__init__.py` | Modify - add export |
+| File                                     | Action                                              |
+| ---------------------------------------- | --------------------------------------------------- |
+| `src/bt/models/correlation_model.py`     | Create                                              |
+| `src/bt/state/types.py`                  | Modify - add correlation_model field                |
+| `src/bt/engine/backtest.py`              | Modify - integrate correlation model + new strategy |
+| `src/bt/algos/vol_extension_pullback.py` | Create                                              |
+| `src/bt/algos/__init__.py`               | Modify - add export                                 |

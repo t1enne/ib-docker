@@ -1,11 +1,15 @@
-from src.bt.data_feed import DataFeed
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
-from src.bt.engine.engine import Engine
+from src.bt.engine.backtest import Backtest, run_backtest, ticks_generator
+from src.bt.engine.handlers import (
+    ExecutionHandler,
+    RiskHandler,
+    default_execution_handler,
+    default_risk_handler,
+)
 from src.bt.execution.pure import execute_signal
 from src.bt.types import (
-    StrategyProtocol,
     FillEvent,
     ExecutionParams,
     StrategyConfig,
@@ -33,379 +37,169 @@ def get_fill(s: TradeSignal, portfolio: PortfolioState):
         high=s.price,
         low=s.price,
         close=s.price,
-        volume=1000,
+        volume=0.0,
     )
     return execute_signal(s, tick, params)
 
 
 @pytest.fixture
-def sample_ticks():
-    """Sample ticks for testing."""
-    return [
-        Tick(
-            timestamp=get_ts("2025-01-01"),
-            symbol="AAPL",
-            open=100.0,
-            high=105.0,
-            low=95.0,
-            close=102.0,
-            volume=1000,
-        ),
-        Tick(
-            timestamp=get_ts("2025-01-01"),
-            symbol="GOOGL",
-            open=200.0,
-            high=210.0,
-            low=195.0,
-            close=205.0,
-            volume=500,
-        ),
-        Tick(
-            timestamp=get_ts("2025-01-02"),
-            symbol="AAPL",
-            open=102.0,
-            high=110.0,
-            low=98.0,
-            close=108.0,
-            volume=1200,
-        ),
-    ]
+def sample_df():
+    """Sample OHLCV data for testing."""
+    idx = pd.date_range("2025-01-01", periods=10, freq="h")
+    df = pd.DataFrame(
+        {"open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000},
+        index=idx,
+    )
+    return df
 
 
 @pytest.fixture
 def strategy_config():
+    """Sample strategy config."""
     return StrategyConfig(
         name="test",
         strategy_type="pnd",
         symbols=["AAPL", "GOOGL"],
-        stop_loss=0.1,
-        take_profit=1.5,
-        initial_capital=10000,
-        position_size=0.1,
-        commission=0.0001,
+        stop_loss=0.05,
+        take_profit=0.1,
+        initial_capital=10000.0,
+        position_size=0.2,
+        commission=0.5,
         training_start="2024-01-01",
         training_end="2024-12-31",
         trading_start="2025-01-01",
-        trading_end="2025-01-02",
-        rolling_window_size=20,
-        plot=False,
-        strategy_params={
-            "entry_z": 2.0,
-            "exit_z": 0.0,
-        },
+        trading_end="2025-12-31",
+        bar="1h",
+        strategy_params={},
         model_params={},
-        bar="1d",
     )
 
 
-class MockStrategy(StrategyProtocol):
-    """Mock strategy that returns signals based on ticks."""
+class TestTicksGenerator:
+    """Test the ticks_generator function."""
 
-    model = None  # StrategyModel instance - set by engine
-
-    def __init__(self, signals: list[TradeSignal]):
-        self._signals = signals
-        self._signal_idx = 0
-
-    def on_tick(self, tick: Tick, open_trade=None) -> list[TradeSignal]:
-        """Process tick and return signals."""
-        if tick.symbol == "AAPL" and self._signal_idx < len(self._signals):
-            signal = self._signals[self._signal_idx]
-            self._signal_idx += 1
-            return [signal]
-        return []
-
-
-@pytest.fixture
-def mock_strategy(sample_ticks):
-    """Mock strategy that returns signals based on ticks."""
-    signals = [
-        TradeSignal(
-            action=ActionType.long,
-            symbol=tick.symbol,
-            z_score=2.0,
-            timestamp=tick.timestamp,
-            price=tick.close,
-        )
-        for tick in sample_ticks
-        if tick.symbol == "AAPL"
-    ]
-    return MockStrategy(signals)
-
-
-@pytest.fixture
-def portfolio():
-    """Real portfolio for testing."""
-    return create_initial_portfolio(
-        initial_capital=10000,
-        start_timestamp=get_ts("2025-01-01"),
-    )
-
-
-@pytest.fixture
-def sample_df():
-    """Sample dataframe with all required columns."""
-    return pd.DataFrame(
-        {
-            "open": [100.0, 102.0],
-            "high": [105.0, 110.0],
-            "low": [95.0, 98.0],
-            "close": [102.0, 108.0],
-            "volume": [1000, 1200],
-        },
-        index=pd.Index(
-            [get_ts("2025-01-01"), get_ts("2025-01-02")], dtype="datetime64[ns]"
-        ),
-    )
-
-
-@pytest.mark.asyncio
-# async def test_run(mock_strategy, sample_df, strategy_config):
-#     """Test Engine.run processes ticks and returns results."""
-#     with patch("src.get_local_candles", return_value=sample_df):
-#         engine = Engine(strategy_config)
-#
-#         signal = TradeSignal(
-#             action=ActionType.long,
-#             symbol="AAPL",
-#             z_score=2.0,
-#             timestamp=get_ts("2025-01-01"),
-#             price=100.0,
-#         )
-#         engine.state = engine.state.__replace__(
-#             portfolio=apply_fill(
-#                 engine.state.portfolio, get_fill(signal, engine.state.portfolio)
-#             )
-#         )
-#         _r = await engine.run()
-#         results = _r.pf
-#         assert len(results.trades) >= 1
-#         assert results.trades[0].symbol == "AAPL"
-#         assert results.trades[0].position == ActionType.long
-
-
-def test_finalize_results(sample_df, strategy_config):
-    """Test Engine._finalize constructs PortfolioResult."""
-    with patch("src.get_local_candles", return_value=sample_df):
-        engine = Engine(strategy_config)
-        signal = TradeSignal(
-            action=ActionType.long,
-            symbol="AAPL",
-            z_score=2.0,
-            timestamp=get_ts("2025-01-01"),
-            price=100.0,
-        )
-        tick = Tick(
-            symbol="AAPL",
-            timestamp=get_ts("2025-01-02"),
-            open=0.0,
-            high=0.0,
-            low=0.0,
-            close=120.0,
-            volume=0.0,
-        )
-
-        engine.state = engine.state.__replace__(
-            portfolio=apply_fill(
-                engine.state.portfolio, get_fill(signal, engine.state.portfolio)
+    def test_empty_df_returns_empty_generator(self):
+        """Empty DataFrame yields no ticks."""
+        # Create empty DataFrame with proper MultiIndex structure
+        df = pd.DataFrame(
+            columns=pd.MultiIndex.from_product(
+                [["AAPL"], ["open", "high", "low", "close", "volume"]]
             )
         )
+        gen = ticks_generator(df, ["AAPL"])
+        ticks = list(gen)
+        assert ticks == []
 
-        from src.bt.state import Tick as StateTick
+    def test_single_symbol(self):
+        """Single symbol generates correct ticks."""
+        # Create DataFrame with MultiIndex like load_candles produces
+        idx = pd.date_range("2025-01-01", periods=10, freq="h")
+        data = {
+            ("AAPL", "open"): [100] * 10,
+            ("AAPL", "high"): [105] * 10,
+            ("AAPL", "low"): [95] * 10,
+            ("AAPL", "close"): [102] * 10,
+            ("AAPL", "volume"): [1000] * 10,
+        }
+        df = pd.DataFrame(data, index=idx)
+        df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        state_tick = StateTick(
-            timestamp=tick.timestamp,
-            symbol=tick.symbol,
-            open=tick.open,
-            high=tick.high,
-            low=tick.low,
-            close=tick.close,
-            volume=tick.volume,
-        )
-        engine.state = engine.state.__replace__(
-            portfolio=apply_fill(
-                engine.state.portfolio, get_fill(signal, engine.state.portfolio)
-            )
-        )
+        gen = ticks_generator(df, ["AAPL"])
+        ticks = list(gen)
+        assert len(ticks) == 10
+        assert all(t.symbol == "AAPL" for t in ticks)
 
-        assert len(engine.state.portfolio.positions) >= 0
+    def test_multiple_symbols(self):
+        """Multiple symbols generate ticks for each."""
+        idx = pd.date_range("2025-01-01", periods=5, freq="h")
+        data = {
+            ("AAPL", "open"): [100] * 5,
+            ("AAPL", "high"): [105] * 5,
+            ("AAPL", "low"): [95] * 5,
+            ("AAPL", "close"): [102] * 5,
+            ("AAPL", "volume"): [1000] * 5,
+            ("GOOGL", "open"): [200] * 5,
+            ("GOOGL", "high"): [205] * 5,
+            ("GOOGL", "low"): [195] * 5,
+            ("GOOGL", "close"): [202] * 5,
+            ("GOOGL", "volume"): [500] * 5,
+        }
+        df = pd.DataFrame(data, index=idx)
+        df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        results = engine._finalize(engine.state).portfolio
-        # After finalization, all positions should be closed
+        gen = ticks_generator(df, ["AAPL", "GOOGL"])
+        ticks = list(gen)
 
+        aapl_ticks = [t for t in ticks if t.symbol == "AAPL"]
+        googl_ticks = [t for t in ticks if t.symbol == "GOOGL"]
 
-# ---------------------------------------------------------------------------
-# Signal dispatch tests
-# ---------------------------------------------------------------------------
-
-
-def _make_engine(strategy_config):
-    """Create a Engine with patched read_candles."""
-    sample_df = pd.DataFrame(
-        {
-            "open": [100.0],
-            "high": [105.0],
-            "low": [95.0],
-            "close": [102.0],
-            "volume": [1000],
-        },
-        index=pd.Index([get_ts("2025-01-01")], dtype="datetime64[ns]"),
-    )
-    with patch("src.get_local_candles", return_value=sample_df):
-        return Engine(strategy_config)
-
-
-def test_all_pending_signals_execute(strategy_config):
-    """All pending signals for a symbol should execute — no skipped elements."""
-    engine = _make_engine(strategy_config)
-    params = create_execution_params(spread_bps=0, slippage_bps=0)
-
-    # Create ticks for execution
-    tick = Tick(
-        timestamp=get_ts("2025-01-01"),
-        symbol="AAPL",
-        open=100.0,
-        high=106.0,
-        low=99.0,
-        close=105.0,
-        volume=1000,
-    )
-    from src.bt.state import Tick as StateTick
-
-    state_tick = StateTick(
-        timestamp=tick.timestamp,
-        symbol=tick.symbol,
-        open=tick.open,
-        high=tick.high,
-        low=tick.low,
-        close=tick.close,
-        volume=tick.volume,
-    )
-
-    # 3 signals for AAPL
-    signals = [
-        TradeSignal(
-            action=ActionType.long,
-            symbol="AAPL",
-            z_score=2.0,
-            timestamp=get_ts("2025-01-01"),
-            price=100.0,
-        ),
-        TradeSignal(
-            action=ActionType.close,
-            symbol="AAPL",
-            z_score=0.0,
-            timestamp=get_ts("2025-01-01"),
-            price=105.0,
-        ),
-        TradeSignal(
-            action=ActionType.long,
-            symbol="AAPL",
-            z_score=2.5,
-            timestamp=get_ts("2025-01-01"),
-            price=103.0,
-        ),
-    ]
-
-    # Simulate the dispatch loop
-    portfolio = engine.state.portfolio
-    remaining = []
-    for signal in signals:
-        if signal.symbol == tick.symbol:
-            fill = execute_signal(signal, state_tick, params)
-            portfolio = apply_fill(portfolio, fill)
-        else:
-            remaining.append(signal)
-
-    # All 3 signals should have been processed (open, close, re-open)
-    assert len(portfolio.trades) == 2  # two opens recorded
-    assert remaining == []
+        assert len(aapl_ticks) == 5
+        assert len(googl_ticks) == 5
 
 
-def test_signals_only_execute_against_matching_tick(strategy_config):
-    """Signals for GOOGL should not execute on an AAPL tick."""
-    engine = _make_engine(strategy_config)
-    params = create_execution_params(spread_bps=0, slippage_bps=0)
+class TestBacktest:
+    """Test the Backtest dataclass."""
 
-    aapl_signal = TradeSignal(
-        action=ActionType.long,
-        symbol="AAPL",
-        z_score=2.0,
-        timestamp=get_ts("2025-01-01"),
-        price=100.0,
-    )
-    googl_signal = TradeSignal(
-        action=ActionType.short,
-        symbol="GOOGL",
-        z_score=2.0,
-        timestamp=get_ts("2025-01-01"),
-        price=200.0,
-    )
-    signals = [aapl_signal, googl_signal]
+    def test_creates_window_from_config(self, strategy_config):
+        """Backtest creates EngineWindow from config."""
+        bt = Backtest(strategy_config)
+        assert bt.window.train_start == parse_timestamp("2024-01-01")
+        assert bt.window.train_end == parse_timestamp("2024-12-31")
+        assert bt.window.test_start == parse_timestamp("2025-01-01")
+        assert bt.window.test_end == parse_timestamp("2025-12-31")
 
-    aapl_tick = Tick(
-        timestamp=get_ts("2025-01-01"),
-        symbol="AAPL",
-        open=100.0,
-        high=106.0,
-        low=99.0,
-        close=105.0,
-        volume=1000,
-    )
-    from src.bt.state import Tick as StateTick
+    def test_creates_execution_params(self, strategy_config):
+        """Backtest creates ExecutionParams from config."""
+        bt = Backtest(strategy_config)
+        assert bt.execution_params.fixed_commission == 0.5
 
-    state_tick = StateTick(
-        timestamp=aapl_tick.timestamp,
-        symbol=aapl_tick.symbol,
-        open=aapl_tick.open,
-        high=aapl_tick.high,
-        low=aapl_tick.low,
-        close=aapl_tick.close,
-        volume=aapl_tick.volume,
-    )
+    def test_creates_risk_config(self, strategy_config):
+        """Backtest creates RiskConfig from config."""
+        bt = Backtest(strategy_config)
+        assert bt.risk_config.stop_loss_pct == 0.05
+        assert bt.risk_config.take_profit_pct == 0.1
 
-    # Dispatch against AAPL tick
-    portfolio = engine.state.portfolio
-    remaining = []
-    for signal in signals:
-        if signal.symbol == aapl_tick.symbol:
-            fill = execute_signal(signal, state_tick, params)
-            portfolio = apply_fill(portfolio, fill)
-        else:
-            remaining.append(signal)
 
-    # Only AAPL signal executed; GOOGL signal deferred
-    assert len(portfolio.trades) == 1
-    assert portfolio.trades[0].symbol == "AAPL"
-    assert len(remaining) == 1
-    assert remaining[0].symbol == "GOOGL"
+class TestRunBacktest:
+    """Test the run_backtest function."""
 
-    # Now dispatch against GOOGL tick
-    googl_tick = Tick(
-        timestamp=get_ts("2025-01-01"),
-        symbol="GOOGL",
-        open=200.0,
-        high=210.0,
-        low=195.0,
-        close=205.0,
-        volume=500,
-    )
-    state_tick = StateTick(
-        timestamp=googl_tick.timestamp,
-        symbol=googl_tick.symbol,
-        open=googl_tick.open,
-        high=googl_tick.high,
-        low=googl_tick.low,
-        close=googl_tick.close,
-        volume=googl_tick.volume,
-    )
+    def _create_test_df(self):
+        """Create a test DataFrame with proper MultiIndex."""
+        idx = pd.date_range("2025-01-01", periods=10, freq="h")
+        data = {
+            ("AAPL", "open"): [100] * 10,
+            ("AAPL", "high"): [105] * 10,
+            ("AAPL", "low"): [95] * 10,
+            ("AAPL", "close"): [102] * 10,
+            ("AAPL", "volume"): [1000] * 10,
+        }
+        df = pd.DataFrame(data, index=idx)
+        df.columns = pd.MultiIndex.from_tuples(df.columns)
+        return df
 
-    for signal in remaining:
-        if signal.symbol == googl_tick.symbol:
-            fill = execute_signal(signal, state_tick, params)
-            portfolio = apply_fill(portfolio, fill)
+    def test_runs_with_default_handlers(self, strategy_config):
+        """run_backtest works with default handlers."""
+        bt = Backtest(strategy_config)
+        df = self._create_test_df()
+        gen = ticks_generator(df, ["AAPL"])
+        exec_handler = default_execution_handler()
+        risk_handler = default_risk_handler()
 
-    # Both legs now filled
-    assert len(portfolio.trades) == 2
-    symbols_traded = {t.symbol for t in portfolio.trades}
-    assert symbols_traded == {"AAPL", "GOOGL"}
+        results, state = run_backtest(bt, gen, exec_handler, risk_handler)
+
+        assert results is not None
+        assert state is not None
+        assert state.portfolio is not None
+
+    def test_tracks_trades(self, strategy_config):
+        """run_backtest tracks executed trades."""
+        bt = Backtest(strategy_config)
+        df = self._create_test_df()
+        gen = ticks_generator(df, ["AAPL"])
+        exec_handler = default_execution_handler()
+        risk_handler = default_risk_handler()
+
+        results, state = run_backtest(bt, gen, exec_handler, risk_handler)
+
+        # With no signals, no trades should be executed
+        assert len(state.portfolio.trades) == 0

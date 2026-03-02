@@ -13,7 +13,7 @@ import src.pnd as pnd_mod
 import src.syncm as sync_mod
 import src.hmm as hmm_mod
 
-from src.bt import StrategyType, backtest, load_strategy, StrategyConfig
+from src.bt import StrategyType, backtest, load_strategy, StrategyConfig, backtest_async
 from src.bt.metrics import get_backtest_results_analysis
 
 
@@ -127,7 +127,7 @@ def hmm(
 @click.argument("strategy_file")
 def bt(strategy_file: str):
     config = load_strategy(strategy_file)
-    output = asyncio.run(backtest(config))
+    output = asyncio.run(backtest_async(config))
     click.echo(output)
 
 

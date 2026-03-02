@@ -90,7 +90,7 @@ def handle_entry(
     entry_price = yesterday_high + gap_offset
 
     if tick.close < yesterday_high:
-        return open(tick, ActionType.long, 0)
+        return open(tick, ActionType.long, "tick below YH")
 
     return []
 

@@ -1,8 +1,7 @@
-from beartype.typing import Optional
 from src.bt.portfolio import TradeExitReason
 import src.bt.indicators as ta
 from src.bt.algos.utils import open, close
-from typing import List, Dict
+from typing import List, Dict, Optional
 from src.bt.state import BacktestState, TradeSignal, Tick, ActionType, Position
 from src.bt.types import PlotConfig, StrategyConfig
 import pandas as pd

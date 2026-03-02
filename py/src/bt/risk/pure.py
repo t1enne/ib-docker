@@ -37,36 +37,36 @@ def check_position_risk(
     is_long = position.type == ActionType.long
 
     # Check stop loss
-    if is_long and position.stop_loss and tick.close <= position.stop_loss:
+    if is_long and position.stop_loss and tick.low <= position.stop_loss:
         return StopLossEvent(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
-            trigger_price=tick.close,
+            trigger_price=position.stop_loss,
             reason="sl",
         )
 
-    if not is_long and position.stop_loss and tick.close >= position.stop_loss:
+    if not is_long and position.stop_loss and tick.high >= position.stop_loss:
         return StopLossEvent(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
-            trigger_price=tick.close,
+            trigger_price=position.stop_loss,
             reason="sl",
         )
 
     # Check take profit
-    if is_long and position.take_profit and tick.close >= position.take_profit:
+    if is_long and position.take_profit and tick.high >= position.take_profit:
         return TakeProfitEvent(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
-            trigger_price=tick.close,
+            trigger_price=position.take_profit,
             reason="tp",
         )
 
-    if not is_long and position.take_profit and tick.close <= position.take_profit:
+    if not is_long and position.take_profit and tick.low <= position.take_profit:
         return TakeProfitEvent(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
-            trigger_price=tick.close,
+            trigger_price=position.take_profit,
             reason="tp",
         )
 
@@ -80,7 +80,7 @@ def update_trailing_stop(
     if not config.trailing_stop:
         return position
 
-    is_long = position.qty > 0
+    is_long = position.type == ActionType.long
 
     if is_long:
         new_stop = tick.high * (1 - config.stop_loss_pct)

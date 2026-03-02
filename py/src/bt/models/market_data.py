@@ -29,15 +29,18 @@ class MarketDataView:
         self._bars: List[Dict[str, Tick]] = []  # [{sym1: Tick, sym2: Tick}, ...]
         self._timestamps: List[pd.Timestamp] = []
 
-    def append(self, timestamp: pd.Timestamp, tick_group: Dict[str, Tick]) -> None:
-        """Add a new bar to the view.
+    def append(self, tick: Tick) -> None:
+        """Add a new tick to the view.
 
         Args:
-            timestamp: Bar timestamp
-            tick_group: Dict mapping symbol -> Tick for this timestamp
+            tick: Tick for a single symbol
         """
-        self._bars.append(dict(tick_group))  # Copy to avoid external mutations
-        self._timestamps.append(timestamp)
+        if self._timestamps and self._timestamps[-1] == tick.timestamp:
+            self._bars[-1][tick.symbol] = tick
+            return
+
+        self._bars.append({tick.symbol: tick})
+        self._timestamps.append(tick.timestamp)
 
     def __len__(self) -> int:
         return len(self._bars)
@@ -153,7 +156,7 @@ class MarketDataView:
         return list(self._timestamps)
 
     def get_latest(self) -> Dict[str, Tick]:
-        """Get the most recent tick group."""
+        """Get the most recent tick map."""
         if not self._bars:
             return {}
         return dict(self._bars[-1])

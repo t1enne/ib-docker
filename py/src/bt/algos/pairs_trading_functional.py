@@ -5,7 +5,7 @@ Pure functions that generate signals based on state.
 
 from src.bt.algos.utils import close, open
 
-from typing import Tuple, Optional, List, TYPE_CHECKING
+from typing import Optional, List, TYPE_CHECKING, cast
 from src.bt.state import (
     BacktestState,
     TradeSignal,
@@ -16,19 +16,22 @@ from src.bt.state import (
 )
 from src.bt.types import PlotConfig
 import pandas as pd
+import numpy as np
+from src.bt.zscore import calculate_rolling_z
+from src.utils import calculate_zscore_spread
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
 
 
 def on_tick(
-    state: BacktestState, tick_group: dict, strategy_params: dict
+    state: BacktestState, tick: Tick, strategy_params: dict
 ) -> List[TradeSignal]:
     """Generate trading signals based on z-score.
 
     Args:
         state: Current backtest state
-        tick_group: Dictionary of ticks by symbol for current timestamp
+        tick: Current tick event
         entry_z: Z-score threshold for entry
         exit_z: Z-score threshold for exit
 
@@ -37,29 +40,78 @@ def on_tick(
     """
 
     signals = []
-    z_score = state.model_state.z_score
-    hedge = state.model_state.hedge_beta
+    entry_z = strategy_params.get("entry_z", 2.5)
+    exit_z = strategy_params.get("exit_z", 0.5)
+    window = strategy_params.get("rolling_window_size")
+    symbols = strategy_params.get("symbols")
 
-    # Check if z_score is available (pair trading strategies only)
-    if z_score is None:
-        return signals
+    if not symbols:
+        if state.candles.empty:
+            return signals
+        symbols = list(state.candles.index.get_level_values("symbol").unique())
 
-    # Check if we have enough data
-    if len(state.model_state.price_buffers) < 2:
-        return signals
-
-    # Get symbols
-    symbols = list(tick_group.keys())
     if len(symbols) != 2:
         return signals
 
     sym1, sym2 = symbols
+    if state.candles.empty:
+        return signals
+
+    try:
+        candles1 = state.candles.xs(sym1)
+        candles2 = state.candles.xs(sym2)
+    except KeyError:
+        return signals
+
+    if candles1.empty or candles2.empty:
+        return signals
+
+    closes1, closes2 = candles1["close"], candles2["close"]
+    aligned1, aligned2 = closes1.align(closes2, join="inner")
+    aligned1 = cast(pd.Series, aligned1)
+    aligned2 = cast(pd.Series, aligned2)
+    aligned = pd.concat([aligned1, aligned2], axis=1).dropna()
+    if aligned.empty:
+        return signals
+
+    aligned1 = aligned.iloc[:, 0]
+    aligned2 = aligned.iloc[:, 1]
+
+    if window is None:
+        window = min(len(aligned1), len(aligned2))
+
+    if len(aligned1) < window or len(aligned2) < window:
+        return signals
+
+    z_score, _alpha, hedge = calculate_rolling_z(aligned1, aligned2, window)
+    if np.isnan(z_score):
+        return signals
+
+    last_ts = cast(pd.Timestamp, aligned1.index[-1])
+    row1 = candles1.loc[last_ts]
+    row2 = candles2.loc[last_ts]
+    tick1 = Tick(
+        timestamp=last_ts,
+        symbol=sym1,
+        open=float(row1["open"]),
+        high=float(row1["high"]),
+        low=float(row1["low"]),
+        close=float(row1["close"]),
+        volume=float(row1["volume"]),
+    )
+    tick2 = Tick(
+        timestamp=last_ts,
+        symbol=sym2,
+        open=float(row2["open"]),
+        high=float(row2["high"]),
+        low=float(row2["low"]),
+        close=float(row2["close"]),
+        volume=float(row2["volume"]),
+    )
 
     # Check for existing positions
     position1 = state.portfolio.positions.get(sym1)
     position2 = state.portfolio.positions.get(sym2)
-    tick1 = tick_group[sym1]
-    tick2 = tick_group[sym2]
 
     have_positions = True if position1 or position2 else False
     is_regressed = abs(z_score) < exit_z
@@ -85,15 +137,15 @@ def on_tick(
         # Check for entry
     if z_score < -entry_z:
         # Long sym1, short sym2
-        buy_signals = open(tick1, ActionType.long, z_score) + open(
-            tick2, ActionType.short, z_score, hedge
+        buy_signals = open(tick1, ActionType.long, f"z: {z_score}") + open(
+            tick2, ActionType.short, f"z: {z_score}", hedge
         )
         return signals + buy_signals
 
     if z_score > entry_z:
         # Short sym1, long sym2
-        buy_signals = open(tick1, ActionType.short, z_score) + open(
-            tick2, ActionType.long, z_score, hedge
+        buy_signals = open(tick1, ActionType.short, f"z: {z_score}") + open(
+            tick2, ActionType.long, f"z: {z_score}", hedge
         )
         return signals + buy_signals
 
@@ -102,11 +154,31 @@ def on_tick(
 
 def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
     """Return z-score as a separate subplot."""
-    z_score = state.model_state.z_score
-    if z_score is None:
+    if state.candles.empty:
+        return PlotConfig()
+    symbols = list(config.symbols)
+    if len(symbols) != 2:
+        return PlotConfig()
+    sym1, sym2 = symbols
+
+    try:
+        candles1 = state.candles.xs(sym1)
+        candles2 = state.candles.xs(sym2)
+    except KeyError:
         return PlotConfig()
 
-    timestamps = [buf.get("timestamp") for buf in state.model_state.price_buffers]
-    z_series = pd.Series([z_score], index=[timestamps[-1]] if timestamps else None)
+    closes1, closes2 = candles1["close"], candles2["close"]
+    aligned1, aligned2 = closes1.align(closes2, join="inner")
+    aligned1 = cast(pd.Series, aligned1)
+    aligned2 = cast(pd.Series, aligned2)
+    aligned = pd.concat([aligned1, aligned2], axis=1).dropna()
+    if aligned.empty:
+        return PlotConfig()
+
+    aligned1 = aligned.iloc[:, 0]
+    aligned2 = aligned.iloc[:, 1]
+
+    window = config.rolling_window_size
+    z_series = calculate_zscore_spread(aligned1, aligned2, window)
 
     return PlotConfig(subplots=[("Z-Score", z_series)])

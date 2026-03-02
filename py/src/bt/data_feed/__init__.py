@@ -1,63 +1,103 @@
-# Data feed module
-import asyncio
-from src.db.models import ISymbol
-from src.syncm import get_symbols, sync_data
+"""Functional data feed module.
+
+Provides pure functions for loading and transforming market data into ticks.
+Can be injected into Backtest engine via EngineDependencies.
+
+Usage:
+    from src.bt.data_feed import load_candles, ticks_from_dataframe
+
+    # Load data
+    df = load_candles(["AAPL", "MSFT"], start, end, "1h")
+
+    # Generate ticks
+    async for tick in ticks_from_dataframe(df, ["AAPL", "MSFT"]):
+        process(tick)
+"""
 
 import pandas as pd
 from pandas import Timestamp
+from typing import AsyncGenerator, List
 
-from src.bt.types import StrategyConfig, EngineWindow
 from src.bt.state import Tick
-from src import get_local_candles
-from typing import AsyncGenerator, Dict, List, Optional, Tuple, cast
+from src.utils import get_local_candles
+from src.syncm import sync_data
 
 
-class DataFeed:
-    """Async data feed for n symbols from SQLite."""
+def load_candles(
+    symbols: List[str],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    bar: str,
+) -> pd.DataFrame:
+    """Pure function - loads candles for given symbols and date range.
 
-    def __init__(self, config: StrategyConfig, window: EngineWindow):
-        self.symbols = config.symbols
-        self.bar = config.bar
+    Args:
+        symbols: List of ticker symbols
+        start: Start timestamp
+        end: End timestamp
+        bar: Bar size (e.g., "1h", "1d")
 
-    async def load(self, config: StrategyConfig, window: EngineWindow):
-        from_date = window.train_start.date()
-        # await sync_data(
-        #     config.symbols,
-        # )
-        self.time_series = [
-            get_local_candles(x, window.train_start, window.test_end, self.bar)
-            for x in config.symbols
-        ]
-        self.candles_df = pd.concat(self.time_series, axis=1, keys=self.symbols)
+    Returns:
+        DataFrame with MultiIndex (symbol, timestamp) containing OHLCV data
+    """
+    time_series = [get_local_candles(s, start, end, bar) for s in symbols]
+    return pd.concat(time_series, axis=1, keys=symbols)
 
-    async def get_data_stream(self) -> AsyncGenerator[Optional[Tick]]:
-        """Returns an async generator that yields market data ticks for all symbols."""
-        data = self.time_series
-        if not data or not len(data[0].index):
-            raise ValueError("no timestamps")
 
-        has_equal_ts = all(df.index.equals(data[0].index) for df in data[1:])
-        if not has_equal_ts:
-            print("timestamps not in sync")
+def ticks_from_dataframe(
+    df: pd.DataFrame,
+    symbols: List[str],
+):
+    """Pure async generator - yields ticks from a DataFrame.
 
-        # Get union of all timestamps
-        all_timestamps = sorted(set().union(*[set(df.index) for df in data]))
+    This function is stateless - given the same DataFrame and symbols,
+    it will always yield the same sequence of ticks.
 
-        # Create a lookup for faster existence checking
-        # This is more memory efficient than filtering all dataframes
-        for timestamp in all_timestamps:
-            for j, df in enumerate(data):
-                try:
-                    row = df.loc[timestamp]
-                    yield Tick(
-                        timestamp=cast(Timestamp, timestamp),
-                        symbol=self.symbols[j],
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=float(row["close"]),
-                        volume=float(row["volume"]),
-                    )
-                except KeyError:
-                    # This symbol doesn't have data for this timestamp, skip
-                    continue
+    Args:
+        df: DataFrame with MultiIndex (symbol, timestamp) containing OHLCV
+        symbols: List of symbols to generate ticks for
+
+    Yields:
+        Tick objects for each symbol at each timestamp
+    """
+    if df.empty or len(df.index) == 0:
+        return
+
+    all_timestamps = sorted(
+        set().union(*[set(df.xs(s, axis=1).index) for s in symbols])
+    )
+
+    for ts in all_timestamps:
+        for s in symbols:
+            try:
+                row = df.xs(s, axis=1).loc[ts]
+                yield Tick(
+                    timestamp=Timestamp(ts),
+                    symbol=s,
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=float(row["volume"]),
+                )
+            except KeyError:
+                continue
+
+
+def sync_and_load(
+    symbols: List[str],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    bar: str,
+) -> pd.DataFrame:
+    """Sync data from IBKR and load into DataFrame.
+
+    This is the main entry point for production use.
+    """
+    import asyncio
+
+    async def _sync():
+        await sync_data(symbols)
+
+    asyncio.run(_sync())
+    return load_candles(symbols, start, end, bar)

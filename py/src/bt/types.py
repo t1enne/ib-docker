@@ -1,6 +1,17 @@
 from dataclasses import dataclass, field
 import pandas as pd
-from typing import List, Optional, Any, Protocol, Union, TypedDict, Dict
+from typing import (
+    List,
+    Optional,
+    Any,
+    Protocol,
+    Union,
+    TypedDict,
+    Dict,
+    Callable,
+    Tuple,
+    AsyncGenerator,
+)
 from enum import Enum
 
 from src.bt.state import (
@@ -16,7 +27,11 @@ from src.bt.state import (
     ActionType,
     TradeStatus,
     TradeExitReason,
+    BacktestState,
+    PortfolioState,
+    RiskConfig,
 )
+from src.bt.state import RiskEvent as StateRiskEvent
 
 
 class ZScoreState:
@@ -100,3 +115,104 @@ class StrategyProtocol(Protocol):
 
 
 RiskEvent = Union[StopLossEvent, TakeProfitEvent]
+
+
+class StrategyFn(Protocol):
+    """Protocol for strategy signal generation function."""
+
+    def __call__(
+        self,
+        state: BacktestState,
+        tick: Tick,
+        params: Dict[str, Any],
+    ) -> List[TradeSignal]: ...
+
+
+class ModelUpdaterFn(Protocol):
+    """Protocol for model state update function."""
+
+    def __call__(
+        self,
+        state: BacktestState,
+        tick: Tick,
+    ) -> BacktestState: ...
+
+
+class ExecutionFn(Protocol):
+    """Protocol for signal execution function."""
+
+    def __call__(
+        self,
+        signal: TradeSignal,
+        tick: Tick,
+        exec_params: ExecutionParams,
+    ) -> FillEvent: ...
+
+
+class PositionSizerFn(Protocol):
+    """Protocol for position sizing and fill application."""
+
+    def __call__(
+        self,
+        portfolio: PortfolioState,
+        fill: FillEvent,
+        sizing_params: Dict[str, float],
+    ) -> PortfolioState: ...
+
+
+class RiskCheckFn(Protocol):
+    """Protocol for risk checking function."""
+
+    def __call__(
+        self,
+        portfolio: PortfolioState,
+        tick: Tick,
+        risk_config: RiskConfig,
+    ) -> Tuple[StateRiskEvent, ...]: ...
+
+
+class ZScoreFn(Protocol):
+    """Protocol for z-score calculation."""
+
+    def __call__(
+        self,
+        price_buffers: Tuple[Dict[str, float], ...],
+    ) -> Tuple[float, float]: ...
+
+
+class DataLoaderFn(Protocol):
+    """Protocol for data loading function."""
+
+    def __call__(
+        self,
+        symbols: List[str],
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        bar: str,
+    ) -> pd.DataFrame: ...
+
+
+@dataclass
+class EngineDependencies:
+    """All injectable dependencies for the Backtest engine.
+
+    Each field is optional - None values will use sensible defaults.
+    This allows partial injection (e.g., only swap the strategy function).
+
+    Note: strategy_fn accepts any callable - strategies may have different
+    signatures (state, tick, params).
+    """
+
+    strategy_fn: Optional[Callable[..., List[TradeSignal]]] = None
+    model_updater_fn: Optional[ModelUpdaterFn] = None
+    execution_fn: Optional[ExecutionFn] = None
+    position_sizer_fn: Optional[PositionSizerFn] = None
+    risk_check_fn: Optional[RiskCheckFn] = None
+    risk_executor_fn: Optional[
+        Callable[[StateRiskEvent, Tick, ExecutionParams], FillEvent]
+    ] = None
+    zscore_fn: Optional[ZScoreFn] = None
+    data_loader_fn: Optional[DataLoaderFn] = None
+    tick_generator_fn: Optional[
+        Callable[[pd.DataFrame, List[str]], AsyncGenerator[Tick, None]]
+    ] = None

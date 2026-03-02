@@ -1,7 +1,7 @@
 name: ema-strat
-training_start: 2025-01-01
-training_end: 2025-02-01
-trading_start: 2025-02-02
+training_start: 2024-01-01
+training_end: 2024-01-02
+trading_start: 2024-01-02
 trading_end: 2027-01-01
 commission: 0.1
 initial_capital: 10000
@@ -11,11 +11,11 @@ strategy_type: ema_cross
 stop_loss: 0.1
 take_profit: 0.2
 bar: 1h
-plot: false
+plot: true
 model_params: false
 strategy_params:
   fast: 9
-  slow: 70
+  slow: 20
 symbols:
   # - XLE
   - GLD

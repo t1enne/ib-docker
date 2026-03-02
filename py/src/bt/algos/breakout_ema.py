@@ -1,4 +1,4 @@
-from beartype.typing import Optional
+from typing import Optional
 import src.bt.indicators as ta
 from src.bt.algos.utils import open, close
 from typing import List, Dict, TYPE_CHECKING

@@ -79,17 +79,24 @@ class StrategyModel:
     def market_data(self) -> MarketDataView:
         return self._market_data
 
-    def update(self, timestamp: pd.Timestamp, tick_group: dict[str, Tick]) -> None:
-        self._market_data.append(timestamp, tick_group)
+    def update(self, tick: Tick) -> None:
+        self._market_data.append(tick)
 
-        prices = self._prices_from_tick_group(tick_group)
-        self._update_z_state(prices)
+        prices = self._prices_from_latest()
+        if prices is not None:
+            self._update_z_state(prices)
 
         if self._hmm_state.enabled:
             self._update_hmm_state()
 
-    def _prices_from_tick_group(self, tick_group: dict[str, Tick]) -> dict[str, float]:
-        return {symbol: tick.close for symbol, tick in tick_group.items()}
+    def _prices_from_latest(self) -> Optional[dict[str, float]]:
+        latest = self._market_data.get_latest()
+        if len(latest) != len(self.symbols):
+            return None
+        prices = {symbol: latest[symbol].close for symbol in self.symbols}
+        if len(prices) != len(self.symbols):
+            return None
+        return prices
 
     def _update_z_state(self, prices: dict[str, float]) -> None:
         buffers = self._z_state.price_buffers

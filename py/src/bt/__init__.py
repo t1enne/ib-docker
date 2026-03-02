@@ -1,9 +1,6 @@
 # beartype workaround
-import collections.abc
+from src.bt.algos import init_strat
 
-collections.abc.ByteString = bytes  # type: ignore
-
-from beartype.claw import beartype_this_package as roar
 from src.bt.plotting.plotting import plot_backtest_results
 from datetime import date
 import logging
@@ -11,12 +8,16 @@ import logging
 import click
 import yaml
 
-from src.bt.engine.engine import Engine
+from src.bt.engine.backtest import Backtest, ticks_generator, run_backtest, run
+from src.bt.engine.handlers import (
+    ExecutionHandler,
+    RiskHandler,
+    default_execution_handler,
+    default_risk_handler,
+)
 from src.bt.metrics import get_backtest_results_analysis
 from src.bt.types import StrategyConfig, StrategyType
 from src.bt.types import PortfolioResult
-
-roar()
 
 
 def load_strategy(path: str) -> StrategyConfig:
@@ -29,36 +30,38 @@ def load_strategy(path: str) -> StrategyConfig:
     return StrategyConfig(**data)
 
 
-async def backtest(strategy_conf: StrategyConfig) -> str:
-    """
-    Backtest a trading strategy using walk-forward analysis.
-
-    Walk-forward analysis provides more realistic backtesting by:
-    - Training on historical data (in-sample)
-    - Testing on future data (out-of-sample)
-    - Rolling forward through time with retraining at specified intervals
+async def backtest_async(strategy_conf: StrategyConfig) -> str:
+    """Backtest a trading strategy (async version).
 
     Args:
         strategy_conf: Strategy configuration
-        return_output: If True, return the output string instead of printing
-        plot: If True, generate plot (default True)
     """
-    # Validate inputs
-    if (
-        strategy_conf.strategy_type
-        in [StrategyType.PND.value, StrategyType.SPREAD.value]
-        and len(strategy_conf.symbols) != 2
-    ):
-        raise click.BadParameter(
-            f"{strategy_conf.strategy_type.upper()} strategy requires exactly 2 symbols"
-        )
+    from src.bt.data_feed import load_candles
 
-    # Use functional engine
-    engine = Engine(strategy_conf)
-    results = await engine.run()
+    bt = Backtest(strategy_conf)
+    df = load_candles(
+        strategy_conf.symbols,
+        bt.window.train_start,
+        bt.window.test_end,
+        strategy_conf.bar,
+    )
+    strat_mod = init_strat(strategy_conf.strategy_type)
+    print(strat_mod)
+    results = run(bt, df, strat_mod=strat_mod)
     output = get_backtest_results_analysis(results.pf)
 
     if strategy_conf.plot:
         plot_backtest_results(strategy_conf, results)
 
     return output
+
+
+def backtest(strategy_conf: StrategyConfig) -> str:
+    """Backtest a trading strategy (sync version).
+
+    Args:
+        strategy_conf: Strategy configuration
+    """
+    import asyncio
+
+    return asyncio.run(backtest_async(strategy_conf))

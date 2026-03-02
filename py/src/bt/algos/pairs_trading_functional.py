@@ -22,10 +22,7 @@ if TYPE_CHECKING:
 
 
 def on_tick(
-    state: BacktestState,
-    tick_group: dict,
-    entry_z: float,
-    exit_z: float,
+    state: BacktestState, tick_group: dict, strategy_params: dict
 ) -> List[TradeSignal]:
     """Generate trading signals based on z-score.
 

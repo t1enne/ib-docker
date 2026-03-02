@@ -11,10 +11,11 @@ strategy_type: ema_cross
 stop_loss: 0.1
 take_profit: 0.2
 bar: 1h
-plot: true
+plot: false
 model_params: false
 strategy_params:
   fast: 9
-  slow: 100
+  slow: 70
 symbols:
-  - xle
+  # - XLE
+  - GLD

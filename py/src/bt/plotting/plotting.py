@@ -35,29 +35,26 @@ def plot_backtest_results(
     config: StrategyConfig,
     bt_results: BacktestResults,
 ):
-    z_scores = bt_results.z_scores
-    regime_df = bt_results.regimes
+    # z_scores = bt_results.z_scores
+    # regime_df = bt_results.regimes
     data = bt_results.data
     results = bt_results.pf
     symbols = config.symbols
-    entry_z = config.strategy_params.get("entry_z", 0.0)
-    exit_z = config.strategy_params.get("exit_z", 0.0)
     strategy = config.strategy_type
     plot_config = bt_results.plot_config
 
-    has_z_scores = _has_data(z_scores)
-    has_regime = _has_data(regime_df)
-    has_strategy_subplots = bool(plot_config and len(plot_config.subplots) > 0)
+    # has_z_scores = _has_data(z_scores)
+    # has_regime = _has_data(regime_df)
+    subplots = []
+    if plot_config and plot_config.subplots:
+        subplots = plot_config.subplots
 
     meta = _build_plot_meta(
         symbols,
-        has_z_scores,
-        has_regime,
-        has_strategy_subplots,
-        entry_z,
-        exit_z,
+        subplots,
         strategy,
     )
+
     fig = make_subplots(
         rows=meta.num_rows,
         cols=1,
@@ -84,20 +81,20 @@ def plot_backtest_results(
     row_offset = len(symbols)
 
     # Add strategy-defined subplots (replaces hardcoded z-score)
-    if has_strategy_subplots:
+    if len(subplots) > 0:
         assert plot_config is not None
         for subplot_title, series in plot_config.subplots:
             _add_series_subplot(fig, row_offset + 1, series, subplot_title)
             row_offset += 1
-    elif has_z_scores:
-        assert z_scores is not None
-        _add_zscore_subplot(fig, row_offset + 1, z_scores, entry_z, exit_z)
-        row_offset += 1
+    # elif has_z_scores:
+    #     assert z_scores is not None
+    #     _add_zscore_subplot(fig, row_offset + 1, z_scores, entry_z, exit_z)
+    #     row_offset += 1
 
-    if has_regime:
-        assert regime_df is not None
-        _add_regime_subplot(fig, row_offset + 1, regime_df)
-        row_offset += 1
+    # if has_regime:
+    #     assert regime_df is not None
+    #     _add_regime_subplot(fig, row_offset + 1, regime_df)
+    #     row_offset += 1
 
     equity_series = _equity_series(results)
 
@@ -122,37 +119,16 @@ def _has_data(df: Optional[pd.DataFrame]) -> bool:
 
 def _build_plot_meta(
     symbols: list[str],
-    has_z_scores: bool,
-    has_regime: bool,
-    has_strategy_subplots: bool,
-    entry_z: float,
-    exit_z: float,
+    subplots: list,
     strategy: str,
 ) -> PlotMeta:
-    num_rows = (
-        len(symbols)
-        + (1 if has_strategy_subplots else (1 if has_z_scores else 0))
-        + (1 if has_regime else 0)
-        + 1
-        + 1
-    )
+    num_rows = len(symbols) + len(subplots) + 1 + 1
     titles = [f"{symbol} Price + Volume" for symbol in symbols]
-    if has_strategy_subplots:
-        pass  # Titles will be added by strategy
-    elif has_z_scores:
-        titles.append(f"Z-Score (Entry: ±{entry_z}, Exit: ±{exit_z})")
-    if has_regime:
-        titles.append("HMM Regime Probabilities")
-    titles.extend([f"Equity Curve - {strategy.upper()} Strategy", "Drawdown"])
 
+    titles.extend([f"Equity Curve - {strategy.upper()} Strategy", "Drawdown"])
     specs: list[list[dict | None]] = []
     specs.extend([[{"secondary_y": True}] for _ in symbols])
-    if has_strategy_subplots:
-        pass  # Specs will be added by strategy
-    elif has_z_scores:
-        specs.append([{}])
-    if has_regime:
-        specs.append([{}])
+    specs.extend([[{}] for _ in subplots])
     specs.append([{}])
     specs.append([{}])
 
@@ -222,7 +198,7 @@ def _collect_trade_markers(results: PortfolioResult, symbol: str) -> TradeMarker
 
         if trade.position == ActionType.long:
             long_entries.append((trade.entry_time, trade.entry_price))
-            long_entries_text.append(f"Z: {trade.z_score:.2f}")
+            long_entries_text.append(f"{trade.reason}")
             if trade.exit_time and trade.exit_price is not None:
                 long_exits.append((trade.exit_time, trade.exit_price))
                 long_exits_text.append(
@@ -230,7 +206,7 @@ def _collect_trade_markers(results: PortfolioResult, symbol: str) -> TradeMarker
                 )
         else:
             short_entries.append((trade.entry_time, trade.entry_price))
-            short_entries_text.append(f"Z: {trade.z_score:.2f}")
+            short_entries_text.append(f"{trade.reason}")
             if trade.exit_time and trade.exit_price is not None:
                 short_exits.append((trade.exit_time, trade.exit_price))
                 short_exits_text.append(

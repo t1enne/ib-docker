@@ -1,0 +1,25 @@
+name: breakout_ema
+training_start: 2024-01-01
+training_end: 2024-12-31
+trading_start: 2025-01-01
+trading_end: 2026-01-01
+
+initial_capital: 10000
+commission: 0.0005
+strategy_type: breakout_ema
+bar: 1h
+plot: true
+stop_loss: 0.1
+take_profit: 0.2
+position_size: 0.2
+
+strategy_params:
+  fast: 9
+  slow: 100
+  vol_window: 20
+  vol_multiplier: 1.5
+
+model_params: false
+
+symbols:
+  - SPY

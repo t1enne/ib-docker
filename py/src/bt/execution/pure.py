@@ -62,7 +62,6 @@ def execute_risk_event(event, tick: Tick, params: ExecutionParams) -> FillEvent:
         symbol=event.symbol,
         timestamp=event.timestamp,
         price=event.trigger_price,
-        z_score=0.0,
         reason=event.reason,
     )
 

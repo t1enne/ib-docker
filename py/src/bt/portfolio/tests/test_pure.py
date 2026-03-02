@@ -79,7 +79,7 @@ class TestApplyFill:
                     exit_time=None,
                     exit_price=None,
                     last_price=100.0,
-                    z_score=2.0,
+                    reason="Z: 2.0",
                     symbol="AAPL",
                     position=ActionType.long,
                     qty=10.0,
@@ -105,7 +105,7 @@ class TestApplyFill:
             symbol="AAPL",
             timestamp=pd.Timestamp("2024-01-02"),
             price=110.0,
-            z_score=0.5,
+            reason=0.5,
         )
 
         fill = FillEvent(

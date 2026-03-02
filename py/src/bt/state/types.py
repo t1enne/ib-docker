@@ -75,13 +75,13 @@ class Trade:
     exit_time: Optional[pd.Timestamp]
     exit_price: Optional[float]
     last_price: float
-    z_score: Optional[float]
     symbol: str
     position: ActionType
     qty: float
     stop_loss: float
     take_profit: float
     pnl: float = 0.0
+    reason: Optional[str] = ""
     status: TradeStatus = TradeStatus.open
     close_reason: Optional[Any] = None
 
@@ -234,7 +234,7 @@ class BacktestResults:
 
     pf: PortfolioResult
     data: pd.DataFrame
-    z_scores: pd.DataFrame
-    regimes: Optional[pd.DataFrame]
     final_state: BacktestState
+    z_scores: Optional[pd.DataFrame] = None
+    regimes: Optional[pd.DataFrame] = None
     plot_config: Optional["PlotConfig"] = None

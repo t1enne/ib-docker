@@ -35,7 +35,10 @@ def close(
 
 
 def open(
-    tick: Tick, dir: ActionType, z: Optional[float], hedge: Optional[float] = None
+    tick: Tick,
+    dir: ActionType,
+    reason: Optional[str] = "",
+    hedge: Optional[float] = None,
 ) -> List[TradeSignal]:
     return [
         TradeSignal(
@@ -43,7 +46,7 @@ def open(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
             price=tick.close,
-            z_score=z,
+            reason=reason,
             hedge_beta=hedge,
         ),
     ]

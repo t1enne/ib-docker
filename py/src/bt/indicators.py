@@ -208,3 +208,72 @@ def volatility(data: pd.Series, window: int = 20, annualized: bool = True) -> pd
         vol = vol * np.sqrt(252)
 
     return vol
+
+
+def vwma(close: pd.Series, volume: pd.Series, window: int = 20) -> pd.Series:
+    """Calculate Volume-Weighted Moving Average.
+
+    Args:
+        close: Close prices series
+        volume: Volume series
+        window: MA period (default 20)
+
+    Returns:
+        Series with VWMA values
+    """
+    return (close * volume).rolling(window=window).sum() / volume.rolling(
+        window=window
+    ).sum()
+
+
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """Calculate On-Balance Volume.
+
+    Args:
+        close: Close prices series
+        volume: Volume series
+
+    Returns:
+        Series with OBV values (cumulative)
+    """
+    direction = np.sign(close.diff())
+    obv = volume * direction
+    return obv.fillna(0).cumsum()
+
+
+def mfi(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    volume: pd.Series,
+    window: int = 14,
+) -> pd.Series:
+    """Calculate Money Flow Index.
+
+    Args:
+        high: High prices series
+        low: Low prices series
+        close: Close prices series
+        volume: Volume series
+        window: MFI period (default 14)
+
+    Returns:
+        Series with MFI values (0-100)
+    """
+    typical_price = (high + low + close) / 3
+    raw_money_flow = typical_price * volume
+
+    money_flow_sign = np.sign(typical_price.diff())
+    signed_money_flow = raw_money_flow * money_flow_sign
+
+    positive_flow = (
+        signed_money_flow.where(signed_money_flow > 0, 0).rolling(window=window).sum()
+    )
+    negative_flow = (
+        signed_money_flow.where(signed_money_flow < 0, 0).rolling(window=window).sum()
+    )
+
+    money_ratio = positive_flow / negative_flow
+    mfi = 100 - (100 / (1 + money_ratio))
+
+    return mfi

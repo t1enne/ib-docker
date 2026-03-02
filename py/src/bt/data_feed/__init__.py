@@ -21,9 +21,9 @@ class DataFeed:
 
     async def load(self, config: StrategyConfig, window: EngineWindow):
         from_date = window.train_start.date()
-        await sync_data(
-            config.symbols,
-        )
+        # await sync_data(
+        #     config.symbols,
+        # )
         self.time_series = [
             get_local_candles(x, window.train_start, window.test_end, self.bar)
             for x in config.symbols

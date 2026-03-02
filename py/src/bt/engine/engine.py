@@ -20,6 +20,7 @@ from src.bt.algos import (
     pairs_trading_functional,
     vol_extension_pullback,
     yesterday_high_breakout,
+    breakout_ema,
 )
 from src.market_data.cache import update_resample_cache, ResampleCache
 from src.bt.models.correlation_model import CorrelationModel
@@ -242,13 +243,8 @@ class Engine:
 
         def _strat_wrap() -> List[TradeSignal]:
             if self.config.strategy_type == "pnd":
-                entry_z = self.config.strategy_params.get("entry_z", 0.0)
-                exit_z = self.config.strategy_params.get("exit_z", 0.0)
                 return pairs_trading_functional.on_tick(
-                    state,
-                    tick_group,
-                    entry_z,
-                    exit_z,
+                    state, tick_group, self.config.strategy_params
                 )
             elif self.config.strategy_type == "ema_cross":
                 return ema_cross.on_tick(state, tick, self.config.strategy_params)
@@ -263,6 +259,8 @@ class Engine:
                 return yesterday_high_breakout.on_tick(
                     state, tick, self.config.strategy_params
                 )
+            elif self.config.strategy_type == "breakout_ema":
+                return breakout_ema.on_tick(state, tick, self.config.strategy_params)
 
             raise ValueError("Unrecognized strat")
 
@@ -581,19 +579,12 @@ class Engine:
             equity_series, state.portfolio.trades, state.portfolio.initial_capital
         )
 
-        # Build z-scores dataframe
-        z_df = pd.DataFrame(
-            {"z": self.z_scores}, index=pd.DatetimeIndex(self.z_timestamps)
-        )
-
         # Call strategy plot function
-        plot_config = self._get_strategy_plot_fn(state)
+        plot_config = self._get_strategy_plot_fn(state) if self.config.plot else None
 
         return BacktestResults(
             pf=pf_result,
             data=data_feed.candles_df,
-            z_scores=z_df,
-            regimes=None,
             final_state=state,
             plot_config=plot_config,
         )

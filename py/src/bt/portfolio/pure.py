@@ -104,13 +104,13 @@ def _open_position(
         exit_time=None,
         exit_price=None,
         last_price=fill.executed_price,
-        z_score=signal.z_score,
         symbol=signal.symbol,
         position=signal.action,
         qty=qty,
         stop_loss=stop_loss,
         take_profit=take_profit,
         pnl=0.0,
+        reason=signal.reason,
         status=TradeStatus.open,
         close_reason=None,
     )
@@ -138,7 +138,7 @@ def _close_position(portfolio: PortfolioState, fill: FillEvent) -> PortfolioStat
         return portfolio
 
     # Calculate PnL
-    is_long = position.qty > 0
+    is_long = position.type == ActionType.long
     qty = abs(position.qty)
 
     if is_long:
@@ -159,7 +159,7 @@ def _close_position(portfolio: PortfolioState, fill: FillEvent) -> PortfolioStat
                 exit_time=fill.timestamp,
                 exit_price=fill.executed_price,
                 last_price=fill.executed_price,
-                z_score=trade.z_score,
+                reason=trade.reason,
                 symbol=trade.symbol,
                 position=trade.position,
                 qty=trade.qty,

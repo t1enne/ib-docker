@@ -371,13 +371,14 @@ def get_backtest_results_analysis(
         sl_tp_str = f"{t.stop_loss:.2f}/{t.take_profit:.2f}"
         exit_price_str = f"{t.exit_price:.2f}" if t.exit_price is not None else "N/A"
         print(
+            f"{t.symbol:<5} "
             f"{_safe_date_str(t.entry_time):<20} "
             f"{_safe_date_str(t.exit_time):<20} "
             f"{t.entry_price:<10.2f} "
             f"{exit_price_str:<10} "
             f"{t.pnl:<10.2f} "
             f"{t.position == ActionType.long and 'L' or 'S':<8} "
-            f"{str(t.close_reason):<15} "
+            f"{str(t.close_reason):<25} "
             f"{sl_tp_str:<15}"
         )
 

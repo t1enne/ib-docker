@@ -27,6 +27,12 @@ def load_strategy(path: str) -> StrategyConfig:
             if key in data and isinstance(data[key], date):
                 data[key] = data[key].isoformat()
 
+        if "hft" in data and "htf" not in data:
+            data["htf"] = data.pop("hft")
+
+        if data.get("htf") is None:
+            data["htf"] = []
+
     return StrategyConfig(**data)
 
 
@@ -46,7 +52,6 @@ async def backtest_async(strategy_conf: StrategyConfig) -> str:
         strategy_conf.bar,
     )
     strat_mod = init_strat(strategy_conf.strategy_type)
-    print(strat_mod)
     results = run(bt, df, strat_mod=strat_mod)
     output = get_backtest_results_analysis(results.pf)
 

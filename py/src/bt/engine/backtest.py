@@ -14,7 +14,7 @@ Usage:
     results, state = run_backtest(bt, gen, exec_handler, risk_handler)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Generator, Tuple, Optional, Any, List, Callable, cast
 
 import pandas as pd
@@ -101,8 +101,9 @@ def ticks_generator(
                 timestamp = Timestamp(ts)
                 if timestamp is pd.NaT:
                     continue
+                timestamp = cast(Timestamp, timestamp)
                 yield Tick(
-                    timestamp=cast(pd.Timestamp, timestamp),
+                    timestamp=timestamp,
                     symbol=s,
                     open=float(row["open"]),
                     high=float(row["high"]),
@@ -156,23 +157,6 @@ def run_backtest(
             rolling_window_size=config.rolling_window_size,
         )
 
-    # Initialize resample cache if needed
-    # timeframes = config.strategy_params.get("resample_timeframes", [])
-    # if timeframes:
-    #     cache: Dict[str, pd.DataFrame] = {}
-    #     anchor: Dict[str, pd.Timestamp] = {}
-    #     state = BacktestState(
-    #         portfolio=state.portfolio,
-    #         timestamp=state.timestamp,
-    #         pending_signals=state.pending_signals,
-    #         model_state=state.model_state.__replace__(
-    #             resample_cache=cache,
-    #             resample_anchor=anchor,
-    #         ),
-    #         risk_events=state.risk_events,
-    #         candles=state.candles,
-    #     )
-    #
     for tick in tick_gen:
         can_trade = bt.window.test_start <= tick.timestamp <= bt.window.test_end
         state = _process_tick(
@@ -201,12 +185,12 @@ def run_backtest(
         equity_series, state.portfolio.trades, state.portfolio.initial_capital
     )
 
-    plot_config = None
+    plot_config: PlotConfig = strategy_mod.plot(state, config)
 
     return (
         BacktestResults(
             pf=pf_result,
-            data=pd.DataFrame(),
+            data=state.candles,
             final_state=state,
             plot_config=plot_config,
         ),
@@ -234,6 +218,9 @@ def _process_tick(
 
     # Append candle
     state = _append_candle(state, tick)
+
+    # Update HTF resample cache
+    state = _update_resample_cache(state, tick, config)
 
     # Execute pending signals from previous tick
     portfolio, pending_signals = _execute_signals(
@@ -334,6 +321,55 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
         model_state=state.model_state,
         risk_events=state.risk_events,
         candles=candles,
+    )
+
+
+def _update_resample_cache(
+    state: BacktestState, tick: Tick, config: StrategyConfig
+) -> BacktestState:
+    htf = config.htf or []
+    if isinstance(htf, str):
+        frequencies = [htf]
+    else:
+        frequencies = list(htf)
+    if not frequencies:
+        return state
+
+    from src.market_data.cache import ResampleCache, update_resample_cache_incremental
+
+    cache = ResampleCache(
+        cache=state.model_state.resample_cache,
+        anchor=state.model_state.resample_anchor,
+    )
+    partial = state.model_state.resample_partial
+
+    new_cache, new_partial = update_resample_cache_incremental(
+        cache,
+        partial,
+        symbol=tick.symbol,
+        timestamp=tick.timestamp,
+        open=tick.open,
+        high=tick.high,
+        low=tick.low,
+        close=tick.close,
+        volume=tick.volume,
+        frequencies=cast(List[str], frequencies),
+    )
+
+    new_model_state = replace(
+        state.model_state,
+        resample_cache=new_cache.cache,
+        resample_anchor=new_cache.anchor,
+        resample_partial=new_partial,
+    )
+
+    return BacktestState(
+        portfolio=state.portfolio,
+        timestamp=state.timestamp,
+        pending_signals=state.pending_signals,
+        model_state=new_model_state,
+        risk_events=state.risk_events,
+        candles=state.candles,
     )
 
 

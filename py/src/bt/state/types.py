@@ -193,6 +193,7 @@ class ModelState:
     correlation_model: Optional[Any] = None
     resample_cache: Dict[str, pd.DataFrame] = field(default_factory=dict)
     resample_anchor: Dict[str, pd.Timestamp] = field(default_factory=dict)
+    resample_partial: Dict[str, Dict[str, dict]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -67,7 +67,7 @@ def plot_backtest_results(
 
     for i, symbol in enumerate(symbols):
         row = i + 1
-        _add_price_and_volume(fig, row, symbol, data[symbol])
+        _add_price_and_volume(fig, row, symbol, data.loc[symbol])
 
         # Add price overlays from strategy
         if plot_config and symbol in plot_config.price_overlays:
@@ -125,6 +125,7 @@ def _build_plot_meta(
     num_rows = len(symbols) + len(subplots) + 1 + 1
     titles = [f"{symbol} Price + Volume" for symbol in symbols]
 
+    titles.extend([sp[0] for sp in subplots])
     titles.extend([f"Equity Curve - {strategy.upper()} Strategy", "Drawdown"])
     specs: list[list[dict | None]] = []
     specs.extend([[{"secondary_y": True}] for _ in symbols])

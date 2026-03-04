@@ -277,3 +277,86 @@ def mfi(
     mfi = 100 - (100 / (1 + money_ratio))
 
     return mfi
+
+
+def lsma(data: pd.Series, window: int = 14, offset: int = 0) -> pd.Series:
+    """Calculate Least Squares Moving Average (LSMA).
+
+    Args:
+        data: Price series
+        window: Lookback period
+        offset: Forecast offset (0 = current bar)
+
+    Returns:
+        Series with LSMA values
+    """
+    if window <= 1:
+        return data
+
+    x = np.arange(window)
+    x_mean = x.mean()
+    x_denom = ((x - x_mean) ** 2).sum()
+
+    def _calc(values: np.ndarray) -> float:
+        y = values
+        y_mean = y.mean()
+        slope = ((x - x_mean) * (y - y_mean)).sum() / x_denom
+        intercept = y_mean - slope * x_mean
+        return slope * (window - 1 + offset) + intercept
+
+    return data.rolling(window=window).apply(_calc, raw=True)
+
+
+def _dmi_components(
+    high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    up_move = high.diff()
+    down_move = low.shift(1) - low
+
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    tr_smooth = tr.ewm(alpha=1 / window, adjust=False).mean()
+    plus_dm_smooth = (
+        pd.Series(plus_dm, index=high.index).ewm(alpha=1 / window, adjust=False).mean()
+    )
+    minus_dm_smooth = (
+        pd.Series(minus_dm, index=high.index).ewm(alpha=1 / window, adjust=False).mean()
+    )
+
+    tr_safe = tr_smooth.replace(0, np.nan)
+    plus_di = 100 * (plus_dm_smooth / tr_safe)
+    minus_di = 100 * (minus_dm_smooth / tr_safe)
+
+    return plus_di.fillna(0), minus_di.fillna(0), tr_safe.fillna(0)
+
+
+def plus_di(
+    high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14
+) -> pd.Series:
+    """Calculate +DI (Directional Indicator)."""
+    plus, _minus, _tr = _dmi_components(high, low, close, window)
+    return plus
+
+
+def minus_di(
+    high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14
+) -> pd.Series:
+    """Calculate -DI (Directional Indicator)."""
+    _plus, minus, _tr = _dmi_components(high, low, close, window)
+    return minus
+
+
+def adx(
+    high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14
+) -> pd.Series:
+    """Calculate ADX (Average Directional Index)."""
+    plus, minus, _tr = _dmi_components(high, low, close, window)
+    denom = (plus + minus).replace(0, np.nan)
+    dx = 100 * (plus - minus).abs() / denom
+    return dx.ewm(alpha=1 / window, adjust=False).mean().fillna(0)

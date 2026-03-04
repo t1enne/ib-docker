@@ -52,6 +52,7 @@ def create_initial_model_state(
         hedge_beta=1.0,
         resample_cache={},
         resample_anchor={},
+        resample_partial={},
     )
 
 

@@ -206,7 +206,7 @@ def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
 
     # Calculate equity (always do this, even if no positions)
     positions_value = calculate_positions_value(new_positions)
-    equity = portfolio.cash + positions_value
+    equity = calculate_equity(portfolio)
 
     # Add equity point
     equity_point = EquityPoint(
@@ -229,13 +229,13 @@ def calculate_positions_value(positions: Dict[str, Position]) -> float:
     """Calculate total value of all positions."""
     value = 0.0
     for position in positions.values():
-        if position.qty > 0:
+        if position.type == ActionType.long:
             value += position.qty * position.last_price
         else:
             # Short: collateral + unrealized pnl
-            value += abs(position.qty) * (
-                2 * position.entry_price - position.last_price
-            )
+            upnl = position.qty * (position.entry_price - position.last_price)
+            position.last_price - position.entry_price
+            value += (position.qty * position.entry_price) + upnl
     return value
 
 

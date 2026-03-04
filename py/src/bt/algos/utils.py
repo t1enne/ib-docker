@@ -71,25 +71,89 @@ def get_resampled_candles(
     """
     cache = state.model_state.resample_cache
     anchor = state.model_state.resample_anchor
+    partial = getattr(state.model_state, "resample_partial", {})
     candles = state.candles
     current_ts = state.timestamp
 
     if not cache or freq not in cache:
-        return resample_multiindex(
-            candles,
+        if freq in partial:
+            if completed_only:
+                return pd.DataFrame(
+                    columns=pd.Index(["open", "high", "low", "close", "volume"])
+                )
+            cached = pd.DataFrame(
+                columns=pd.Index(["open", "high", "low", "close", "volume"])
+            )
+        else:
+            return resample_multiindex(
+                candles,
+                freq,
+                completed_only=completed_only,
+                current_ts=current_ts,
+            )
+    else:
+        from src.market_data.cache import ResampleCache
+
+        cache_obj = ResampleCache(cache=cache, anchor=anchor)
+
+        cached = get_from_cache(
+            cache_obj,
             freq,
             completed_only=completed_only,
             current_ts=current_ts,
+            symbol=symbol,
         )
 
-    from src.market_data.cache import ResampleCache
+    if completed_only:
+        return cached
 
-    cache_obj = ResampleCache(cache=cache, anchor=anchor)
+    freq_partial = partial.get(freq, {})
+    if not freq_partial:
+        return cached
 
-    return get_from_cache(
-        cache_obj,
-        freq,
-        completed_only=completed_only,
-        current_ts=current_ts,
-        symbol=symbol,
-    )
+    partial_rows = []
+    if symbol:
+        bucket = freq_partial.get(symbol)
+        if bucket:
+            partial_rows.append((symbol, bucket))
+    else:
+        partial_rows = list(freq_partial.items())
+
+    if not partial_rows:
+        return cached
+
+    if symbol:
+        partial_df = pd.DataFrame(
+            [
+                {
+                    "open": b["open"],
+                    "high": b["high"],
+                    "low": b["low"],
+                    "close": b["close"],
+                    "volume": b["volume"],
+                    "timestamp": b["timestamp"],
+                }
+                for _s, b in partial_rows
+            ]
+        ).set_index("timestamp")
+    else:
+        partial_df = pd.DataFrame(
+            [
+                {
+                    "open": b["open"],
+                    "high": b["high"],
+                    "low": b["low"],
+                    "close": b["close"],
+                    "volume": b["volume"],
+                    "symbol": s,
+                    "timestamp": b["timestamp"],
+                }
+                for s, b in partial_rows
+            ]
+        ).set_index(["symbol", "timestamp"])
+
+    if cached.empty:
+        return partial_df
+
+    combined = pd.concat([cached, partial_df])
+    return combined

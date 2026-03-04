@@ -1,5 +1,5 @@
-from src.bt.portfolio import TradeExitReason
 import src.bt.indicators as ta
+from src.bt.portfolio import TradeExitReason
 from src.bt.algos.utils import open, close
 from typing import List, Dict, Optional
 from src.bt.state import BacktestState, TradeSignal, Tick, ActionType, Position
@@ -10,28 +10,29 @@ regime = None
 
 
 def is_ranging(
-    closes: pd.Series,
-    high: pd.Series,
-    low: pd.Series,
-    fast: int,
-    slow: int,
-    atr_period: int = 14,
-    ema_threshold: float = 0.015,
-    atr_threshold: float = 0.01,
+    closes: pd.Series, high: pd.Series, low: pd.Series, strategy_params: dict
 ) -> bool:
     """Detect ranging market using EMA convergence + ATR."""
-    if len(closes) < slow + atr_period:
-        return False
+    fast = strategy_params.get("fast", 9)
+    slow = strategy_params.get("slow", 14)
+    # atr
+    atr_threshold = strategy_params.get("atr_threshold", 0.5)
+    atr_period = strategy_params.get("atr_period", 14)
 
-    ema_f = ta.ema(closes, fast).iloc[-1]
-    ema_s = ta.ema(closes, slow).iloc[-1]
-    ema_spread = abs(ema_f - ema_s) / closes.iloc[-1]
+    # ema
+    ema_threshold = strategy_params.get("ema_threshold", 0.05)
+    ema_fast = ta.ema(closes, fast).iloc[-1]
+    ema_slow = ta.ema(closes, slow).iloc[-1]
+    ema_spread = round(abs(ema_fast - ema_slow) / closes.iloc[-1], 4)
+
+    if len(closes) < max(slow, atr_period):
+        return True
 
     atr_val = ta.atr(high, low, closes, atr_period).iloc[-1]
-    atr_ratio = atr_val / closes.iloc[-1]
+    atr_ranging = atr_val < atr_threshold
     ema_ranging = ema_spread < ema_threshold
-    atr_ranging = atr_ratio < atr_threshold
-    if ema_ranging and atr_ranging:
+
+    if atr_ranging:
         return True
 
     return False
@@ -42,9 +43,9 @@ def handle_ranging(tick: Tick, position: Optional[Position] = None):
         return []
 
     if position and position.type == ActionType.short:
-        return close(tick, position, "[bear] ranging - close short")
+        return close(tick, position, "[bear] ranging - short")
     if position and position.type == ActionType.long:
-        return close(tick, position, "[bear] ranging - close long")
+        return close(tick, position, "[bear] ranging - long")
 
     return []
 
@@ -80,7 +81,7 @@ def on_tick(
     ema_fast = ta.ema(closes, fast).iloc[-1]
     ema_slow = ta.ema(closes, slow).iloc[-1]
     regime = "BULL" if ema_fast > ema_slow else "BEAR"
-    if is_ranging(closes, high, low, fast, slow):
+    if is_ranging(closes, high, low, strategy_params):
         regime = "RANGE"
 
     if regime == "RANGE":
@@ -121,28 +122,27 @@ def handle_entry_exit(
 
     ema_fast = ta.ema(closes, fast).iloc[-1]
     ema_slow = ta.ema(closes, slow).iloc[-1]
-    ema_spread = round(abs(ema_fast - ema_slow) / closes.iloc[-1], 3)
     last_close = closes.iloc[-1]
     position = state.portfolio.positions.get(tick.symbol)
 
     with_volume = volume_confirmed(volumes, vol_window, vol_multiplier)
-    is_volatile = ema_spread > 0.05
-    hedge = 0.3 if is_volatile else 1.0
+    hedge = 1.0
     # if extremely volatile, use the close instead of the ema
-    fast_signal = last_close if is_volatile else ema_fast
+    fast_signal = last_close
     crossed_above = fast_signal > ema_slow
     crossed_below = ema_slow > fast_signal
 
     if not position:
-        if is_volatile:
-            # don't open positions
-            return []
         if regime == "BULL":
             if crossed_above and with_volume:
-                return open(tick, ActionType.long, f"emaspread: {ema_spread}", hedge)
+                if hedge != 1.0:
+                    print("Hedging!")
+                return open(tick, ActionType.long, f"emaspread: {0}", hedge)
         else:
             if crossed_below and with_volume:
-                return open(tick, ActionType.short, f"emaspread: {ema_spread}", hedge)
+                if hedge != 1.0:
+                    print("Hedging!")
+                return open(tick, ActionType.short, f"emaspread: {0}", hedge)
         return []
 
     if not position:
@@ -162,11 +162,13 @@ def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
     """Calculate EMAs from candles and return as price overlays."""
     fast = config.strategy_params.get("fast", 9)
     slow = config.strategy_params.get("slow", 14)
+    atr_period = config.strategy_params.get("atr_period", 14)
 
     price_overlays: Dict[str, Dict[str, pd.Series]] = {}
 
     for symbol in config.symbols:
         closes = state.candles.xs(symbol)["close"]
+        volumes = state.candles.xs(symbol)["volume"]
         if len(closes) < slow:
             continue
 
@@ -174,10 +176,21 @@ def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
         ema_slow = ta.ema(closes, slow)
         ema_spread = abs(ema_fast - ema_slow) / closes.iloc[-1]
 
+        high = state.candles.xs(symbol)["high"]
+        low = state.candles.xs(symbol)["low"]
+        atr = ta.atr(high, low, closes, atr_period)
+
+        obv = ta.obv(closes, volumes)
+
         price_overlays[symbol] = {
             f"ema_{fast}": ema_fast,
             f"ema_{slow}": ema_slow,
         }
-        sublots = [("ema_spread", ema_spread)]
+
+        sublots = [
+            (f"ema_spread {fast}/{slow}", ema_spread),
+            ("atr", atr),
+            ("obv", obv),
+        ]
 
     return PlotConfig(price_overlays=price_overlays, subplots=sublots)

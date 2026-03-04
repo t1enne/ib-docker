@@ -1,24 +1,19 @@
-name: ema-strat
+name: trend_following
 training_start: 2024-01-01
 training_end: 2024-01-02
 trading_start: 2024-01-02
 trading_end: 2027-01-01
 commission: 0.1
 initial_capital: 10000
-plot: false
+plot: true
 position_size: 0.2
-strategy_type: ema_cross
-stop_loss: 0.2
+strategy_type: trend_following
+stop_loss: 0.1
 take_profit: 0.5
 bar: 1h
 plot: true
 model_params: false
 strategy_params:
-  fast: 9
-  slow: 30
-  ema_threshold: 0.001
-  atr_threshold: 3.5
-  atr_period: 14
 symbols:
   # - XLE
   - COIN

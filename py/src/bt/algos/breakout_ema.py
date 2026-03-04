@@ -71,6 +71,8 @@ def on_tick(
     slow = strategy_params.get("slow", 14)
     vol_window = strategy_params.get("vol_window", 20)
     vol_multiplier = strategy_params.get("vol_multiplier", 1.5)
+    ema_th = strategy_params.get("ema_th", 0.05)
+    atr_th = strategy_params.get("atr_th", 0.05)
 
     if len(closes) < slow:
         return []
@@ -82,7 +84,7 @@ def on_tick(
     if is_squeeze(closes, high, low, fast, slow):
         return handle_squeeze(tick, position)
 
-    if was_squeezing(closes, fast, slow):
+    if was_squeezing(closes, fast, slow, ema_th):
         return handle_breakout(
             state, tick, strategy_params, candles, ema_fast, ema_slow, ema_spread
         )

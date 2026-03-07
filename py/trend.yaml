@@ -11,9 +11,13 @@ strategy_type: trend_following
 stop_loss: 0.1
 take_profit: 0.5
 bar: 1h
+htf:
+  - 4h
 plot: true
 model_params: false
 strategy_params:
+  window: 14 
+  
 symbols:
   # - XLE
   - COIN

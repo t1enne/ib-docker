@@ -1,5 +1,5 @@
 import src.bt.indicators as ta
-from src.bt.algos.utils import open, close, get_resampled_candles
+from src.bt.algos.utils import open, close, htf_candles
 from typing import List, Dict, TYPE_CHECKING, Optional, cast
 from src.bt.state import BacktestState, TradeSignal, Tick, ActionType, Position
 from src.bt.types import PlotConfig
@@ -80,7 +80,7 @@ def on_tick(
     if pd.isna(lsma.iloc[-1]) or pd.isna(ema.iloc[-1]):
         return []
 
-    htf = get_resampled_candles(state, "4h", symbol, completed_only=True)
+    htf = htf_candles(state, "4h", tick)
 
     if htf.empty or len(htf) < window + 1:
         return []

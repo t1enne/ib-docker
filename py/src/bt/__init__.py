@@ -27,9 +27,6 @@ def load_strategy(path: str) -> StrategyConfig:
             if key in data and isinstance(data[key], date):
                 data[key] = data[key].isoformat()
 
-        if "hft" in data and "htf" not in data:
-            data["htf"] = data.pop("hft")
-
         if data.get("htf") is None:
             data["htf"] = []
 

@@ -206,7 +206,7 @@ def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
 
     # Calculate equity (always do this, even if no positions)
     positions_value = calculate_positions_value(new_positions)
-    equity = calculate_equity(portfolio)
+    equity = portfolio.cash + positions_value
 
     # Add equity point
     equity_point = EquityPoint(

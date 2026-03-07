@@ -31,7 +31,6 @@ def resample_ohlcv(
     if df.empty:
         return pd.DataFrame(columns=OHLCV_COLS)  # type: ignore[arg-type]
 
-    print("resampling")
     resampled = df.resample(freq).agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     )

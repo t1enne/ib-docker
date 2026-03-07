@@ -81,7 +81,7 @@ def test_stop_loss_triggered_long(risk_config):
     assert event is not None
     assert isinstance(event, StopLossEvent)
     assert event.symbol == "AAPL"
-    assert event.trigger_price == 88.0
+    assert event.trigger_price == 90.0  # fills at the SL level, not the close
 
 
 def test_take_profit_triggered_long(risk_config):
@@ -112,7 +112,7 @@ def test_take_profit_triggered_long(risk_config):
     assert event is not None
     assert isinstance(event, TakeProfitEvent)
     assert event.symbol == "AAPL"
-    assert event.trigger_price == 122.0
+    assert event.trigger_price == 120.0  # fills at the TP level, not the close
 
 
 def test_stop_loss_triggered_short(risk_config):
@@ -143,7 +143,7 @@ def test_stop_loss_triggered_short(risk_config):
     assert event is not None
     assert isinstance(event, StopLossEvent)
     assert event.symbol == "AAPL"
-    assert event.trigger_price == 112.0
+    assert event.trigger_price == 110.0  # fills at the SL level, not the close
 
 
 def test_take_profit_triggered_short(risk_config):
@@ -174,7 +174,7 @@ def test_take_profit_triggered_short(risk_config):
     assert event is not None
     assert isinstance(event, TakeProfitEvent)
     assert event.symbol == "AAPL"
-    assert event.trigger_price == 78.0
+    assert event.trigger_price == 80.0  # fills at the TP level, not the close
 
 
 def test_no_trailing_sl_update_when_sl_triggered(risk_config):

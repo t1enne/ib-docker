@@ -52,6 +52,31 @@ def open(
     ]
 
 
+def htf_candles(
+    state: "BacktestState",
+    freq: str,
+    tick: Tick,
+    completed_only: bool = True,
+) -> pd.DataFrame:
+    """Get higher-timeframe candles for the tick's symbol.
+
+    Convenience wrapper around get_resampled_candles with a simpler signature.
+    Returns only completed buckets by default (no lookahead).
+
+    Args:
+        state: Current backtest state
+        freq: Resample frequency (e.g., "4h", "1D")
+        tick: Current tick (used to infer symbol)
+        completed_only: If True, exclude incomplete bucket (default True)
+
+    Returns:
+        DataFrame with timestamp index and OHLCV columns for the tick's symbol
+    """
+    return get_resampled_candles(
+        state, freq, symbol=tick.symbol, completed_only=completed_only
+    )
+
+
 def get_resampled_candles(
     state: "BacktestState",
     freq: str,

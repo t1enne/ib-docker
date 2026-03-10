@@ -11,7 +11,6 @@ from src.bt.state import (
     Tick,
     Position,
 )
-from src.market_data.cache import get_from_cache
 from src.market_data.resample import resample_multiindex
 
 
@@ -53,132 +52,71 @@ def open(
 
 
 def htf_candles(
-    state: "BacktestState",
+    state: BacktestState,
     freq: str,
     tick: Tick,
-    completed_only: bool = True,
 ) -> pd.DataFrame:
-    """Get higher-timeframe candles for the tick's symbol.
+    """Get completed higher-timeframe candles for the tick's symbol.
 
-    Convenience wrapper around get_resampled_candles with a simpler signature.
-    Returns only completed buckets by default (no lookahead).
+    Returns only completed buckets (timestamp <= tick.timestamp) to prevent
+    lookahead bias.
 
     Args:
         state: Current backtest state
         freq: Resample frequency (e.g., "4h", "1D")
-        tick: Current tick (used to infer symbol)
-        completed_only: If True, exclude incomplete bucket (default True)
+        tick: Current tick (used to infer symbol and timestamp for filtering)
 
     Returns:
-        DataFrame with timestamp index and OHLCV columns for the tick's symbol
+        DataFrame with MultiIndex (symbol, timestamp) for completed HTF candles
     """
-    return get_resampled_candles(
-        state, freq, symbol=tick.symbol, completed_only=completed_only
-    )
+    df = state.htf_data.get(freq)
+    if df is None or df.empty:
+        return pd.DataFrame(
+            columns=["open", "high", "low", "close", "volume"],
+            index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
+        )
+
+    # Filter to completed buckets only (no lookahead)
+    completed = df[df.index.get_level_values("timestamp") <= tick.timestamp]
+
+    # Filter to tick's symbol
+    try:
+        return completed.xs(tick.symbol, level="symbol")
+    except KeyError:
+        return pd.DataFrame(
+            columns=["open", "high", "low", "close", "volume"],
+            index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
+        )
 
 
 def get_resampled_candles(
-    state: "BacktestState",
+    state: BacktestState,
     freq: str,
     symbol: Optional[str] = None,
     completed_only: bool = True,
 ) -> pd.DataFrame:
-    """Get resampled candles from cache.
+    """Legacy function for backward compatibility.
 
-    Args:
-        state: Current backtest state
-        freq: Resample frequency (e.g., "1h", "4h", "1D")
-        symbol: Optional symbol to filter to single-symbol DataFrame
-        completed_only: If True, exclude incomplete bucket (no lookahead)
-
-    Returns:
-        Resampled DataFrame with OHLCV columns
+    Prefer using htf_candles(state, freq, tick) instead.
     """
-    cache = state.model_state.resample_cache
-    anchor = state.model_state.resample_anchor
-    partial = getattr(state.model_state, "resample_partial", {})
-    candles = state.candles
-    current_ts = state.timestamp
+    if not symbol:
+        raise ValueError("symbol is required")
 
-    if not cache or freq not in cache:
-        if freq in partial:
-            if completed_only:
-                return pd.DataFrame(
-                    columns=pd.Index(["open", "high", "low", "close", "volume"])
-                )
-            cached = pd.DataFrame(
-                columns=pd.Index(["open", "high", "low", "close", "volume"])
-            )
-        else:
-            return resample_multiindex(
-                candles,
-                freq,
-                completed_only=completed_only,
-                current_ts=current_ts,
-            )
-    else:
-        from src.market_data.cache import ResampleCache
-
-        cache_obj = ResampleCache(cache=cache, anchor=anchor)
-
-        cached = get_from_cache(
-            cache_obj,
-            freq,
-            completed_only=completed_only,
-            current_ts=current_ts,
-            symbol=symbol,
+    if state.htf_data.get(freq) is None:
+        return pd.DataFrame(
+            columns=["open", "high", "low", "close", "volume"],
+            index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )
 
+    df = state.htf_data[freq]
+
     if completed_only:
-        return cached
+        df = df[df.index.get_level_values("timestamp") <= state.timestamp]
 
-    freq_partial = partial.get(freq, {})
-    if not freq_partial:
-        return cached
-
-    partial_rows = []
-    if symbol:
-        bucket = freq_partial.get(symbol)
-        if bucket:
-            partial_rows.append((symbol, bucket))
-    else:
-        partial_rows = list(freq_partial.items())
-
-    if not partial_rows:
-        return cached
-
-    if symbol:
-        partial_df = pd.DataFrame(
-            [
-                {
-                    "open": b["open"],
-                    "high": b["high"],
-                    "low": b["low"],
-                    "close": b["close"],
-                    "volume": b["volume"],
-                    "timestamp": b["timestamp"],
-                }
-                for _s, b in partial_rows
-            ]
-        ).set_index("timestamp")
-    else:
-        partial_df = pd.DataFrame(
-            [
-                {
-                    "open": b["open"],
-                    "high": b["high"],
-                    "low": b["low"],
-                    "close": b["close"],
-                    "volume": b["volume"],
-                    "symbol": s,
-                    "timestamp": b["timestamp"],
-                }
-                for s, b in partial_rows
-            ]
-        ).set_index(["symbol", "timestamp"])
-
-    if cached.empty:
-        return partial_df
-
-    combined = pd.concat([cached, partial_df])
-    return combined
+    try:
+        return df.xs(symbol, level="symbol")
+    except KeyError:
+        return pd.DataFrame(
+            columns=["open", "high", "low", "close", "volume"],
+            index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
+        )

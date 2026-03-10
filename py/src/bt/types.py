@@ -191,29 +191,3 @@ class DataLoaderFn(Protocol):
         end: pd.Timestamp,
         bar: str,
     ) -> pd.DataFrame: ...
-
-
-@dataclass
-class EngineDependencies:
-    """All injectable dependencies for the Backtest engine.
-
-    Each field is optional - None values will use sensible defaults.
-    This allows partial injection (e.g., only swap the strategy function).
-
-    Note: strategy_fn accepts any callable - strategies may have different
-    signatures (state, tick, params).
-    """
-
-    strategy_fn: Optional[Callable[..., List[TradeSignal]]] = None
-    model_updater_fn: Optional[ModelUpdaterFn] = None
-    execution_fn: Optional[ExecutionFn] = None
-    position_sizer_fn: Optional[PositionSizerFn] = None
-    risk_check_fn: Optional[RiskCheckFn] = None
-    risk_executor_fn: Optional[
-        Callable[[StateRiskEvent, Tick, ExecutionParams], FillEvent]
-    ] = None
-    zscore_fn: Optional[ZScoreFn] = None
-    data_loader_fn: Optional[DataLoaderFn] = None
-    tick_generator_fn: Optional[
-        Callable[[pd.DataFrame, List[str]], AsyncGenerator[Tick, None]]
-    ] = None

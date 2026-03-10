@@ -14,6 +14,8 @@ Usage:
     results, state = run_backtest(bt, gen, exec_handler, risk_handler)
 """
 
+from src.bt.engine.utils import ticks_generator, merge_bt_state
+
 from dataclasses import dataclass, field, replace
 from typing import Generator, Tuple, Optional, Any, List, Callable, cast
 
@@ -71,50 +73,6 @@ class Backtest:
         )
 
 
-def ticks_generator(
-    df: pd.DataFrame,
-    symbols: List[str],
-) -> Generator[Tick, None, None]:
-    """Create a generator that yields ticks from a DataFrame.
-
-    This is a pure function - given the same inputs, it always yields
-    the same sequence of ticks.
-
-    Args:
-        df: DataFrame with MultiIndex (symbol, timestamp) containing OHLCV
-        symbols: List of symbols to generate ticks for
-
-    Yields:
-        Tick objects for each symbol at each timestamp
-    """
-    if df.empty or len(df.index) == 0:
-        return
-
-    all_timestamps = sorted(
-        set().union(*[set(df.xs(s, axis=1).index) for s in symbols])
-    )
-
-    for ts in all_timestamps:
-        for s in symbols:
-            try:
-                row = df.xs(s, axis=1).loc[ts]
-                timestamp = Timestamp(ts)
-                if timestamp is pd.NaT:
-                    continue
-                timestamp = cast(Timestamp, timestamp)
-                yield Tick(
-                    timestamp=timestamp,
-                    symbol=s,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=float(row["close"]),
-                    volume=float(row["volume"]),
-                )
-            except KeyError:
-                continue
-
-
 def run_backtest(
     bt: Backtest,
     tick_gen: Generator[Tick, None, None],
@@ -145,10 +103,7 @@ def run_backtest(
     config = bt.config
     symbols = config.symbols
 
-    # Initialize state
-    if initial_state is not None:
-        state = initial_state
-    else:
+    def get_initial_state():
         start_date = parse_timestamp(config.trading_start)
         state = create_initial_backtest_state(
             symbols=symbols,
@@ -156,6 +111,10 @@ def run_backtest(
             start_timestamp=start_date,
             rolling_window_size=config.rolling_window_size,
         )
+        return state
+
+    # Initialize state
+    state = initial_state or get_initial_state()
 
     for tick in tick_gen:
         can_trade = bt.window.test_start <= tick.timestamp <= bt.window.test_end
@@ -185,7 +144,9 @@ def run_backtest(
         equity_series, state.portfolio.trades, state.portfolio.initial_capital
     )
 
-    plot_config: PlotConfig = strategy_mod.plot(state, config)
+    plot_config: PlotConfig = (
+        strategy_mod.plot(state, config) if strategy_mod else PlotConfig()
+    )
 
     return (
         BacktestResults(
@@ -212,6 +173,11 @@ def _process_tick(
 ) -> BacktestState:
     """Process a single tick through the pipeline."""
 
+    # Handle HTF ticks: append to htf_data
+    if tick.interval and tick.interval != config.bar:
+        state = _append_htf_tick(state, tick)
+        return state
+
     # Update models
     if model_updater_fn:
         state = model_updater_fn(state, tick)
@@ -219,21 +185,17 @@ def _process_tick(
     # Append candle
     state = _append_candle(state, tick)
 
-    # Update HTF resample cache
-    state = _update_resample_cache(state, tick, config)
-
     # Execute pending signals from previous tick
     portfolio, pending_signals = _execute_signals(
         state, tick, exec_handler, config, exec_params
     )
 
-    state = BacktestState(
-        portfolio=portfolio,
-        timestamp=state.timestamp,
-        pending_signals=pending_signals,
-        model_state=state.model_state,
-        risk_events=state.risk_events,
-        candles=state.candles,
+    state = merge_bt_state(
+        state,
+        dict(
+            portfolio=portfolio,
+            pending_signals=pending_signals,
+        ),
     )
 
     if can_trade and strategy_fn:
@@ -251,13 +213,12 @@ def _process_tick(
     if new_signals:
         pending_signals = pending_signals + list(new_signals)
 
-    state = BacktestState(
-        portfolio=portfolio,
-        timestamp=state.timestamp,
-        pending_signals=pending_signals,
-        model_state=state.model_state,
-        risk_events=state.risk_events,
-        candles=state.candles,
+    state = merge_bt_state(
+        state,
+        dict(
+            portfolio=portfolio,
+            pending_signals=pending_signals,
+        ),
     )
 
     # Execute any signals created on this tick
@@ -265,13 +226,12 @@ def _process_tick(
         state, tick, exec_handler, config, exec_params
     )
 
-    state = BacktestState(
-        portfolio=portfolio,
-        timestamp=state.timestamp,
-        pending_signals=pending_signals,
-        model_state=state.model_state,
-        risk_events=state.risk_events,
-        candles=state.candles,
+    state = merge_bt_state(
+        state,
+        dict(
+            portfolio=portfolio,
+            pending_signals=pending_signals,
+        ),
     )
 
     # Check and execute risk
@@ -284,13 +244,12 @@ def _process_tick(
 
     portfolio = update_prices(state.portfolio, tick)
 
-    return BacktestState(
-        portfolio=portfolio,
-        timestamp=tick.timestamp,
-        pending_signals=state.pending_signals,
-        model_state=state.model_state,
-        risk_events=state.risk_events,
-        candles=state.candles,
+    return merge_bt_state(
+        state,
+        dict(
+            portfolio=portfolio,
+            timestamp=tick.timestamp,
+        ),
     )
 
 
@@ -314,63 +273,38 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
     else:
         candles = pd.concat([state.candles, new_row])
 
-    return BacktestState(
-        portfolio=state.portfolio,
-        timestamp=state.timestamp,
-        pending_signals=state.pending_signals,
-        model_state=state.model_state,
-        risk_events=state.risk_events,
-        candles=candles,
-    )
+    return merge_bt_state(state, dict(candles=candles))
 
 
-def _update_resample_cache(
-    state: BacktestState, tick: Tick, config: StrategyConfig
-) -> BacktestState:
-    htf = config.htf or []
-    if isinstance(htf, str):
-        frequencies = [htf]
-    else:
-        frequencies = list(htf)
-    if not frequencies:
+def _append_htf_tick(state: BacktestState, tick: Tick) -> BacktestState:
+    """Append an HTF tick to the htf_data DataFrame."""
+    freq = tick.interval
+    if freq is None:
         return state
 
-    from src.market_data.cache import ResampleCache, update_resample_cache_incremental
-
-    cache = ResampleCache(
-        cache=state.model_state.resample_cache,
-        anchor=state.model_state.resample_anchor,
-    )
-    partial = state.model_state.resample_partial
-
-    new_cache, new_partial = update_resample_cache_incremental(
-        cache,
-        partial,
-        symbol=tick.symbol,
-        timestamp=tick.timestamp,
-        open=tick.open,
-        high=tick.high,
-        low=tick.low,
-        close=tick.close,
-        volume=tick.volume,
-        frequencies=cast(List[str], frequencies),
+    new_row = pd.DataFrame(
+        {
+            "open": [tick.open],
+            "high": [tick.high],
+            "low": [tick.low],
+            "close": [tick.close],
+            "volume": [tick.volume],
+        },
+        index=pd.MultiIndex.from_tuples(
+            [(tick.symbol, tick.timestamp)], names=["symbol", "timestamp"]
+        ),
     )
 
-    new_model_state = replace(
-        state.model_state,
-        resample_cache=new_cache.cache,
-        resample_anchor=new_cache.anchor,
-        resample_partial=new_partial,
-    )
+    current_htf = state.htf_data.get(freq)
+    if current_htf is None or current_htf.empty:
+        htf_data = new_row
+    else:
+        htf_data = pd.concat([current_htf, new_row])
 
-    return BacktestState(
-        portfolio=state.portfolio,
-        timestamp=state.timestamp,
-        pending_signals=state.pending_signals,
-        model_state=new_model_state,
-        risk_events=state.risk_events,
-        candles=state.candles,
-    )
+    new_htf_data = dict(state.htf_data)
+    new_htf_data[freq] = htf_data
+
+    return merge_bt_state(state, dict(htf_data=new_htf_data))
 
 
 def _execute_signals(
@@ -422,14 +356,7 @@ def _check_and_execute_risk(
         fill = exec_handler.execute_risk_event(event, tick, exec_params)
         portfolio = exec_handler.apply_fill(portfolio, fill)
 
-    return BacktestState(
-        portfolio=portfolio,
-        timestamp=state.timestamp,
-        pending_signals=state.pending_signals,
-        model_state=state.model_state,
-        risk_events=risk_events,
-        candles=state.candles,
-    )
+    return merge_bt_state(state, dict(portfolio=portfolio, risk_events=risk_events))
 
 
 def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestState:
@@ -458,13 +385,13 @@ def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestSta
 
         portfolio = apply_fill(portfolio, fill)
 
-    return BacktestState(
-        portfolio=portfolio,
-        timestamp=state.timestamp,
-        pending_signals=[],
-        model_state=state.model_state,
-        risk_events=(),
-        candles=state.candles,
+    return merge_bt_state(
+        state,
+        dict(
+            portfolio=portfolio,
+            pending_signals=[],
+            risk_events=(),
+        ),
     )
 
 
@@ -476,7 +403,7 @@ def run(bt: Backtest, data: pd.DataFrame, strat_mod) -> BacktestResults:
     """
     from src.bt.engine.handlers import default_execution_handler, default_risk_handler
 
-    gen = ticks_generator(data, bt.config.symbols)
+    gen = ticks_generator(data, bt.config)
     exec_handler = default_execution_handler()
     risk_handler = default_risk_handler()
 

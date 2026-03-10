@@ -50,6 +50,7 @@ class Tick:
     low: float
     close: float
     volume: float
+    interval: Optional[str] = None  # e.g., "1h", "4h"
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,7 @@ class BacktestState:
     model_state: ModelState
     risk_events: Tuple[Any, ...]  # RiskEvent tuple
     candles: pd.DataFrame
+    htf_data: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

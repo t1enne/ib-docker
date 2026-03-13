@@ -34,7 +34,7 @@ class Portfolio:
     def __init__(self, initial_capital):
         self.cash = initial_capital  # Mutable!
         self.positions = {}          # Mutable!
-        
+
     def on_fill(self, fill: FillEvent) -> None:
         self.cash -= fill.commission  # Mutation!
         self.positions[fill.symbol] = ...  # Mutation!
@@ -54,7 +54,7 @@ def apply_fill(portfolio: Portfolio, fill: FillEvent) -> Portfolio:
     new_cash = portfolio.cash - fill.commission
     new_positions = update_positions(portfolio.positions, fill)
     new_trades = portfolio.trades + (new_trade_from_fill(fill),)
-    
+
     return Portfolio(
         cash=new_cash,
         positions=new_positions,
@@ -81,6 +81,7 @@ class Tick:
     low: float
     close: float
     volume: float
+    interval: Optional[str] = "1h"
 
 @dataclass(frozen=True)
 class Position:
@@ -125,7 +126,7 @@ class BacktestState:
     pending_signals: Tuple[TradeSignal, ...]
     model_state: ModelState  # Strategy model state
     risk_events: Tuple[RiskEvent, ...]
-    
+
 @dataclass(frozen=True)
 class ModelState:
     """All model computations (z-score, momentum, regime, etc.)."""
@@ -133,7 +134,7 @@ class ModelState:
     current_regime: Optional[int]
     price_buffers: Tuple[Dict[str, float], ...]
     market_data: MarketDataState
-    
+
 @dataclass(frozen=True)
 class MarketDataState:
     """Immutable market data history."""
@@ -149,7 +150,7 @@ PortfolioState, FillEvent -> PortfolioState
 PortfolioState, Dict[str, float] -> PortfolioState  # Update prices
 PortfolioState -> PortfolioResult
 
-# Strategy functions  
+# Strategy functions
 ModelState, Tick, Optional[Position] -> Tuple[TradeSignal, ...], ModelState
 
 # Risk functions
@@ -168,6 +169,7 @@ BacktestState, Tick -> BacktestState
 ### 3. Engine Loop Transformation
 
 **Current (Stateful)**:
+
 ```python
 async def _run_backtest(self, feed):
     for tick in feed:
@@ -179,6 +181,7 @@ async def _run_backtest(self, feed):
 ```
 
 **Functional (State Transform)**:
+
 ```python
 async def run_backtest(
     config: StrategyConfig,
@@ -187,11 +190,11 @@ async def run_backtest(
 ) -> Iterator[BacktestState]:
     """Yields state after each tick for debugging/analysis."""
     state = initial_state
-    
+
     async for tick in data_stream:
         state = process_tick(state, tick, config)
         yield state  # Can snapshot/save at any point
-    
+
     return state
 
 def process_tick(
@@ -202,29 +205,29 @@ def process_tick(
     """Pure function: transform state with one tick."""
     # 1. Update models
     new_model_state = update_models(state.model_state, tick)
-    
+
     # 2. Generate signals
     signals, new_model_state = generate_signals(
         new_model_state, tick, config
     )
-    
+
     # 3. Execute pending signals
     fills = execute_signals(state.pending_signals, tick, config.execution)
     new_portfolio = apply_fills(state.portfolio, fills)
-    
+
     # 4. Check risk
     risk_events = check_risk(new_portfolio, tick, config.risk)
     risk_fills = execute_risk_events(risk_events, tick)
     new_portfolio = apply_fills(new_portfolio, risk_fills)
-    
+
     # 5. Update market prices
     new_portfolio = update_prices(new_portfolio, tick)
-    
+
     # 6. Get new signals from strategy
     new_signals, new_model_state = strategy.on_tick(
         new_model_state, tick, new_portfolio
     )
-    
+
     return BacktestState(
         portfolio=new_portfolio,
         timestamp=tick.timestamp,
@@ -241,13 +244,14 @@ def process_tick(
 **Goal**: Convert all mutable state to immutable dataclasses
 
 **Files to Create**:
+
 - `src/bt/state/types.py` - All state dataclasses
 - `src/bt/state/factories.py` - Factory functions for initial states
 
 **Key Conversions**:
 
 1. **Portfolio** → `PortfolioState`
-   - Replace `Dict[str, Trade]` with `Dict[str, Position]` 
+   - Replace `Dict[str, Trade]` with `Dict[str, Position]`
    - Replace `List[Trade]` with `Tuple[Trade, ...]`
    - Remove mutation methods
 
@@ -264,6 +268,7 @@ def process_tick(
    - State only stores results, not model objects
 
 **Validation**:
+
 - All dataclasses use `@dataclass(frozen=True)`
 - No mutable default arguments
 - Use tuples instead of lists for sequences
@@ -274,6 +279,7 @@ def process_tick(
 **Goal**: Convert Portfolio class methods to pure functions
 
 **Files to Create**:
+
 - `src/bt/portfolio/pure.py` - Pure portfolio functions
 - `src/bt/portfolio/state.py` - PortfolioState dataclass
 
@@ -299,7 +305,7 @@ def _open_position(
     """Open a new position from fill."""
     signal = fill.signal
     qty = calculate_position_qty(portfolio, signal, fill)
-    
+
     position = Position(
         symbol=signal.symbol,
         qty=qty,
@@ -308,12 +314,12 @@ def _open_position(
         stop_loss=calculate_stop_loss(signal, fill),
         take_profit=calculate_take_profit(signal, fill)
     )
-    
+
     new_positions = dict(portfolio.positions)
     new_positions[signal.symbol] = position
-    
+
     new_cash = portfolio.cash - (qty * fill.executed_price) - fill.commission
-    
+
     trade = Trade(
         entry_time=signal.timestamp,
         entry_price=fill.executed_price,
@@ -322,7 +328,7 @@ def _open_position(
         qty=qty,
         # ... other fields
     )
-    
+
     return PortfolioState(
         cash=new_cash,
         positions=new_positions,
@@ -338,21 +344,21 @@ def _close_position(
     """Close a position from fill."""
     symbol = fill.signal.symbol
     position = portfolio.positions.get(symbol)
-    
+
     if not position:
         return portfolio  # No-op if no position
-    
+
     # Calculate PnL
     is_long = position.qty > 0
     qty = abs(position.qty)
-    
+
     if is_long:
         pnl = (fill.executed_price - position.entry_price) * qty
         cash_change = qty * fill.executed_price - fill.commission
     else:
         pnl = (position.entry_price - fill.executed_price) * qty
         cash_change = (qty * position.entry_price) + pnl - fill.commission
-    
+
     # Create closed trade record
     closed_trade = ClosedTrade(
         entry_time=position.entry_time,
@@ -363,11 +369,11 @@ def _close_position(
         pnl=pnl,
         # ... other fields
     )
-    
+
     # Return new state
     new_positions = {k: v for k, v in portfolio.positions.items() if k != symbol}
     new_cash = portfolio.cash + cash_change
-    
+
     return PortfolioState(
         cash=new_cash,
         positions=new_positions,
@@ -383,10 +389,10 @@ def update_prices(
     """Update position valuations with new prices."""
     if tick.symbol not in portfolio.positions:
         return portfolio
-    
+
     # Update equity curve with new valuations
     # ... implementation
-    
+
     return portfolio  # Or new state with updated equity
 
 def calculate_equity(portfolio: PortfolioState, prices: Dict[str, float]) -> float:
@@ -399,19 +405,20 @@ def calculate_equity(portfolio: PortfolioState, prices: Dict[str, float]) -> flo
 ```
 
 **Testing Strategy**:
+
 ```python
 # Pure functions are trivial to test
 def test_apply_fill():
     portfolio = create_test_portfolio(cash=10000)
     fill = create_test_fill(symbol="AAPL", qty=10, price=100)
-    
+
     new_portfolio = apply_fill(portfolio, fill)
-    
+
     # Assertions are straightforward
     assert new_portfolio.cash == 9000  # 10000 - (10 * 100)
     assert "AAPL" in new_portfolio.positions
     assert len(new_portfolio.trades) == 1
-    
+
     # Original portfolio unchanged!
     assert portfolio.cash == 10000
     assert "AAPL" not in portfolio.positions
@@ -422,6 +429,7 @@ def test_apply_fill():
 **Goal**: Convert RiskManager to pure functions
 
 **Files to Create**:
+
 - `src/bt/risk/pure.py` - Risk checking functions
 - `src/bt/risk/types.py` - Risk-specific types
 
@@ -435,13 +443,13 @@ def check_risk(
 ) -> Tuple[RiskEvent, ...]:
     """Check if any positions hit risk limits."""
     events = []
-    
+
     for symbol, position in portfolio.positions.items():
         if symbol == tick.symbol:
             event = check_position_risk(position, tick, config)
             if event:
                 events.append(event)
-    
+
     return tuple(events)
 
 def check_position_risk(
@@ -451,7 +459,7 @@ def check_position_risk(
 ) -> Optional[RiskEvent]:
     """Check single position for SL/TP."""
     is_long = position.qty > 0
-    
+
     # Check stop loss
     if is_long and position.stop_loss and tick.close <= position.stop_loss:
         return StopLossEvent(
@@ -459,14 +467,14 @@ def check_position_risk(
             timestamp=tick.timestamp,
             trigger_price=tick.close
         )
-    
+
     if not is_long and position.stop_loss and tick.close >= position.stop_loss:
         return StopLossEvent(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
             trigger_price=tick.close
         )
-    
+
     # Check take profit
     if is_long and position.take_profit and tick.close >= position.take_profit:
         return TakeProfitEvent(
@@ -474,14 +482,14 @@ def check_position_risk(
             timestamp=tick.timestamp,
             trigger_price=tick.close
         )
-    
+
     if not is_long and position.take_profit and tick.close <= position.take_profit:
         return TakeProfitEvent(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
             trigger_price=tick.close
         )
-    
+
     return None
 
 def update_trailing_stop(
@@ -492,9 +500,9 @@ def update_trailing_stop(
     """Update trailing stop, return new position."""
     if not config.trailing_stop:
         return position
-    
+
     is_long = position.qty > 0
-    
+
     if is_long:
         new_stop = tick.high * (1 - config.stop_loss_pct)
         if new_stop > (position.stop_loss or 0):
@@ -517,7 +525,7 @@ def update_trailing_stop(
                 stop_loss=new_stop,
                 take_profit=position.take_profit
             )
-    
+
     return position
 ```
 
@@ -526,6 +534,7 @@ def update_trailing_stop(
 **Goal**: Convert ExecutionHandler to pure functions
 
 **Files to Create**:
+
 - `src/bt/execution/pure.py` - Execution functions
 - `src/bt/execution/types.py` - Execution types
 
@@ -539,7 +548,7 @@ def execute_signal(
 ) -> FillEvent:
     """Convert signal to fill with slippage/spread."""
     base_spread = signal.price * (params.spread_bps / 10000)
-    
+
     # Calculate base price with spread
     if signal.action == ActionType.long:
         base_price = signal.price + base_spread
@@ -547,15 +556,15 @@ def execute_signal(
         base_price = signal.price - base_spread
     else:
         base_price = signal.price
-    
+
     # Calculate slippage
     adverse = calculate_adverse_selection(signal, tick)
     slippage_bps = params.slippage_bps * (1.5 if adverse else 1.0)
     slippage = signal.price * (slippage_bps / 10000)
-    
+
     executed_price = base_price + slippage
     commission = calculate_commission(signal, executed_price, params)
-    
+
     return FillEvent(
         signal=signal,
         filled_qty=signal.qty,
@@ -579,12 +588,12 @@ def execute_risk_event(
         qty=0,  # Will be determined from position
         reason=event.reason
     )
-    
+
     # Risk events often have worse slippage
     base_price = event.trigger_price - (event.trigger_price * params.spread_bps / 10000)
     slippage = event.trigger_price * (params.slippage_bps * 2 / 10000)
     executed_price = base_price - slippage
-    
+
     return FillEvent(
         signal=signal,
         filled_qty=0,  # To be filled from position
@@ -601,7 +610,7 @@ def calculate_adverse_selection(
     """Determine if slippage should be adverse."""
     price_move = tick.close - tick.open
     percent_move = price_move / tick.open if tick.open != 0 else 0
-    
+
     if signal.action == ActionType.long:
         return percent_move < -0.001
     elif signal.action == ActionType.short:
@@ -614,6 +623,7 @@ def calculate_adverse_selection(
 **Goal**: Convert StrategyModel to state + pure functions
 
 **Files to Create**:
+
 - `src/bt/models/pure.py` - Model computation functions
 - `src/bt/models/state.py` - ModelState dataclass
 
@@ -628,13 +638,13 @@ def update_models(
     """Update all models with new tick data."""
     # Update market data
     new_market_data = append_bar(state.market_data, tick_group)
-    
+
     # Update z-score if enabled
     new_z = update_z_score(state, tick_group, config)
-    
+
     # Update HMM if enabled
     new_regime = update_regime(state, new_market_data, config)
-    
+
     return ModelState(
         z_score=new_z,
         current_regime=new_regime,
@@ -650,17 +660,17 @@ def update_z_score(
     """Calculate new z-score from price buffers."""
     if not config.z_score_enabled:
         return None
-    
+
     prices = {sym: tick.close for sym, tick in tick_group.items()}
     new_buffers = state.price_buffers + (prices,)
-    
+
     # Trim to window size
     if len(new_buffers) > config.rolling_window_size:
         new_buffers = new_buffers[-config.rolling_window_size:]
-    
+
     if len(new_buffers) < 2:
         return 0.0
-    
+
     # Calculate z-score
     return calculate_z_score(new_buffers, config)
 
@@ -672,15 +682,15 @@ def update_regime(
     """Update HMM regime detection."""
     if not config.hmm_enabled:
         return None
-    
+
     # Check if we need to retrain
     if should_retrain_hmm(state, config):
         model = train_hmm(market_data, config)
         return predict_regime(model, market_data)
-    
+
     if state.hmm_model:
         return predict_regime(state.hmm_model, market_data)
-    
+
     return None
 ```
 
@@ -689,6 +699,7 @@ def update_regime(
 **Goal**: Convert strategies to pure functions
 
 **Files to Create**:
+
 - `src/bt/strategies/pure.py` - Strategy interface
 - `src/bt/algos/pairs_trading_pure.py` - Pure pairs strategy
 
@@ -699,7 +710,7 @@ from typing import Protocol
 
 class PureStrategy(Protocol):
     """Protocol for pure functional strategies."""
-    
+
     def on_tick(
         self,
         model_state: ModelState,
@@ -707,7 +718,7 @@ class PureStrategy(Protocol):
         portfolio: PortfolioState
     ) -> Tuple[Tuple[TradeSignal, ...], ModelState]:
         """Generate signals from tick data.
-        
+
         Returns:
             Tuple of (signals, updated_model_state)
         """
@@ -723,7 +734,7 @@ def pairs_trading_strategy(
 ) -> Tuple[Tuple[TradeSignal, ...], ModelState]:
     """Pure pairs trading strategy."""
     z_score = model_state.z_score
-    
+
     # Check for exit
     position = portfolio.positions.get(tick.symbol)
     if position and abs(z_score) < config.exit_z:
@@ -736,25 +747,25 @@ def pairs_trading_strategy(
             reason="z_regression"
         )
         return (signal,), model_state
-    
+
     # Check for entry
     if len(model_state.price_buffers) < 2:
         return (), model_state
-    
+
     # Need both symbols' ticks to generate entry signals
     pending_ticks = model_state.pending_ticks or {}
     pending_ticks[tick.symbol] = tick.close
-    
+
     if len(pending_ticks) != 2:
         new_state = ModelState(
             **model_state.__dict__,
             pending_ticks=pending_ticks
         )
         return (), new_state
-    
+
     # Generate entry signals
     sym1, sym2 = config.symbols
-    
+
     if z_score < -config.entry_z:
         signals = (
             TradeSignal(ActionType.long, sym1, tick.timestamp, pending_ticks[sym1], 0, None),
@@ -767,7 +778,7 @@ def pairs_trading_strategy(
         )
     else:
         signals = ()
-    
+
     return signals, model_state
 ```
 
@@ -776,6 +787,7 @@ def pairs_trading_strategy(
 **Goal**: Wire everything together with pure engine
 
 **Files to Create**:
+
 - `src/bt/engine/pure_engine.py` - Functional backtest engine
 - `src/bt/engine/pipeline.py` - Data processing pipeline
 
@@ -792,32 +804,32 @@ async def run_backtest(
     initial_state: Optional[BacktestState] = None
 ) -> Iterator[BacktestState]:
     """Run functional backtest, yielding state after each tick.
-    
+
     Args:
         config: Strategy configuration
         data_stream: Async iterator of ticks
         strategy: Pure strategy function
         initial_state: Optional initial state (for resuming)
-    
+
     Yields:
         BacktestState after each tick
-    
+
     Returns:
         Final BacktestState
     """
     state = initial_state or create_initial_state(config)
-    
+
     async for tick in data_stream:
         # Process one tick through the pipeline
         state = await process_tick_pipeline(state, tick, config, strategy)
-        
+
         # Yield for debugging/snapshotting
         yield state
-    
+
     # Finalize (close positions, etc.)
     final_state = finalize_backtest(state, config)
     yield final_state
-    
+
     return final_state
 
 def process_tick_pipeline(
@@ -827,7 +839,7 @@ def process_tick_pipeline(
     strategy: PureStrategy
 ) -> BacktestState:
     """Process single tick through all pipeline stages.
-    
+
     Each stage is a pure function transforming state.
     """
     # Stage 1: Update models
@@ -835,31 +847,31 @@ def process_tick_pipeline(
         state,
         lambda s: update_model_state(s, tick, config)
     )
-    
+
     # Stage 2: Execute pending signals
     state = pipe(
         state,
         lambda s: execute_pending_signals(s, tick, config)
     )
-    
+
     # Stage 3: Check risk
     state = pipe(
         state,
         lambda s: check_and_execute_risk(s, tick, config)
     )
-    
+
     # Stage 4: Update prices
     state = pipe(
         state,
         lambda s: update_portfolio_prices(s, tick)
     )
-    
+
     # Stage 5: Generate new signals
     state = pipe(
         state,
         lambda s: generate_strategy_signals(s, tick, strategy)
     )
-    
+
     return state
 
 def pipe(value, *functions):
@@ -881,7 +893,7 @@ def update_model_state(
         {tick.symbol: tick},  # Wrap in dict for consistency
         config
     )
-    
+
     return BacktestState(
         portfolio=state.portfolio,
         timestamp=tick.timestamp,
@@ -900,23 +912,23 @@ def execute_pending_signals(
         s for s in state.pending_signals
         if s.symbol == tick.symbol
     )
-    
+
     remaining_signals = tuple(
         s for s in state.pending_signals
         if s.symbol != tick.symbol
     )
-    
+
     fills = tuple(
         execute_signal(signal, tick, config.execution)
         for signal in relevant_signals
     )
-    
+
     new_portfolio = reduce(
         apply_fill,
         fills,
         state.portfolio
     )
-    
+
     return BacktestState(
         portfolio=new_portfolio,
         timestamp=state.timestamp,
@@ -932,21 +944,21 @@ def check_and_execute_risk(
 ) -> BacktestState:
     """Stage 3: Check risk and execute closes."""
     risk_events = check_risk(state.portfolio, tick, config.risk)
-    
+
     if not risk_events:
         return state
-    
+
     fills = tuple(
         execute_risk_event(event, tick, config.execution)
         for event in risk_events
     )
-    
+
     new_portfolio = reduce(
         apply_fill,
         fills,
         state.portfolio
     )
-    
+
     return BacktestState(
         portfolio=new_portfolio,
         timestamp=state.timestamp,
@@ -961,7 +973,7 @@ def update_portfolio_prices(
 ) -> BacktestState:
     """Stage 4: Update portfolio with new prices."""
     new_portfolio = update_prices(state.portfolio, tick)
-    
+
     return BacktestState(
         portfolio=new_portfolio,
         timestamp=state.timestamp,
@@ -977,13 +989,13 @@ def generate_strategy_signals(
 ) -> BacktestState:
     """Stage 5: Generate new signals from strategy."""
     position = state.portfolio.positions.get(tick.symbol)
-    
+
     new_signals, new_model = strategy.on_tick(
         state.model_state,
         tick,
         state.portfolio
     )
-    
+
     return BacktestState(
         portfolio=state.portfolio,
         timestamp=state.timestamp,
@@ -1009,7 +1021,7 @@ def finalize_backtest(
         )
         for symbol, position in state.portfolio.positions.items()
     )
-    
+
     # Execute all closes
     new_portfolio = state.portfolio
     for signal in close_signals:
@@ -1023,7 +1035,7 @@ def finalize_backtest(
             timestamp=signal.timestamp
         )
         new_portfolio = apply_fill(new_portfolio, fill)
-    
+
     return BacktestState(
         portfolio=new_portfolio,
         timestamp=state.timestamp,
@@ -1044,7 +1056,7 @@ def finalize_backtest(
 
 class TestPortfolioPure:
     """Tests for pure portfolio functions."""
-    
+
     def test_apply_fill_open_position(self):
         """Test opening a position."""
         portfolio = create_portfolio(cash=10000)
@@ -1054,19 +1066,19 @@ class TestPortfolioPure:
             price=100,
             commission=1
         )
-        
+
         new_portfolio = apply_fill(portfolio, fill)
-        
+
         # Assertions
         assert new_portfolio.cash == 8999  # 10000 - 1000 - 1
         assert "AAPL" in new_portfolio.positions
         assert new_portfolio.positions["AAPL"].qty == 10
         assert len(new_portfolio.trades) == 1
-        
+
         # Original unchanged
         assert portfolio.cash == 10000
         assert "AAPL" not in portfolio.positions
-    
+
     def test_apply_fill_close_position(self):
         """Test closing a position."""
         position = Position(
@@ -1081,7 +1093,7 @@ class TestPortfolioPure:
             cash=5000,
             positions={"AAPL": position}
         )
-        
+
         fill = create_fill(
             symbol="AAPL",
             action=ActionType.close,
@@ -1089,22 +1101,22 @@ class TestPortfolioPure:
             price=110,  # Profit!
             commission=1
         )
-        
+
         new_portfolio = apply_fill(portfolio, fill)
-        
+
         assert new_portfolio.cash == 6099  # 5000 + 1100 - 1
         assert "AAPL" not in new_portfolio.positions
         assert len(new_portfolio.trades) == 1
         assert new_portfolio.trades[0].pnl == 100  # (110-100) * 10
-    
+
     def test_apply_fill_idempotent(self):
         """Applying same fill twice gives same result as once."""
         portfolio = create_portfolio(cash=10000)
         fill = create_fill(symbol="AAPL", qty=10, price=100)
-        
+
         result1 = apply_fill(portfolio, fill)
         result2 = apply_fill(apply_fill(portfolio, fill), fill)
-        
+
         # Second apply should be no-op (position already exists)
         assert result1 == result2
 
@@ -1112,92 +1124,92 @@ class TestPortfolioPure:
 
 class TestEnginePure:
     """Tests for pure engine functions."""
-    
+
     def test_process_tick_pipeline(self):
         """Test complete tick processing pipeline."""
         config = create_test_config()
         state = create_initial_state(config)
         tick = create_test_tick(symbol="AAPL", price=100)
         strategy = create_mock_strategy([])
-        
+
         new_state = process_tick_pipeline(state, tick, config, strategy)
-        
+
         # Verify state transformations
         assert new_state.timestamp == tick.timestamp
         assert new_state.model_state is not None
-    
+
     def test_state_snapshots(self):
         """Test that we can snapshot and compare states."""
         config = create_test_config()
         state = create_initial_state(config)
-        
+
         # Record initial state
         snapshot1 = state
-        
+
         # Process some ticks
         ticks = [
             create_test_tick("AAPL", 100),
             create_test_tick("AAPL", 101),
         ]
-        
+
         for tick in ticks:
             state = process_tick_pipeline(state, tick, config, mock_strategy)
-        
+
         # Can diff states
         assert state.timestamp != snapshot1.timestamp
         assert state.portfolio != snapshot1.portfolio
-    
+
     def test_determinism(self):
         """Same inputs produce same outputs."""
         config = create_test_config()
         state = create_initial_state(config)
         tick = create_test_tick("AAPL", 100)
-        
+
         result1 = process_tick_pipeline(state, tick, config, mock_strategy)
         result2 = process_tick_pipeline(state, tick, config, mock_strategy)
-        
+
         assert result1 == result2
 
 # tests/test_state_debugging.py
 
 class TestStateDebugging:
     """Tests demonstrating debuggability improvements."""
-    
+
     def test_state_can_be_serialized(self):
         """States can be pickled/saved for later analysis."""
         import pickle
-        
+
         state = create_test_state()
         serialized = pickle.dumps(state)
         restored = pickle.loads(serialized)
-        
+
         assert state == restored
-    
+
     def test_state_diffing(self):
         """Can diff two states to see what changed."""
         state1 = create_test_state(cash=10000)
         state2 = state1._replace(cash=9000)
-        
+
         diff = state_diff(state1, state2)
         assert diff.changed_fields == {"cash"}
         assert diff.cash.before == 10000
         assert diff.cash.after == 9000
-    
+
     def test_time_travel(self):
         """Can replay from any saved state."""
         states = []
-        
+
         # Run backtest, saving states
         state = create_initial_state(config)
         for tick in test_data:
             state = process_tick(state, tick, config, strategy)
             states.append(state)  # Save snapshot
-        
+
         # Replay from middle
         middle_state = states[50]
         for tick in test_data[51:]:
             middle_state = process_tick(middle_state, tick, config, strategy)
-        
+
         # Should match final state
         assert middle_state == states[-1]
 ```
@@ -1220,16 +1232,16 @@ from .pure_engine import run_backtest, process_tick_pipeline
 # Adapter to use new engine with old interface
 class BacktestEngine:
     """Adapter maintaining old interface, using new pure engine internally."""
-    
+
     def __init__(self, config: StrategyConfig):
         self.config = config
         self._state: Optional[BacktestState] = None
-    
+
     async def run(self) -> BacktestResults:
         """Run backtest using new pure engine."""
         data_feed = DataFeed(self.config, self._build_window())
         strategy = self._create_strategy()
-        
+
         states = []
         async for state in run_backtest(
             self.config,
@@ -1237,12 +1249,13 @@ class BacktestEngine:
             strategy
         ):
             states.append(state)
-        
+
         self._state = states[-1] if states else None
         return self._to_results(states[-1])
 ```
 
 **Gradual Migration Path**:
+
 1. Keep old classes as thin wrappers around pure functions
 2. Mark old methods as deprecated
 3. Update tests to use pure functions directly
@@ -1264,7 +1277,7 @@ class PortfolioState:
     # Use persistent data structures
     positions: Mapping[str, Position]  # Could be pyrsistent.PMap
     trades: Tuple[Trade, ...]
-    
+
 # 2. Memoize expensive computations
 @lru_cache(maxsize=1024)
 def calculate_z_score(buffers: Tuple[Dict, ...]) -> float:
@@ -1328,7 +1341,7 @@ states = []
 for tick in data:
     state = process_tick(state, tick, config)
     states.append(state)  # Save for later analysis
-    
+
 # Replay from any point
 investigate_state = states[1000]  # What happened at tick 1000?
 ```

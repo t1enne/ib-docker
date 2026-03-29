@@ -203,7 +203,7 @@ def _add_regime_probability_traces(
     row: int = 2,
     col: int = 1,
 ) -> None:
-    """Add stacked area traces for regime probabilities."""
+    """Add line traces for regime probabilities."""
     colors = [REGIME_COLORS_OPAQUE[i] for i in range(len(probabilities.columns))]
 
     for i, col_name in enumerate(probabilities.columns):
@@ -217,9 +217,7 @@ def _add_regime_probability_traces(
                 y=probabilities[col_name],
                 mode="lines",
                 name=label,
-                line=dict(width=0),
-                stackgroup="one",
-                fillcolor=color,
+                line=dict(color=color, width=2),
                 hovertemplate=f"{label}: %{{y:.1%}}<extra></extra>",
                 showlegend=True,
             ),

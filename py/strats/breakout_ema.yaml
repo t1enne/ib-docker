@@ -25,4 +25,4 @@ strategy_params:
 model_params: false
 
 symbols:
-  - COIN
+  - QQQ

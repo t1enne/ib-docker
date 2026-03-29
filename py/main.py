@@ -12,6 +12,7 @@ import src.nd as nd_mod
 import src.pnd as pnd_mod
 import src.syncm as sync_mod
 import src.hmm as hmm_mod
+import src.signals as signals_mod
 
 from src.bt import StrategyType, backtest, load_strategy, StrategyConfig, backtest_async
 from src.bt.metrics import get_backtest_results_analysis
@@ -143,6 +144,13 @@ def view():
     env = os.environ.copy()
     env["PYTHONPATH"] = os.getcwd()
     subprocess.run(["streamlit", "run", "src/view.py"], env=env)
+
+
+@main.command(help="generate live trading signals from strategy file")
+@click.argument("strategy_file")
+def signal(strategy_file: str):
+    config = load_strategy(strategy_file)
+    asyncio.run(signals_mod.generate_signals(config))
 
 
 if __name__ == "__main__":

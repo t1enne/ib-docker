@@ -1,6 +1,6 @@
 services:
   ib-gateway:
-    build: ./ib-gateway
+    build: ./client-portal
     container_name: gateway
     ports:
       - "5000:5000"

@@ -97,7 +97,10 @@ def calculate_gaps(
 
 
 def get_existing_range_sync(ticker: str) -> tuple[Optional[int], Optional[int]]:
-    """Returns (oldest_timestamp, newest_timestamp) for ticker, or (None, None) if empty."""
+    """Returns (oldest_timestamp, newest_timestamp) for ticker, or (None, None) if empty.
+
+    Synchronous — use get_existing_range() from async contexts to avoid blocking the event loop.
+    """
     result = (
         CandleSchema.select(
             fn.MIN(CandleSchema.timestamp).alias("oldest"),
@@ -112,19 +115,24 @@ def get_existing_range_sync(ticker: str) -> tuple[Optional[int], Optional[int]]:
     return result.oldest, result.newest
 
 
+async def get_existing_range(ticker: str) -> tuple[Optional[int], Optional[int]]:
+    """Async wrapper around get_existing_range_sync to avoid blocking the event loop."""
+    return await asyncio.to_thread(get_existing_range_sync, ticker)
+
+
 async def _fetch_candles_iterative(
     conid: int,
+    ticker: str,
     bar: str,
     from_datetime: datetime,
     to_datetime: datetime,
-    data: list[dict] = [],
 ) -> list[dict]:
     """Iteratively fetch candles from IBKR API for a given datetime range.
 
     Fetches candles going backwards from to_datetime until from_datetime is reached.
     """
     current_to = to_datetime
-    accumulated_data = data
+    accumulated_data: list[dict] = []
 
     while current_to > from_datetime:
         datetime_to_fetch = current_to - from_datetime
@@ -132,9 +140,8 @@ async def _fetch_candles_iterative(
         if days_to_fetch <= 0:
             break
 
-        symbol_info = await get_contract_info(conid)
         print(
-            f"Getting candles for {symbol_info.ticker} for days {days_to_fetch}, "
+            f"Getting candles for {ticker} for days {days_to_fetch}, "
             f"from {from_datetime}, to {current_to}"
         )
 
@@ -160,8 +167,8 @@ async def _fetch_candles_iterative(
 
         accumulated_data = accumulated_data + [
             {
-                "conid": symbol_info.conid,
-                "ticker": symbol_info.ticker,
+                "conid": conid,
+                "ticker": ticker,
                 "timestamp": item.t,
                 "open": item.o,
                 "high": item.h,
@@ -208,7 +215,7 @@ async def candles(
         symbol_info = await get_contract_info(conid)
         ticker = symbol_info.ticker
 
-    oldest_existing, newest_existing = get_existing_range_sync(ticker)
+    oldest_existing, newest_existing = await get_existing_range(ticker)
 
     gaps = (
         [(from_datetime, to_datetime)]
@@ -226,7 +233,9 @@ async def candles(
 
     async with _candle_limiter:
         for gap_start, gap_end in gaps:
-            insert_data = await _fetch_candles_iterative(conid, bar, gap_start, gap_end)
+            insert_data = await _fetch_candles_iterative(
+                conid, ticker, bar, gap_start, gap_end
+            )
 
             if insert_data:
                 try:
@@ -250,7 +259,6 @@ async def candles(
 
 async def candles_batch(
     conids: list[int],
-    lookback: int,
     from_datetime: datetime,
     to_datetime: Optional[datetime] = None,
     max_concurrent: int = 2,
@@ -260,7 +268,6 @@ async def candles_batch(
 
     Args:
         conids: List of conids to fetch candles for
-        lookback: Number of days to look back
         from_datetime: Start datetime for fetching
         to_datetime: End datetime for fetching (defaults to now)
         max_concurrent: Maximum concurrent requests

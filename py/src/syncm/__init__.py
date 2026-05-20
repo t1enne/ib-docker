@@ -1,4 +1,3 @@
-from src.utils import get_days_from_now
 from src.db.models import SymbolSchema, ISymbol
 from dataclasses import dataclass
 from typing import cast, Any, Dict, List, Optional
@@ -43,20 +42,26 @@ def get_symbols(tickers: list[str]):
 
 
 async def _get_candles(symbols: list[ISymbol], from_date: date):
-    try:
-        await candles_batch(
-            [symbol.conid for symbol in symbols],
-            lookback=get_days_from_now(from_date),
-            from_datetime=datetime.combine(from_date, datetime.min.time()),
-        )
-    except Exception as e:
-        print(f"Error syncing {symbols}: {e}")
+    await candles_batch(
+        [symbol.conid for symbol in symbols],
+        from_datetime=datetime.combine(from_date, datetime.min.time()),
+    )
 
 
-async def sync_data(tickers: list[str], from_date: Optional[date] = None):
-    from_date = from_date or date.today()
-    _symbols: list[ISymbol] = await asyncio.gather(*get_symbols(tickers))
+async def sync_data(tickers: list[str], from_date: date) -> None:
+    """Sync historical candle data for the given tickers starting from from_date.
+
+    Args:
+        tickers: List of ticker symbols to sync
+        from_date: Start date for historical data (required — no default)
+
+    Raises:
+        ValueError: If no symbols could be resolved
+    """
+    _symbols: list[Optional[ISymbol]] = await asyncio.gather(*get_symbols(tickers))
     symbols = [s for s in _symbols if s is not None]
+    if not symbols:
+        raise ValueError(f"No symbols resolved for tickers: {tickers}")
     await _get_candles(symbols, from_date)
 
 

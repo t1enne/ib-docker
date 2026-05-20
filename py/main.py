@@ -136,6 +136,11 @@ def bt(strategy_file: str):
 @click.option("--universe", default="universe.yml", help="Path to universe config file")
 def sync(universe: str):
     data = sync_mod.load_universe_config(universe)
+    if data.from_date is None:
+        raise click.UsageError(
+            "from_date is required. Set it in universe.yml, e.g.:\n"
+            '  from_date: "2024-01-01"'
+        )
     asyncio.run(sync_mod.sync_data(data.symbols, data.from_date))
 
 

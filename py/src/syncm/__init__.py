@@ -27,10 +27,15 @@ async def _get_symbol_for_ticker(ticker: str) -> ISymbol:
     return symbol_info
 
 
-def get_symbols(tickers: list[str]):
+async def resolve_symbols(tickers: list[str]) -> list[ISymbol]:
+    """Resolve ticker strings to ISymbol objects (DB lookup + API fallback).
+
+    Returns only successfully resolved symbols. Failed resolutions are
+    logged and skipped.
+    """
     semaphore = asyncio.Semaphore(2)
 
-    async def bounded_resolve(ticker: str) -> Optional[ISymbol]:
+    async def bounded(ticker: str) -> Optional[ISymbol]:
         async with semaphore:
             try:
                 return await _get_symbol_for_ticker(ticker)
@@ -38,7 +43,8 @@ def get_symbols(tickers: list[str]):
                 print(f"Error resolving {ticker}: {e}")
                 return None
 
-    return [bounded_resolve(ticker) for ticker in tickers]
+    results = await asyncio.gather(*[bounded(t) for t in tickers])
+    return [s for s in results if s is not None]
 
 
 async def _get_candles(symbols: list[ISymbol], from_date: date):
@@ -58,8 +64,7 @@ async def sync_data(tickers: list[str], from_date: date) -> None:
     Raises:
         ValueError: If no symbols could be resolved
     """
-    _symbols: list[Optional[ISymbol]] = await asyncio.gather(*get_symbols(tickers))
-    symbols = [s for s in _symbols if s is not None]
+    symbols = await resolve_symbols(tickers)
     if not symbols:
         raise ValueError(f"No symbols resolved for tickers: {tickers}")
     await _get_candles(symbols, from_date)
@@ -71,4 +76,4 @@ def load_universe_config(file_path: str) -> UniverseConf:
     return UniverseConf(**data)
 
 
-__all__ = ["sync_data", "load_universe_config", "get_symbols"]
+__all__ = ["sync_data", "load_universe_config"]

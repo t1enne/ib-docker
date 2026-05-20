@@ -18,24 +18,13 @@ from src.consts import BAR_INTERVAL
 from src.db import db
 
 from .shared import client, get_contract_info, auth_client
-from .rate_limiter import RateLimiter, RateLimitConfig, with_retry, batch_items
+from .rate_limiter import with_retry
 
 from ib_rest_api_client.api.trading_market_data import get_iserver_marketdata_history
 
 
 # Maximum number of candles per API request
 MAX_CANDLES_PER_REQUEST = 1000
-
-# Default rate limiter config for candles
-DEFAULT_CANDLE_RATE_LIMIT = RateLimitConfig(
-    max_concurrent=2,
-    min_delay_ms=200,
-    max_retries=3,
-    base_delay_ms=500,
-    max_delay_ms=10000,
-)
-
-_candle_limiter = RateLimiter(DEFAULT_CANDLE_RATE_LIMIT)
 
 
 def date_to_timestamp(d: date) -> int:
@@ -231,30 +220,18 @@ async def candles(
 
     print(f"Fetching {len(gaps)} gap(s) for {ticker}/{conid}: {gaps}")
 
-    async with _candle_limiter:
-        for gap_start, gap_end in gaps:
-            insert_data = await _fetch_candles_iterative(
-                conid, ticker, bar, gap_start, gap_end
-            )
+    for gap_start, gap_end in gaps:
+        insert_data = await _fetch_candles_iterative(
+            conid, ticker, bar, gap_start, gap_end
+        )
 
-            if insert_data:
-                try:
-                    with db.atomic():
-                        CandleSchema.insert_many(
-                            insert_data
-                        ).on_conflict_ignore().execute()
-                        # .on_conflict(
-                        #     conflict_target=(CandleSchema.timestamp),
-                        # ).update(
-                        #     open=CandleSchema.open,
-                        #     high=CandleSchema.high,
-                        #     low=CandleSchema.low,
-                        #     close=CandleSchema.close,
-                        #     volume=CandleSchema.volume,
-
-                except Exception as e:
-                    print(f"Bulk insert failed ({e})")
-                    raise e
+        if insert_data:
+            try:
+                with db.atomic():
+                    CandleSchema.insert_many(insert_data).on_conflict_ignore().execute()
+            except Exception as e:
+                print(f"Bulk insert failed ({e})")
+                raise e
 
 
 async def candles_batch(

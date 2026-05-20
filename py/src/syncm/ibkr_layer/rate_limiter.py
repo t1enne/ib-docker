@@ -1,7 +1,10 @@
 import asyncio
+import logging
 from functools import wraps
 from typing import Callable, TypeVar, Awaitable, ParamSpec
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -37,12 +40,16 @@ def with_retry(
                 try:
                     result = await func(*args, **kwargs)
                     if attempt > 0:
-                        print(f"[{name}] Succeeded on attempt {attempt + 1}")
+                        logger.info("[%s] Succeeded on attempt %s", name, attempt + 1)
                     return result
                 except retryable_exceptions as e:
                     last_exception = e
-                    print(
-                        f"[{name}] Attempt {attempt + 1}/{config.max_retries + 1} failed: {e}"
+                    logger.warning(
+                        "[%s] Attempt %s/%s failed: %s",
+                        name,
+                        attempt + 1,
+                        config.max_retries + 1,
+                        e,
                     )
                     if attempt < config.max_retries:
                         delay = (
@@ -52,10 +59,10 @@ def with_retry(
                             )
                             / 1000.0
                         )
-                        print(f"[{name}] Retrying in {delay}s...")
+                        logger.info("[%s] Retrying in %ss...", name, delay)
                         await asyncio.sleep(delay)
                     else:
-                        print(f"[{name}] All retries exhausted, raising: {e}")
+                        logger.error("[%s] All retries exhausted, raising: %s", name, e)
                         raise last_exception
             raise last_exception  # type: ignore[possibly-undefined]
 

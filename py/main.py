@@ -141,7 +141,19 @@ def sync(universe: str):
             "from_date is required. Set it in universe.yml, e.g.:\n"
             '  from_date: "2024-01-01"'
         )
-    asyncio.run(sync_mod.sync_data(data.symbols, data.from_date))
+    result = asyncio.run(
+        sync_mod.sync_data(
+            data.symbols,
+            data.from_date,
+            to_date=data.to_date,
+            bar=data.bar,
+        )
+    )
+    click.echo(
+        f"Sync complete: {result.resolved} resolved, "
+        f"{result.total_fetched} fetched, "
+        f"{result.gaps_found} gaps filled"
+    )
 
 
 @main.command(help="view historical data in browser")

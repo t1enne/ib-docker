@@ -139,13 +139,6 @@ def sync(universe: str):
     asyncio.run(sync_mod.sync_data(data.symbols, data.from_date))
 
 
-@main.command(help="view historical data in browser")
-def view():
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.getcwd()
-    subprocess.run(["streamlit", "run", "src/view.py"], env=env)
-
-
 @main.command(help="generate live trading signals from strategy file")
 @click.argument("strategy_file")
 def signal(strategy_file: str):

@@ -1,41 +1,23 @@
-import time
 import asyncio
-from pprint import pprint
-from src.db.models import CandleSchema
-from peewee import fn
-from ib_rest_api_client.models import (
-    IserverHistoryLastResponse,
-    SingleHistoricalBarLast,
-    SingleHistoricalBarBidAsk,
-    IserverHistoryBidAskResponse,
-)
-import math
-import re
-import pandas as pd
+import logging
 from datetime import datetime, timedelta, date
 from typing import Optional, cast
-from src.consts import BAR_INTERVAL
+
+from peewee import fn
+from src.db.models import CandleSchema
 from src.db import db
-
-from .shared import client, get_contract_info, auth_client
-from .rate_limiter import RateLimiter, RateLimitConfig, with_retry, batch_items
-
 from ib_rest_api_client.api.trading_market_data import get_iserver_marketdata_history
+from ib_rest_api_client.models import IserverHistoryBidAskResponse
+
+from .shared import get_contract_info, auth_client
+from .rate_limiter import with_retry
+from src.syncm.types import CandleDict
+
+logger = logging.getLogger(__name__)
 
 
 # Maximum number of candles per API request
 MAX_CANDLES_PER_REQUEST = 1000
-
-# Default rate limiter config for candles
-DEFAULT_CANDLE_RATE_LIMIT = RateLimitConfig(
-    max_concurrent=2,
-    min_delay_ms=200,
-    max_retries=3,
-    base_delay_ms=500,
-    max_delay_ms=10000,
-)
-
-_candle_limiter = RateLimiter(DEFAULT_CANDLE_RATE_LIMIT)
 
 
 def date_to_timestamp(d: date) -> int:
@@ -97,7 +79,10 @@ def calculate_gaps(
 
 
 def get_existing_range_sync(ticker: str) -> tuple[Optional[int], Optional[int]]:
-    """Returns (oldest_timestamp, newest_timestamp) for ticker, or (None, None) if empty."""
+    """Returns (oldest_timestamp, newest_timestamp) for ticker, or (None, None) if empty.
+
+    Synchronous — use get_existing_range() from async contexts to avoid blocking the event loop.
+    """
     result = (
         CandleSchema.select(
             fn.MIN(CandleSchema.timestamp).alias("oldest"),
@@ -112,19 +97,24 @@ def get_existing_range_sync(ticker: str) -> tuple[Optional[int], Optional[int]]:
     return result.oldest, result.newest
 
 
+async def get_existing_range(ticker: str) -> tuple[Optional[int], Optional[int]]:
+    """Async wrapper around get_existing_range_sync to avoid blocking the event loop."""
+    return await asyncio.to_thread(get_existing_range_sync, ticker)
+
+
 async def _fetch_candles_iterative(
     conid: int,
+    ticker: str,
     bar: str,
     from_datetime: datetime,
     to_datetime: datetime,
-    data: list[dict] = [],
-) -> list[dict]:
+) -> list[CandleDict]:
     """Iteratively fetch candles from IBKR API for a given datetime range.
 
     Fetches candles going backwards from to_datetime until from_datetime is reached.
     """
     current_to = to_datetime
-    accumulated_data = data
+    accumulated_data: list[CandleDict] = []
 
     while current_to > from_datetime:
         datetime_to_fetch = current_to - from_datetime
@@ -132,10 +122,12 @@ async def _fetch_candles_iterative(
         if days_to_fetch <= 0:
             break
 
-        symbol_info = await get_contract_info(conid)
-        print(
-            f"Getting candles for {symbol_info.ticker} for days {days_to_fetch}, "
-            f"from {from_datetime}, to {current_to}"
+        logger.info(
+            "Getting candles for %s for days %s, from %s, to %s",
+            ticker,
+            days_to_fetch,
+            from_datetime,
+            current_to,
         )
 
         r = await get_iserver_marketdata_history.asyncio(
@@ -147,33 +139,41 @@ async def _fetch_candles_iterative(
         )
 
         if not isinstance(r, IserverHistoryBidAskResponse) or not r.data:
-            print("Unexpected response!")
-            pprint(r)
+            logger.error("Unexpected response for %s: %r", ticker, r)
             raise Exception("Unexpected response type")
 
         sorted_data = sorted(r.data, key=lambda x: x.t)
         if not sorted_data or not sorted_data[0].t:
-            print("No more data available")
+            logger.info("No more data available for %s", ticker)
             break
 
         oldest_ts = sorted_data[0].t
 
-        accumulated_data = accumulated_data + [
-            {
-                "conid": symbol_info.conid,
-                "ticker": symbol_info.ticker,
-                "timestamp": item.t,
-                "open": item.o,
-                "high": item.h,
-                "low": item.l,
-                "close": item.c,
-                "volume": item.v,
-            }
-            for item in r.data
-        ]
+        new_candles = cast(
+            list[CandleDict],
+            [
+                {
+                    "conid": conid,
+                    "ticker": ticker,
+                    "timestamp": item.t,
+                    "open": item.o,
+                    "high": item.h,
+                    "low": item.l,
+                    "close": item.c,
+                    "volume": item.v,
+                }
+                for item in r.data
+            ],
+        )
+        accumulated_data = accumulated_data + new_candles
 
         oldest_datetime = timestamp_to_datetime(oldest_ts)
-        print(f"Got {len(r.data)} candles, oldest: {oldest_datetime}")
+        logger.info(
+            "Got %s candles for %s, oldest: %s",
+            len(r.data),
+            ticker,
+            oldest_datetime,
+        )
 
         if oldest_datetime >= current_to or oldest_datetime <= from_datetime:
             break
@@ -208,7 +208,7 @@ async def candles(
         symbol_info = await get_contract_info(conid)
         ticker = symbol_info.ticker
 
-    oldest_existing, newest_existing = get_existing_range_sync(ticker)
+    oldest_existing, newest_existing = await get_existing_range(ticker)
 
     gaps = (
         [(from_datetime, to_datetime)]
@@ -219,38 +219,29 @@ async def candles(
     )
 
     if not gaps:
-        print(f"No gaps to fetch for {ticker}: data already exists for full range")
+        logger.info(
+            "No gaps to fetch for %s: data already exists for full range", ticker
+        )
         return
 
-    print(f"Fetching {len(gaps)} gap(s) for {ticker}/{conid}: {gaps}")
+    logger.info("Fetching %s gap(s) for %s/%s: %s", len(gaps), ticker, conid, gaps)
 
-    async with _candle_limiter:
-        for gap_start, gap_end in gaps:
-            insert_data = await _fetch_candles_iterative(conid, bar, gap_start, gap_end)
+    for gap_start, gap_end in gaps:
+        insert_data = await _fetch_candles_iterative(
+            conid, ticker, bar, gap_start, gap_end
+        )
 
-            if insert_data:
-                try:
-                    with db.atomic():
-                        CandleSchema.insert_many(
-                            insert_data
-                        ).on_conflict_ignore().execute()
-                        # .on_conflict(
-                        #     conflict_target=(CandleSchema.timestamp),
-                        # ).update(
-                        #     open=CandleSchema.open,
-                        #     high=CandleSchema.high,
-                        #     low=CandleSchema.low,
-                        #     close=CandleSchema.close,
-                        #     volume=CandleSchema.volume,
-
-                except Exception as e:
-                    print(f"Bulk insert failed ({e})")
-                    raise e
+        if insert_data:
+            try:
+                with db.atomic():
+                    CandleSchema.insert_many(insert_data).on_conflict_ignore().execute()
+            except Exception:
+                logger.exception("Bulk insert failed for %s", ticker)
+                raise
 
 
 async def candles_batch(
     conids: list[int],
-    lookback: int,
     from_datetime: datetime,
     to_datetime: Optional[datetime] = None,
     max_concurrent: int = 2,
@@ -260,7 +251,6 @@ async def candles_batch(
 
     Args:
         conids: List of conids to fetch candles for
-        lookback: Number of days to look back
         from_datetime: Start datetime for fetching
         to_datetime: End datetime for fetching (defaults to now)
         max_concurrent: Maximum concurrent requests
@@ -278,7 +268,7 @@ async def candles_batch(
                 await candles(c, from_datetime, to_datetime, bar)
                 return c
         except Exception as e:
-            print(f"Failed to fetch candles for conid {c}: {e}")
+            logger.error("Failed to fetch candles for conid %s: %s", c, e)
             return None
 
     results = await asyncio.gather(*[fetch_with_limit(c) for c in conids])

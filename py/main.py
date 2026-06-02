@@ -136,7 +136,24 @@ def bt(strategy_file: str):
 @click.option("--universe", default="universe.yml", help="Path to universe config file")
 def sync(universe: str):
     data = sync_mod.load_universe_config(universe)
-    asyncio.run(sync_mod.sync_data(data.symbols, data.from_date))
+    if data.from_date is None:
+        raise click.UsageError(
+            "from_date is required. Set it in universe.yml, e.g.:\n"
+            '  from_date: "2024-01-01"'
+        )
+    result = asyncio.run(
+        sync_mod.sync_data(
+            data.symbols,
+            data.from_date,
+            to_date=data.to_date,
+            bar=data.bar,
+        )
+    )
+    click.echo(
+        f"Sync complete: {result.resolved} resolved, "
+        f"{result.total_fetched} fetched, "
+        f"{result.gaps_found} gaps filled"
+    )
 
 
 @main.command(help="generate live trading signals from strategy file")

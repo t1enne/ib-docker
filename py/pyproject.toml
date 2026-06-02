@@ -20,6 +20,7 @@ dependencies = [
     "ib-rest-api-client",
     "streamlit",
     "websockets>=14.0",
+    "beartype>=0.22.9",
 ]
 
 [tool.uv.sources]

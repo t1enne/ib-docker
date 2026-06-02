@@ -4,6 +4,7 @@ from src.syncm.ibkr_layer.candles import (
     calculate_gaps,
     date_to_timestamp,
     get_existing_range_sync,
+    get_existing_range,
     candles,
 )
 
@@ -166,7 +167,7 @@ class TestNoOverfetch:
         )
 
         mocker.patch(
-            "src.syncm.ibkr_layer.candles.get_existing_range_sync",
+            "src.syncm.ibkr_layer.candles.get_existing_range",
             return_value=(oldest_ts, newest_ts),
         )
         spy = mocker.patch(
@@ -184,7 +185,7 @@ class TestNoOverfetch:
         newest_ts = int(datetime(2024, 6, 30).timestamp() * 1000)
 
         mocker.patch(
-            "src.syncm.ibkr_layer.candles.get_existing_range_sync",
+            "src.syncm.ibkr_layer.candles.get_existing_range",
             return_value=(oldest_ts, newest_ts),
         )
         spy = mocker.patch(
@@ -207,7 +208,7 @@ class TestNoOverfetch:
         )
 
         mocker.patch(
-            "src.syncm.ibkr_layer.candles.get_existing_range_sync",
+            "src.syncm.ibkr_layer.candles.get_existing_range",
             return_value=(oldest_ts, newest_ts),
         )
         spy = mocker.patch(
@@ -222,7 +223,7 @@ class TestNoOverfetch:
     async def test_fetch_empty_db(self, mocker):
         """When DB is empty, fetch full range"""
         mocker.patch(
-            "src.syncm.ibkr_layer.candles.get_existing_range_sync",
+            "src.syncm.ibkr_layer.candles.get_existing_range",
             return_value=(None, None),
         )
         spy = mocker.patch(
@@ -237,7 +238,7 @@ class TestNoOverfetch:
     async def test_fetches_with_correct_gap_params(self, mocker):
         """Verify _fetch_candles_iterative is called with correct gap parameters"""
         mocker.patch(
-            "src.syncm.ibkr_layer.candles.get_existing_range_sync",
+            "src.syncm.ibkr_layer.candles.get_existing_range",
             return_value=(None, None),
         )
         spy = mocker.patch(
@@ -249,7 +250,7 @@ class TestNoOverfetch:
         )
 
         spy.assert_called_once_with(
-            123, "1h", datetime(2024, 1, 1), datetime(2024, 12, 31)
+            123, "AAPL", "1h", datetime(2024, 1, 1), datetime(2024, 12, 31)
         )
 
     @pytest.mark.asyncio
@@ -259,7 +260,7 @@ class TestNoOverfetch:
         newest_ts = int(datetime(2024, 9, 30).timestamp() * 1000)
 
         mocker.patch(
-            "src.syncm.ibkr_layer.candles.get_existing_range_sync",
+            "src.syncm.ibkr_layer.candles.get_existing_range",
             return_value=(oldest_ts, newest_ts),
         )
         spy = mocker.patch(

@@ -18,7 +18,6 @@ dependencies = [
     "hmmlearn>=0.3.0",
     "scikit-learn>=1.3.0",
     "ib-rest-api-client",
-    "streamlit",
     "websockets>=14.0",
     "beartype>=0.22.9",
 ]

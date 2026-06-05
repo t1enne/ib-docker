@@ -62,7 +62,7 @@ def on_tick(
 ) -> List[TradeSignal]:
     symbol = tick.symbol
     position = state.portfolio.positions.get(symbol)
-    candles = state.candles.xs(symbol)
+    candles = state.candles[symbol]
     closes = candles["close"]
     volumes = candles["volume"]
     high = candles["high"]
@@ -199,7 +199,7 @@ def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
     subplots = []
 
     for symbol in config.symbols:
-        closes = state.candles.xs(symbol)["close"]
+        closes = state.candles[symbol]["close"]
         if len(closes) < slow:
             continue
 

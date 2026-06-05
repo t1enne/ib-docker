@@ -53,13 +53,12 @@ async def _resolve_symbols(tickers: list[str]) -> dict[str, int]:
     return result
 
 
-def _load_historical_candles(symbols: list[str], bar: str) -> pd.DataFrame:
+def _load_historical_candles(symbols: list[str], bar: str) -> dict[str, pd.DataFrame]:
     """Load historical candles from local DB for indicator warmup.
 
-    Returns a DataFrame in the (symbol, timestamp) MultiIndex format
-    that BacktestState.candles expects.
+    Returns a dict mapping symbol to per-symbol DataFrame with DatetimeIndex.
     """
-    frames = []
+    result: dict[str, pd.DataFrame] = {}
     for symbol in symbols:
         df = get_local_candles(symbol, bar=bar)
         if df.empty:
@@ -69,30 +68,17 @@ def _load_historical_candles(symbols: list[str], bar: str) -> pd.DataFrame:
         # Take last HISTORY_BUFFER_BARS rows
         df = df.tail(HISTORY_BUFFER_BARS)
 
-        # Drop the 'symbol' column if present, convert to MultiIndex format
+        # Drop the 'symbol' column if present
         if "symbol" in df.columns:
             df = df.drop(columns=["symbol"])
 
-        # df index is DatetimeIndex ('Date'), columns are ohlcv
-        # Convert to (symbol, timestamp) MultiIndex
-        df = df[["open", "high", "low", "close", "volume"]]
-        df.index = pd.MultiIndex.from_arrays(
-            [[symbol.upper()] * len(df), df.index],
-            names=["symbol", "timestamp"],
-        )
-        frames.append(df)
+        result[symbol.upper()] = df[["open", "high", "low", "close", "volume"]]
 
-    if not frames:
-        return pd.DataFrame(
-            columns=cast(Any, ["open", "high", "low", "close", "volume"]),
-            index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
-        )
-
-    return pd.concat(frames)
+    return result
 
 
 def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
-    """Append a candle to the state's candles DataFrame."""
+    """Append a candle to the per-symbol candles dict."""
     new_row = pd.DataFrame(
         {
             "open": [tick.open],
@@ -101,15 +87,15 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
             "close": [tick.close],
             "volume": [tick.volume],
         },
-        index=pd.MultiIndex.from_tuples(
-            [(tick.symbol, tick.timestamp)], names=["symbol", "timestamp"]
-        ),
+        index=[tick.timestamp],
     )
 
-    if state.candles.empty:
-        candles = new_row
+    candles = dict(state.candles)
+    current = candles.get(tick.symbol)
+    if current is None or current.empty:
+        candles[tick.symbol] = new_row
     else:
-        candles = pd.concat([state.candles, new_row])
+        candles[tick.symbol] = pd.concat([current, new_row])
 
     return merge_bt_state(state, dict(candles=candles))
 
@@ -162,10 +148,10 @@ class SignalGenerator:
         candles = _load_historical_candles(symbols, self.config.bar)
 
         for symbol in symbols:
-            try:
-                n = len(candles.xs(symbol))
-                click.echo(f"  {symbol}: {n} bars loaded")
-            except KeyError:
+            sym_df = candles.get(symbol.upper())
+            if sym_df is not None and not sym_df.empty:
+                click.echo(f"  {symbol}: {len(sym_df)} bars loaded")
+            else:
                 click.echo(
                     f"  {symbol}: no data (indicators may be inaccurate until buffer fills)"
                 )
@@ -180,7 +166,7 @@ class SignalGenerator:
         )
 
         # Replace empty candles with historical data
-        if not candles.empty:
+        if candles:
             self.state = merge_bt_state(self.state, dict(candles=candles))
 
         return symbol_conids

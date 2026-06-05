@@ -58,7 +58,7 @@ def handle_entry(
     roc_enabled = roc_cfg.get("enabled", False)
     roc_threshold = roc_cfg.get("threshold", 1.0)
 
-    daily = state.candles
+    daily = state.candles[symbol]
     if daily.empty or len(daily) < 2:
         return []
 
@@ -72,7 +72,7 @@ def handle_entry(
     symbol_state["yesterday_low"] = yesterday_low
 
     if roc_enabled:
-        closes = state.candles.xs(symbol)["close"]
+        closes = state.candles[symbol]["close"]
         if len(closes) < 2:
             return []
 
@@ -129,7 +129,7 @@ def handle_exit(
     #         return close(tick, position, "trailing_stop", 0)
 
     if ema_enabled:
-        candles = state.candles.xs(symbol)
+        candles = state.candles[symbol]
         if len(candles) >= ema_period:
             ema_val = ta.ema(candles["close"], ema_period).iloc[-1]
             if tick.close < ema_val:
@@ -177,7 +177,7 @@ def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
                     entry_level, index=[daily.index[-1]]
                 )
 
-        candles = state.candles.xs(symbol)
+        candles = state.candles[symbol]
         if len(candles) >= ema_period:
             ema_val = ta.ema(candles["close"], ema_period)
             overlays[f"ema_{ema_period}"] = ema_val

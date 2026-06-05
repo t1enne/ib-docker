@@ -32,58 +32,6 @@ def _df_to_multiindex(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-    # Check if columns are MultiIndex (symbol, field)
-    if isinstance(df.columns, pd.MultiIndex):
-        # Convert to (symbol, timestamp) format
-        frames = []
-        for symbol in df.columns.get_level_values(0).unique():
-            sym_df = df.xs(symbol, axis=1, level=0).copy()
-            # Reset the DatetimeIndex to get timestamp column
-            sym_df = sym_df.reset_index()
-            # First column is the timestamp (original index)
-            ts_col = sym_df.columns[0]
-            sym_df = sym_df.rename(columns={ts_col: "timestamp"})
-            sym_df = sym_df.set_index(["symbol", "timestamp"])
-            frames.append(sym_df)
-
-        if frames:
-            return pd.concat(frames)
-
-    return df
-
-    # Check if columns are MultiIndex (symbol, field)
-    if isinstance(df.columns, pd.MultiIndex):
-        # Convert to (symbol, timestamp) format
-        frames = []
-        for symbol in df.columns.get_level_values(0).unique():
-            sym_df = df.xs(symbol, axis=1, level=0).copy()
-            # Reset the DatetimeIndex to get 'timestamp' column
-            sym_df = sym_df.reset_index()
-            sym_df = sym_df.rename(columns={sym_df.columns[0]: "timestamp"})
-            sym_df = sym_df.set_index(["symbol", "timestamp"])
-            frames.append(sym_df)
-
-        if frames:
-            return pd.concat(frames)
-
-    return df
-
-    # Check if columns are MultiIndex (symbol, field)
-    if isinstance(df.columns, pd.MultiIndex):
-        # Convert to (symbol, timestamp) format
-        frames = []
-        for symbol in df.columns.get_level_values(0).unique():
-            sym_cols = df.xs(symbol, axis=1, level=0)
-            sym_cols["symbol"] = symbol
-            sym_cols = sym_cols.set_index("symbol", append=True)
-            sym_cols = sym_cols.swaplevel(0, 1)
-            frames.append(sym_cols)
-
-        if frames:
-            return pd.concat(frames)
-
-    return df
-
 
 def ticks_generator(
     df: pd.DataFrame,

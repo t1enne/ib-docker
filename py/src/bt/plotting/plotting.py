@@ -67,7 +67,7 @@ def plot_backtest_results(
 
     for i, symbol in enumerate(symbols):
         row = i + 1
-        _add_price_and_volume(fig, row, symbol, data.loc[symbol])
+        _add_price_and_volume(fig, row, symbol, data[symbol])
 
         # Add price overlays from strategy
         if plot_config and symbol in plot_config.price_overlays:

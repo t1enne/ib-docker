@@ -254,7 +254,7 @@ def _process_tick(
 
 
 def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
-    """Append a candle to the candles DataFrame."""
+    """Append a candle to the per-symbol candles dict."""
     new_row = pd.DataFrame(
         {
             "open": [tick.open],
@@ -263,15 +263,15 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
             "close": [tick.close],
             "volume": [tick.volume],
         },
-        index=pd.MultiIndex.from_tuples(
-            [(tick.symbol, tick.timestamp)], names=["symbol", "timestamp"]
-        ),
+        index=[tick.timestamp],
     )
 
-    if state.candles.empty:
-        candles = new_row
+    candles = dict(state.candles)
+    current = candles.get(tick.symbol)
+    if current is None or current.empty:
+        candles[tick.symbol] = new_row
     else:
-        candles = pd.concat([state.candles, new_row])
+        candles[tick.symbol] = pd.concat([current, new_row])
 
     return merge_bt_state(state, dict(candles=candles))
 

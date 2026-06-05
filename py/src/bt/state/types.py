@@ -206,7 +206,7 @@ class BacktestState:
     pending_signals: List[TradeSignal]
     model_state: ModelState
     risk_events: Tuple[Any, ...]  # RiskEvent tuple
-    candles: pd.DataFrame
+    candles: dict[str, pd.DataFrame]
     htf_data: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
@@ -236,7 +236,7 @@ class BacktestResults:
     """Complete backtest results."""
 
     pf: PortfolioResult
-    data: pd.DataFrame
+    data: dict[str, pd.DataFrame]
     final_state: BacktestState
     z_scores: Optional[pd.DataFrame] = None
     regimes: Optional[pd.DataFrame] = None

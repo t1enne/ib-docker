@@ -49,7 +49,7 @@ def on_tick(
 ) -> List[TradeSignal]:
     symbol = tick.symbol
     position = state.portfolio.positions.get(symbol)
-    candles = state.candles.xs(symbol)
+    candles = state.candles[symbol]
 
     window = strategy_params.get("window", 14)
     vol_window = strategy_params.get("vol_window", 20)
@@ -175,7 +175,7 @@ def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
     subplots: List[tuple[str, pd.Series]] = []
 
     for symbol in config.symbols:
-        candles = state.candles.xs(symbol)
+        candles = state.candles[symbol]
         if len(candles) < window:
             continue
 

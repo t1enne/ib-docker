@@ -63,17 +63,13 @@ def create_initial_backtest_state(
     rolling_window_size: Optional[int] = None,
 ) -> BacktestState:
     """Create initial backtest state."""
-    empty_candles = pd.DataFrame(
-        columns=cast(Any, ["open", "high", "low", "close", "volume"]),
-        index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
-    )
     return BacktestState(
         portfolio=create_initial_portfolio(initial_capital, start_timestamp),
         timestamp=None,
         pending_signals=[],
         model_state=create_initial_model_state(symbols, rolling_window_size),
         risk_events=(),
-        candles=empty_candles,
+        candles={},
     )
 
 

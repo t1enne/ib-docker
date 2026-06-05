@@ -46,20 +46,20 @@ def on_tick(
     symbols = strategy_params.get("symbols")
 
     if not symbols:
-        if state.candles.empty:
+        if not state.candles:
             return signals
-        symbols = list(state.candles.index.get_level_values("symbol").unique())
+        symbols = list(state.candles.keys())
 
     if len(symbols) != 2:
         return signals
 
     sym1, sym2 = symbols
-    if state.candles.empty:
+    if sym1 not in state.candles or sym2 not in state.candles:
         return signals
 
     try:
-        candles1 = state.candles.xs(sym1)
-        candles2 = state.candles.xs(sym2)
+        candles1 = state.candles[sym1]
+        candles2 = state.candles[sym2]
     except KeyError:
         return signals
 
@@ -154,7 +154,7 @@ def on_tick(
 
 def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
     """Return z-score as a separate subplot."""
-    if state.candles.empty:
+    if not state.candles:
         return PlotConfig()
     symbols = list(config.symbols)
     if len(symbols) != 2:
@@ -162,8 +162,8 @@ def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
     sym1, sym2 = symbols
 
     try:
-        candles1 = state.candles.xs(sym1)
-        candles2 = state.candles.xs(sym2)
+        candles1 = state.candles[sym1]
+        candles2 = state.candles[sym2]
     except KeyError:
         return PlotConfig()
 

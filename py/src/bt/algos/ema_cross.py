@@ -65,7 +65,7 @@ def on_tick(
 ) -> List[TradeSignal]:
     symbol = tick.symbol
     position = state.portfolio.positions.get(symbol)
-    candles = state.candles.xs(symbol)
+    candles = state.candles[symbol]
     closes = candles["close"]
     volumes = candles["volume"]
     high = candles["high"]
@@ -167,8 +167,8 @@ def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
     price_overlays: Dict[str, Dict[str, pd.Series]] = {}
 
     for symbol in config.symbols:
-        closes = state.candles.xs(symbol)["close"]
-        volumes = state.candles.xs(symbol)["volume"]
+        closes = state.candles[symbol]["close"]
+        volumes = state.candles[symbol]["volume"]
         if len(closes) < slow:
             continue
 
@@ -176,8 +176,8 @@ def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
         ema_slow = ta.ema(closes, slow)
         ema_spread = abs(ema_fast - ema_slow) / closes.iloc[-1]
 
-        high = state.candles.xs(symbol)["high"]
-        low = state.candles.xs(symbol)["low"]
+        high = state.candles[symbol]["high"]
+        low = state.candles[symbol]["low"]
         atr = ta.atr(high, low, closes, atr_period)
 
         obv = ta.obv(closes, volumes)

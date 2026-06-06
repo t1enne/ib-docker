@@ -87,7 +87,7 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
             "close": [tick.close],
             "volume": [tick.volume],
         },
-        index=[tick.timestamp],
+        index=pd.Index([tick.timestamp]),
     )
 
     candles = dict(state.candles)

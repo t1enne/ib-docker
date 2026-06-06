@@ -72,7 +72,7 @@ def htf_candles(
     df = state.htf_data.get(freq)
     if df is None or df.empty:
         return pd.DataFrame(
-            columns=["open", "high", "low", "close", "volume"],
+            columns=pd.Index(["open", "high", "low", "close", "volume"]),
             index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )
 
@@ -84,7 +84,7 @@ def htf_candles(
         return completed.xs(tick.symbol, level="symbol")
     except KeyError:
         return pd.DataFrame(
-            columns=["open", "high", "low", "close", "volume"],
+            columns=pd.Index(["open", "high", "low", "close", "volume"]),
             index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )
 
@@ -104,7 +104,7 @@ def get_resampled_candles(
 
     if state.htf_data.get(freq) is None:
         return pd.DataFrame(
-            columns=["open", "high", "low", "close", "volume"],
+            columns=pd.Index(["open", "high", "low", "close", "volume"]),
             index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )
 
@@ -117,6 +117,6 @@ def get_resampled_candles(
         return df.xs(symbol, level="symbol")
     except KeyError:
         return pd.DataFrame(
-            columns=["open", "high", "low", "close", "volume"],
+            columns=pd.Index(["open", "high", "low", "close", "volume"]),
             index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )

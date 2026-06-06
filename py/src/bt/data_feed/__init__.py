@@ -97,7 +97,7 @@ def sync_and_load(
     import asyncio
 
     async def _sync():
-        await sync_data(symbols)
+        await sync_data(symbols, from_date=start.date())
 
     asyncio.run(_sync())
     return load_candles(symbols, start, end, bar)

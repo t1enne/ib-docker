@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import List, Tuple
 import numpy as np
 import pandas as pd
@@ -5,8 +6,8 @@ from src.utils import get_ols_fit_model
 
 
 def calculate_rolling_z(
-    s1: pd.Series,
-    s2: pd.Series,
+    s1: Sequence[float],
+    s2: Sequence[float],
     window: int,
 ) -> Tuple[float, float, float]:
     """Calculate rolling z-score using OLS regression.

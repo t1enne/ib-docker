@@ -13,6 +13,7 @@ import websockets
 import websockets.asyncio.client
 
 from src.bt.state import Tick
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,10 @@ def _parse_bar_message(
         return None
 
     try:
+        pdt = cast(pd.Timestamp, pd.Timestamp(ts, unit="ms"))
+        assert not pd.isna(pdt)
         return Tick(
-            timestamp=pd.Timestamp(ts, unit="ms"),
+            timestamp=pdt,
             symbol=ticker,
             open=float(msg.get("o", 0)),
             high=float(msg.get("h", 0)),
@@ -103,9 +106,11 @@ def _parse_bar_array_message(
         if ts is None:
             continue
         try:
+            pdt = cast(pd.Timestamp, pd.Timestamp(ts, unit="ms"))
+            assert not pd.isna(pdt)
             ticks.append(
                 Tick(
-                    timestamp=pd.Timestamp(ts, unit="ms"),
+                    timestamp=pdt,
                     symbol=ticker,
                     open=float(bar_data.get("o", 0)),
                     high=float(bar_data.get("h", 0)),
@@ -205,8 +210,8 @@ class LiveBarFeed:
             try:
                 if self._ws is None:
                     await self.connect()
-
-                async for raw in self._ws:  # type: ignore[union-attr]
+                assert self._ws is not None
+                async for raw in self._ws:
                     delay = RECONNECT_BASE_DELAY_S  # reset on successful message
 
                     try:

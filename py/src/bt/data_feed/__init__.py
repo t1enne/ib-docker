@@ -16,7 +16,7 @@ Usage:
 
 import pandas as pd
 from pandas import Timestamp
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, cast
 
 from src.bt.state import Tick
 from src.utils import get_local_candles
@@ -71,8 +71,10 @@ def ticks_from_dataframe(
         for s in symbols:
             try:
                 row = df.xs(s, axis=1).loc[ts]
+                pdt = cast(pd.Timestamp, Timestamp(ts))
+                assert not pd.isna(pdt)
                 yield Tick(
-                    timestamp=Timestamp(ts),
+                    timestamp=pdt,
                     symbol=s,
                     open=float(row["open"]),
                     high=float(row["high"]),

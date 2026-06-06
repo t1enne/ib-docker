@@ -424,6 +424,9 @@ def get_regime_df(rstate: RegimeState) -> Union[pd.DataFrame, None]:
     n_regimes = len(first_prob)
     regime_data = {"regime": labels}
     for i in range(n_regimes):
-        regime_data[f"prob_{i}"] = [p[i] if p is not None else None for p in probs]
+        regime_data[f"prob_{i}"] = cast(
+            "list[int | None]",
+            [p[i] if p is not None else None for p in probs],
+        )
 
     return pd.DataFrame(regime_data, index=pd.Index(timestamps))

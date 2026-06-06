@@ -2,6 +2,15 @@
 
 import pytest
 import pandas as pd
+from typing import cast
+from datetime import datetime
+
+
+def _ts(val: str) -> pd.Timestamp:
+    """Create a Timestamp with a narrowing assertion for ty."""
+    result = cast(pd.Timestamp, pd.Timestamp(val))
+    assert not pd.isna(result)
+    return result
 from datetime import datetime
 
 from src.bt.state import (
@@ -24,13 +33,13 @@ class TestApplyFill:
     def test_open_long_position(self):
         """Test opening a long position."""
         portfolio = create_initial_portfolio(
-            initial_capital=10000, start_timestamp=pd.Timestamp("2024-01-01")
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
         )
 
         signal = TradeSignal(
             action=ActionType.long,
             symbol="AAPL",
-            timestamp=pd.Timestamp("2024-01-01"),
+            timestamp=_ts("2024-01-01"),
             price=100.0,
         )
 
@@ -40,7 +49,7 @@ class TestApplyFill:
             executed_price=100.0,
             commission=1.0,
             slippage=0.0,
-            timestamp=pd.Timestamp("2024-01-01"),
+            timestamp=_ts("2024-01-01"),
         )
 
         new_portfolio = apply_fill(portfolio, fill)
@@ -62,7 +71,7 @@ class TestApplyFill:
             symbol="AAPL",
             qty=10.0,
             entry_price=100.0,
-            entry_time=pd.Timestamp("2024-01-01"),
+            entry_time=_ts("2024-01-01"),
             stop_loss=95.0,
             take_profit=110.0,
             last_price=100.0,
@@ -74,7 +83,7 @@ class TestApplyFill:
             positions={"AAPL": position},
             trades=(
                 Trade(
-                    entry_time=pd.Timestamp("2024-01-01"),
+                    entry_time=_ts("2024-01-01"),
                     entry_price=100.0,
                     exit_time=None,
                     exit_price=None,
@@ -91,7 +100,7 @@ class TestApplyFill:
             ),
             equity_curve=(
                 EquityPoint(
-                    timestamp=pd.Timestamp("2024-01-01"),
+                    timestamp=_ts("2024-01-01"),
                     equity=6000,
                     cash=5000,
                     positions_value=1000,
@@ -103,7 +112,7 @@ class TestApplyFill:
         signal = TradeSignal(
             action=ActionType.close,
             symbol="AAPL",
-            timestamp=pd.Timestamp("2024-01-02"),
+            timestamp=_ts("2024-01-02"),
             price=110.0,
             reason=0.5,
         )
@@ -114,7 +123,7 @@ class TestApplyFill:
             executed_price=110.0,
             commission=1.0,
             slippage=0.0,
-            timestamp=pd.Timestamp("2024-01-02"),
+            timestamp=_ts("2024-01-02"),
         )
 
         new_portfolio = apply_fill(portfolio, fill)
@@ -136,13 +145,13 @@ class TestImmutability:
     def test_no_side_effects(self):
         """Prove that functions don't mutate input."""
         portfolio = create_initial_portfolio(
-            initial_capital=10000, start_timestamp=pd.Timestamp("2024-01-01")
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
         )
 
         signal = TradeSignal(
             action=ActionType.long,
             symbol="AAPL",
-            timestamp=pd.Timestamp("2024-01-01"),
+            timestamp=_ts("2024-01-01"),
             price=100.0,
             z_score=2.0,
         )
@@ -153,7 +162,7 @@ class TestImmutability:
             executed_price=100.0,
             commission=1.0,
             slippage=0.0,
-            timestamp=pd.Timestamp("2024-01-01"),
+            timestamp=_ts("2024-01-01"),
         )
 
         # Store original state
@@ -171,7 +180,7 @@ class TestImmutability:
     def test_state_snapshots(self):
         """Test that we can snapshot states."""
         portfolio = create_initial_portfolio(
-            initial_capital=10000, start_timestamp=pd.Timestamp("2024-01-01")
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
         )
 
         # Take snapshot
@@ -181,7 +190,7 @@ class TestImmutability:
         signal = TradeSignal(
             action=ActionType.long,
             symbol="AAPL",
-            timestamp=pd.Timestamp("2024-01-01"),
+            timestamp=_ts("2024-01-01"),
             price=100.0,
             z_score=2.0,
         )
@@ -192,7 +201,7 @@ class TestImmutability:
             executed_price=100.0,
             commission=1.0,
             slippage=0.0,
-            timestamp=pd.Timestamp("2024-01-01"),
+            timestamp=_ts("2024-01-01"),
         )
 
         new_portfolio = apply_fill(portfolio, fill)
@@ -213,7 +222,7 @@ class TestUpdatePrices:
             symbol="AAPL",
             qty=10.0,
             entry_price=100.0,
-            entry_time=pd.Timestamp("2024-01-01"),
+            entry_time=_ts("2024-01-01"),
             stop_loss=95.0,
             take_profit=110.0,
             last_price=100.0,
@@ -226,7 +235,7 @@ class TestUpdatePrices:
             trades=(),
             equity_curve=(
                 EquityPoint(
-                    timestamp=pd.Timestamp("2024-01-01"),
+                    timestamp=_ts("2024-01-01"),
                     equity=6000,
                     cash=5000,
                     positions_value=1000,
@@ -236,7 +245,7 @@ class TestUpdatePrices:
         )
 
         tick = Tick(
-            timestamp=pd.Timestamp("2024-01-02"),
+            timestamp=_ts("2024-01-02"),
             symbol="AAPL",
             open=100.0,
             high=105.0,

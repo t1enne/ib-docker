@@ -98,7 +98,8 @@ def on_tick(
         arr1[i] = float(pair[sym1])
         arr2[i] = float(pair[sym2])
 
-    z_score, _alpha, hedge = _compute_zscore(arr1, arr2, window)
+    z_window = window if window is not None else 50
+    z_score, _alpha, hedge = _compute_zscore(arr1, arr2, z_window)
     if np.isnan(z_score):
         return signals
 
@@ -116,20 +117,20 @@ def on_tick(
     tick1 = Tick(
         timestamp=cast(pd.Timestamp, row1["timestamp"]),
         symbol=sym1,
-        open=float(row1["open"]),
-        high=float(row1["high"]),
-        low=float(row1["low"]),
-        close=float(row1["close"]),
-        volume=float(row1["volume"]),
+        open=cast(float, row1["open"]),
+        high=cast(float, row1["high"]),
+        low=cast(float, row1["low"]),
+        close=cast(float, row1["close"]),
+        volume=cast(float, row1["volume"]),
     )
     tick2 = Tick(
         timestamp=cast(pd.Timestamp, row2["timestamp"]),
         symbol=sym2,
-        open=float(row2["open"]),
-        high=float(row2["high"]),
-        low=float(row2["low"]),
-        close=float(row2["close"]),
-        volume=float(row2["volume"]),
+        open=cast(float, row2["open"]),
+        high=cast(float, row2["high"]),
+        low=cast(float, row2["low"]),
+        close=cast(float, row2["close"]),
+        volume=cast(float, row2["volume"]),
     )
 
     # Check for existing positions

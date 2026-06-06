@@ -298,15 +298,14 @@ def _update_price_buffers(
         if not rows:
             return state
         last_ts = rows[-1]["timestamp"]
-        if not isinstance(last_ts, pd.Timestamp):
-            last_ts = pd.Timestamp(last_ts)
+        assert isinstance(last_ts, pd.Timestamp), f"Expected Timestamp, got {type(last_ts)}"
         if last_ts != tick.timestamp:
             return state
 
     # All symbols aligned at this timestamp — append close pair
     pair: dict[str, float] = {}
     for sym in symbols:
-        pair[sym] = float(_raw_candle_rows[sym][-1]["close"])
+        pair[sym] = float(cast(float, _raw_candle_rows[sym][-1]["close"]))
 
     from dataclasses import replace
 

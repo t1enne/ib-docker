@@ -63,8 +63,9 @@ def with_retry(
                         await asyncio.sleep(delay)
                     else:
                         logger.error("[%s] All retries exhausted, raising: %s", name, e)
-                        raise last_exception
-            raise last_exception  # type: ignore[possibly-undefined]
+                        raise last_exception  # type: ignore[possibly-undefined]
+            assert last_exception is not None
+            raise last_exception
 
         return wrapper
 

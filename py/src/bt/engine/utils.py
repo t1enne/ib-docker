@@ -1,9 +1,10 @@
 from dataclasses import asdict
 from src.bt.types import StrategyConfig
 from src.bt.state import Tick, BacktestState
-from typing import List, Generator, TypedDict
+from typing import List, Generator, TypedDict, cast
 from src.market_data.resample import resample_multiindex
 import pandas as pd
+import numpy as np
 
 
 def _df_to_multiindex(df: pd.DataFrame) -> pd.DataFrame:
@@ -118,7 +119,7 @@ def ticks_generator(
                 continue
 
     for ts in sorted_timestamps:
-        pdt = pd.Timestamp(ts)
+        pdt = cast(pd.Timestamp, pd.Timestamp(ts))
         if pd.isna(pdt):
             continue
 

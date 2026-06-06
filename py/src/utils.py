@@ -22,6 +22,8 @@ def get_local_candles(
     cur = con.cursor()
     _start = start_date if start_date else _DEFAULT_START
     _end = end_date if end_date else _DEFAULT_END
+    _start = cast(pd.Timestamp, _start)
+    _end = cast(pd.Timestamp, _end)
     _sd = int(_start.timestamp() * 1000)
     _ed = int(_end.timestamp() * 1000)
     from_filter = f"and c.timestamp >= {_sd}" if _sd else ""
@@ -220,7 +222,7 @@ def parse_timestamp(value: Union[str, pd.Timestamp]) -> pd.Timestamp:
     timestamp = pd.Timestamp(value)
     if pd.isna(timestamp):
         raise ValueError(f"Invalid timestamp: {value}")
-    return timestamp
+    return cast(pd.Timestamp, timestamp)
 
 
 def get_days_from_now(from_date: date) -> int:

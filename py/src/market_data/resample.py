@@ -3,7 +3,7 @@
 Provides bt-agnostic resampling with lookahead protection.
 """
 
-from typing import Optional, cast
+from typing import Any, Optional, cast
 import pandas as pd
 
 
@@ -29,7 +29,7 @@ def resample_ohlcv(
         Resampled DataFrame with OHLCV columns
     """
     if df.empty:
-        return pd.DataFrame(columns=OHLCV_COLS)  # type: ignore[arg-type]
+        return pd.DataFrame(columns=cast(Any, OHLCV_COLS))
 
     resampled = df.resample(freq).agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
@@ -67,7 +67,7 @@ def resample_multiindex(
     """
     if df.empty:
         return pd.DataFrame(  # noqa: ARG-TYPE
-            columns=OHLCV_COLS,  # type: ignore[arg-type]
+            columns=cast(Any, OHLCV_COLS),
             index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )
 
@@ -88,7 +88,7 @@ def resample_multiindex(
 
         if not resampled_frames:
             return pd.DataFrame(  # noqa: ARG-TYPE
-                columns=OHLCV_COLS,  # type: ignore[arg-type]
+                columns=cast(Any, OHLCV_COLS),
                 index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
             )
 

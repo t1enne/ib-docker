@@ -7,7 +7,7 @@
 
 - **Python 3.14+** (required)
 - **Package manager:** `uv` (not pip)
-- **Type checker:** `pyright` (configured in `pyproject.toml`)
+- **Type checker:** `ty` (configured in `pyproject.toml`)
 - **Formatter:** `ruff format`
 - **Test runner:** `pytest` with `pytest-asyncio`
 

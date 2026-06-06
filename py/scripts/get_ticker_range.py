@@ -4,8 +4,8 @@ from datetime import datetime
 
 sys.path.insert(0, "src")
 
-from db import db
-from db.models import CandleSchema
+from src.db import db
+from src.db.models import CandleSchema
 
 
 def get_contiguous_ranges(ticker: str):

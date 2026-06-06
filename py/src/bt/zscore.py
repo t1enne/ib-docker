@@ -2,7 +2,24 @@ from collections.abc import Sequence
 from typing import List, Tuple
 import numpy as np
 import pandas as pd
-from src.utils import get_ols_fit_model
+
+
+def _ols_log_params(
+    x: np.ndarray, y: np.ndarray
+) -> Tuple[float, float]:
+    """Compute OLS (y ~ const + x) on log-transformed data using direct numpy.
+
+    Avoids statsmodels overhead: for two-variable regression,
+    beta = Cov(x,y)/Var(x), alpha = mean(y) - beta*mean(x).
+    """
+    x_log = np.log(x.astype(float))
+    y_log = np.log(y.astype(float))
+    x_mean = x_log.mean()
+    y_mean = y_log.mean()
+    x_demean = x_log - x_mean
+    beta = (x_demean * (y_log - y_mean)).sum() / (x_demean * x_demean).sum()
+    alpha = y_mean - beta * x_mean
+    return float(alpha), float(beta)
 
 
 def calculate_rolling_z(
@@ -28,11 +45,10 @@ def calculate_rolling_z(
     if len(s1) < window or len(s2) < window:
         return (float("nan"), 0.0, 1.0)
 
-    s1_arr = np.array(s1[-window:])
-    s2_arr = np.array(s2[-window:])
+    s1_arr = np.asarray(s1[-window:], dtype=float)
+    s2_arr = np.asarray(s2[-window:], dtype=float)
 
-    model = get_ols_fit_model(s1_arr, s2_arr)
-    alpha, beta = model.params
+    alpha, beta = _ols_log_params(s2_arr, s1_arr)
 
     log_s1 = np.log(s1_arr)
     log_s2 = np.log(s2_arr)
@@ -44,4 +60,4 @@ def calculate_rolling_z(
     current_spread = log_s1[-1] - (alpha + beta * log_s2[-1])
     z = (current_spread - mean) / std if std != 0 else 0.0
 
-    return (round(float(z), 3), float(alpha), float(beta))
+    return (round(float(z), 3), alpha, beta)

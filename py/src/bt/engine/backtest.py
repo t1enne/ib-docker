@@ -116,6 +116,9 @@ def run_backtest(
     # Initialize state
     state = initial_state or get_initial_state()
 
+    # Clear per-session accumulators
+    _raw_candle_rows.clear()
+
     for tick in tick_gen:
         can_trade = bt.window.test_start <= tick.timestamp <= bt.window.test_end
         state = _process_tick(
@@ -131,6 +134,9 @@ def run_backtest(
             risk_config=bt.risk_config,
         )
 
+    # Flush any remaining raw candle rows into DataFrames
+    state = _flush_candle_batches(state)
+
     # Finalize - close all positions
     state = _finalize(state, bt.execution_params)
 
@@ -145,7 +151,9 @@ def run_backtest(
     )
 
     plot_config: PlotConfig = (
-        strategy_mod.plot(state, config) if strategy_mod else PlotConfig()
+        strategy_mod.plot(state, config)
+        if (strategy_mod and config.plot)
+        else PlotConfig()
     )
 
     return (
@@ -185,6 +193,12 @@ def _process_tick(
     # Append candle
     state = _append_candle(state, tick)
 
+    symbols = list(config.symbols)
+
+    # Update aligned price buffers for pairs strategies.
+    # Appends {sym: close} at each timestamp where all symbols have data.
+    state = _update_price_buffers(state, tick, symbols)
+
     # Execute pending signals from previous tick
     portfolio, pending_signals = _execute_signals(
         state, tick, exec_handler, config, exec_params
@@ -198,7 +212,11 @@ def _process_tick(
         ),
     )
 
-    if can_trade and strategy_fn:
+    # Only run strategy on the last symbol per timestamp to avoid
+    # redundant computation (both symbols share the same aligned data).
+    last_symbol = symbols[-1] if symbols else None
+
+    if can_trade and strategy_fn and tick.symbol == last_symbol:
         strategy_params = dict(config.strategy_params or {})
         if config.rolling_window_size is not None:
             strategy_params.setdefault(
@@ -253,25 +271,101 @@ def _process_tick(
     )
 
 
-def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
-    """Append a candle to the per-symbol candles dict."""
-    new_row = pd.DataFrame(
-        {
-            "open": [tick.open],
-            "high": [tick.high],
-            "low": [tick.low],
-            "close": [tick.close],
-            "volume": [tick.volume],
-        },
-        index=pd.Index([tick.timestamp]),
+# Per-session accumulator for raw candle rows (used by strategies that need
+# fast access to the latest row without hitting the DataFrame).
+# Cleared at the start of each run_backtest call.
+_raw_candle_rows: dict[str, list[dict[str, object]]] = {}
+
+
+
+def _update_price_buffers(
+    state: BacktestState, tick: Tick, symbols: list[str]
+) -> BacktestState:
+    """Update model_state.price_buffers with aligned close prices.
+
+    Only appends when ALL strategy symbols have a candle at this timestamp.
+    This provides a pre-aligned cache for the strategy's on_tick to use
+    directly as numpy arrays, avoiding DataFrame align/concat/dropna.
+    """
+    # Only update on the last symbol's tick (all prior symbols already appended)
+    if tick.symbol != (symbols[-1] if symbols else None):
+        return state
+
+    # Verify all symbols have this timestamp via raw row cache
+    # (DataFrame may not be up-to-date due to batch processing)
+    for sym in symbols:
+        rows = _raw_candle_rows.get(sym)
+        if not rows:
+            return state
+        last_ts = rows[-1]["timestamp"]
+        if not isinstance(last_ts, pd.Timestamp):
+            last_ts = pd.Timestamp(last_ts)
+        if last_ts != tick.timestamp:
+            return state
+
+    # All symbols aligned at this timestamp — append close pair
+    pair: dict[str, float] = {}
+    for sym in symbols:
+        pair[sym] = float(_raw_candle_rows[sym][-1]["close"])
+
+    from dataclasses import replace
+
+    new_ms = replace(
+        state.model_state,
+        price_buffers=state.model_state.price_buffers + (pair,),
     )
+    return merge_bt_state(state, dict(model_state=new_ms))
+
+
+# Batch size for flushing raw candle rows into the DataFrame (avoids
+# per-tick pd.concat). Smaller = less memory, larger = fewer concat calls.
+_CANDLE_BATCH_SIZE = 50
+
+
+def _flush_candle_batches(state: BacktestState) -> BacktestState:
+    """Build final DataFrames from all accumulated raw candle rows."""
+    if not _raw_candle_rows:
+        return state
 
     candles = dict(state.candles)
-    current = candles.get(tick.symbol)
-    if current is None or current.empty:
-        candles[tick.symbol] = new_row
-    else:
-        candles[tick.symbol] = pd.concat([current, new_row])
+    for sym, rows in _raw_candle_rows.items():
+        if not rows:
+            continue
+        new_df = pd.DataFrame(rows).set_index("timestamp")
+        for col in ["open", "high", "low", "close", "volume"]:
+            new_df.loc[:, col] = pd.to_numeric(new_df[col])
+        candles[sym] = new_df
+
+    return merge_bt_state(state, dict(candles=candles))
+
+
+def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
+    """Append a candle to the per-symbol row accumulator.
+
+    Raw rows are always kept for fast strategy access. DataFrames are
+    rebuilt every _CANDLE_BATCH_SIZE rows to avoid per-tick pd.concat.
+    """
+    sym = tick.symbol
+    if sym not in _raw_candle_rows:
+        _raw_candle_rows[sym] = []
+    _raw_candle_rows[sym].append({
+        "timestamp": tick.timestamp,
+        "open": tick.open,
+        "high": tick.high,
+        "low": tick.low,
+        "close": tick.close,
+        "volume": tick.volume,
+    })
+
+    raw_rows = _raw_candle_rows[sym]
+    candles = dict(state.candles)
+
+    # Rebuild DataFrame every N rows (avoids per-tick pd.concat)
+    if len(raw_rows) % _CANDLE_BATCH_SIZE == 0:
+        new_df = pd.DataFrame(raw_rows).set_index("timestamp")
+        for col in ["open", "high", "low", "close", "volume"]:
+            new_df.loc[:, col] = pd.to_numeric(new_df[col])
+        candles[sym] = new_df
 
     return merge_bt_state(state, dict(candles=candles))
 

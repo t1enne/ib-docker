@@ -4,8 +4,6 @@ from typing import Any, Dict, List, Optional, Union, cast
 import pandas as pd
 import sqlite3
 import numpy as np
-import statsmodels.api as sm
-from statsmodels.tsa.stattools import adfuller
 from datetime import datetime, date
 
 
@@ -83,6 +81,8 @@ def _calculate_rolling_zscore_spread(s1: pd.Series, s2: pd.Series, rolling_windo
     if len(s1) < rolling_window:
         return pd.Series(dtype=float)
 
+    import statsmodels.api as sm  # lazy import
+
     # Calculate rolling spread using OLS
     def calc_spread(window_idx):
         idx = s1.index[window_idx]
@@ -117,6 +117,8 @@ def _calculate_rolling_zscore_spread(s1: pd.Series, s2: pd.Series, rolling_windo
 
 
 def get_ols_fit_model(y, x):
+    import statsmodels.api as sm  # lazy import
+
     y_arr = np.asarray(y)
     x_arr = np.asarray(x)
     if len(y_arr) == 0 or len(x_arr) == 0 or len(y_arr) != len(x_arr):
@@ -154,6 +156,8 @@ def hedge_ratio_residuals(y, x) -> pd.DataFrame:
 
 def eg_pvalue(price1, price2):
     """Engle-Granger p-value in one direction: price1 ~ price2"""
+    from statsmodels.tsa.stattools import adfuller  # lazy import
+
     resid = hedge_ratio_residuals(price1, price2)
     return adfuller(resid)[1]  # p-value
 

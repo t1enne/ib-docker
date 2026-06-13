@@ -39,6 +39,15 @@ def calculate_gaps(
     Pure function that returns a list of (start, end) tuples representing
     missing date ranges that need to be fetched.
 
+    Detects THREE kinds of gaps:
+    1. Backward gap: before the oldest existing candle
+    2. Forward gap: after the newest existing candle
+    3. Internal gaps: missing days BETWEEN existing candles
+
+    All gaps use EXACT timestamp precision — no day-boundary truncation.
+    This prevents intra-day gaps (e.g. missing candles at 14:00-23:59)
+    from being silently skipped.
+
     Args:
         requested_from: Start of the requested datetime range
         requested_to: End of the requested datetime range
@@ -46,36 +55,193 @@ def calculate_gaps(
         newest_existing: Newest timestamp in DB (ms), or None if empty
 
     Returns:
-        List of (start_datetime, end_datetime) tuples for gaps to fetch
+        List of (start_datetime, end_datetime) tuples for gaps to fetch,
+        sorted chronologically.
     """
     gaps: list[tuple[datetime, datetime]] = []
+
     if oldest_existing is None and newest_existing is None:
         return [(requested_from, requested_to)]
 
     if oldest_existing is None:
         oldest_existing = newest_existing
-
     if newest_existing is None:
         newest_existing = oldest_existing
 
-    existing_from = timestamp_to_datetime(cast(int, oldest_existing))
-    existing_to = timestamp_to_datetime(cast(int, newest_existing))
+    existing_from_ts = cast(int, oldest_existing)
+    existing_to_ts = cast(int, newest_existing)
 
-    backward_gap_start = requested_from
-    backward_gap_end = existing_from.replace(hour=0, minute=0, second=0, microsecond=0)
+    existing_from = timestamp_to_datetime(existing_from_ts)
+    existing_to = timestamp_to_datetime(existing_to_ts)
 
-    if backward_gap_start < backward_gap_end:
-        gaps.append((backward_gap_start, backward_gap_end))
+    # 1. Backward gap: strictly before the oldest existing candle
+    if requested_from < existing_from:
+        gaps.append((requested_from, existing_from))
 
-    forward_gap_start = (existing_to).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) + timedelta(days=1)
-    forward_gap_end = requested_to
-
-    if forward_gap_start < forward_gap_end:
-        gaps.append((forward_gap_start, forward_gap_end))
+    # 2. Forward gap: strictly after the newest existing candle
+    if existing_to < requested_to:
+        gaps.append((existing_to, requested_to))
 
     return gaps
+
+
+# Known US market holidays (static list for 2025-2027)
+# These are days the NYSE/NASDAQ are closed — no data expected.
+_US_MARKET_HOLIDAYS: set[tuple[int, int, int]] = {
+    # 2025
+    (2025, 1, 1),  # New Year
+    (2025, 1, 20),  # MLK Day
+    (2025, 2, 17),  # Presidents Day
+    (2025, 4, 18),  # Good Friday
+    (2025, 5, 26),  # Memorial Day
+    (2025, 6, 19),  # Juneteenth
+    (2025, 7, 4),  # Independence Day
+    (2025, 9, 1),  # Labor Day
+    (2025, 11, 27),  # Thanksgiving
+    (2025, 12, 25),  # Christmas
+    # 2026
+    (2026, 1, 1),  # New Year
+    (2026, 1, 19),  # MLK Day
+    (2026, 2, 16),  # Presidents Day
+    (2026, 4, 3),  # Good Friday
+    (2026, 5, 25),  # Memorial Day
+    (2026, 6, 19),  # Juneteenth
+    (2026, 7, 3),  # Independence Day (observed)
+    (2026, 9, 7),  # Labor Day
+    (2026, 11, 26),  # Thanksgiving
+    (2026, 12, 25),  # Christmas
+    # 2027
+    (2027, 1, 1),  # New Year
+    (2027, 1, 18),  # MLK Day
+    (2027, 2, 15),  # Presidents Day
+    (2027, 3, 26),  # Good Friday
+    (2027, 5, 31),  # Memorial Day
+    (2027, 6, 18),  # Juneteenth (observed)
+    (2027, 7, 5),  # Independence Day (observed)
+    (2027, 9, 6),  # Labor Day
+    (2027, 11, 25),  # Thanksgiving
+    (2027, 12, 24),  # Christmas (observed)
+}
+
+
+def _is_us_market_holiday(d: datetime) -> bool:
+    """Check if a date is a known US market holiday."""
+    return (d.year, d.month, d.day) in _US_MARKET_HOLIDAYS
+
+
+def find_internal_gaps(
+    ticker: str,
+    requested_from: datetime,
+    requested_to: datetime,
+    max_gap_hours: float = 48.0,
+) -> list[tuple[datetime, datetime]]:
+    """Find missing data INTERNAL to the existing range by scanning
+    consecutive candle timestamps.
+
+    Unlike calculate_gaps() which only looks at the edges (oldest/newest),
+    this function detects a gap between two existing candles where the
+    time difference exceeds max_gap_hours — indicating a full trading
+    day (or more) of missing data.
+
+    This is needed because IBKR's API may fail to return certain days
+    during a fetch, or a previous sync may have completed but skipped
+    a trading day (e.g. due to API limits or transient errors that were
+    swallowed).
+
+    Args:
+        ticker: Symbol to check for internal gaps
+        requested_from: Lower bound for gap detection
+        requested_to: Upper bound for gap detection
+        max_gap_hours: Max allowed hours between consecutive candles.
+                        Default 48h (covers weekend Fri 21:00 → Mon 15:30).
+
+    Returns:
+        List of (gap_start, gap_end) tuples for internal gaps found.
+    """
+    from peewee import SQL
+
+    # Get all distinct trading days within the requested range
+    days: list[str] = [
+        r.date
+        for r in CandleSchema.select(
+            SQL("DATE(datetime(timestamp/1000, 'unixepoch'))").alias("date")
+        )
+        .where(
+            CandleSchema.ticker == ticker,
+            CandleSchema.timestamp >= int(requested_from.timestamp() * 1000),
+            CandleSchema.timestamp <= int(requested_to.timestamp() * 1000),
+        )
+        .distinct()
+        .order_by(SQL("date"))
+    ]
+
+    if not days:
+        return []
+
+    gaps: list[tuple[datetime, datetime]] = []
+    for i in range(len(days) - 1):
+        curr = datetime.strptime(days[i], "%Y-%m-%d")
+        nxt = datetime.strptime(days[i + 1], "%Y-%m-%d")
+        gap_days = (nxt - curr).days
+
+        if gap_days == 1:
+            # Adjacent trading days — no gap
+            continue
+
+        # Scan each missing day to find the first and last non-holiday/non-weekend days
+        missing_start: datetime | None = None
+        missing_end: datetime | None = None
+
+        for offset in range(1, gap_days):
+            missing_day = curr + timedelta(days=offset)
+            # Skip weekends and known US market holidays
+            if missing_day.weekday() >= 5 or _is_us_market_holiday(missing_day):
+                # If we were tracking a gap range, close it before the holiday
+                if missing_start is not None:
+                    gaps.append((missing_start, missing_end))  # type: ignore[arg-type]
+                    missing_start = None
+                    missing_end = None
+                continue
+
+            # This is a real missing trading day
+            if missing_start is None:
+                missing_start = missing_day
+            missing_end = missing_day + timedelta(days=1)  # end is exclusive
+
+        # Close any remaining gap range
+        if missing_start is not None:
+            gaps.append((missing_start, missing_end))  # type: ignore[arg-type]
+
+    return gaps
+
+
+def _merge_and_sort_gaps(
+    gaps: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    """Merge overlapping/adjacent gaps and sort chronologically.
+
+    Args:
+        gaps: List of (start, end) gap tuples (unsorted, possibly overlapping)
+
+    Returns:
+        Merged, sorted list of non-overlapping gaps
+    """
+    if not gaps:
+        return []
+
+    # Sort by start time
+    sorted_gaps = sorted(gaps, key=lambda g: g[0])
+    merged: list[tuple[datetime, datetime]] = [sorted_gaps[0]]
+
+    for start, end in sorted_gaps[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            # Overlapping or adjacent — merge
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+
+    return merged
 
 
 def get_existing_range_sync(ticker: str) -> tuple[Optional[int], Optional[int]]:
@@ -112,18 +278,17 @@ async def _fetch_candles_iterative(
     """Iteratively fetch candles from IBKR API for a given datetime range.
 
     Fetches candles going backwards from to_datetime until from_datetime is reached.
+    Uses exact gap boundaries — no day-truncation — to avoid leaving intra-day gaps.
     """
     current_to = to_datetime
     accumulated_data: list[CandleDict] = []
 
     while current_to > from_datetime:
-        datetime_to_fetch = current_to - from_datetime
-        days_to_fetch = max(1, datetime_to_fetch.days)
-        if days_to_fetch <= 0:
-            break
+        delta = current_to - from_datetime
+        days_to_fetch = max(1, delta.days + (1 if delta.seconds > 0 else 0))
 
         logger.info(
-            "Getting candles for %s for days %s, from %s, to %s",
+            "Getting candles for %s for %sd, from %s, to %s",
             ticker,
             days_to_fetch,
             from_datetime,
@@ -162,7 +327,7 @@ async def _fetch_candles_iterative(
                     "close": item.c,
                     "volume": item.v,
                 }
-                for item in r.data
+                for item in sorted_data
             ],
         )
         accumulated_data = accumulated_data + new_candles
@@ -170,12 +335,16 @@ async def _fetch_candles_iterative(
         oldest_datetime = timestamp_to_datetime(oldest_ts)
         logger.info(
             "Got %s candles for %s, oldest: %s",
-            len(r.data),
+            len(sorted_data),
             ticker,
             oldest_datetime,
         )
 
-        if oldest_datetime >= current_to or oldest_datetime <= from_datetime:
+        # We've reached or passed the from_datetime boundary
+        if oldest_datetime <= from_datetime:
+            break
+        # Safety: if oldest_datetime hasn't advanced, avoid infinite loop
+        if oldest_datetime >= current_to:
             break
         current_to = oldest_datetime
 
@@ -210,13 +379,21 @@ async def candles(
 
     oldest_existing, newest_existing = await get_existing_range(ticker)
 
-    gaps = (
-        [(from_datetime, to_datetime)]
-        if force_fetch
-        else calculate_gaps(
+    gaps: list[tuple[datetime, datetime]]
+    if force_fetch:
+        gaps = [(from_datetime, to_datetime)]
+    else:
+        # Edge gaps: before oldest / after newest
+        gaps = calculate_gaps(
             from_datetime, to_datetime, oldest_existing, newest_existing
         )
-    )
+        # Internal gaps: missing days BETWEEN existing candles
+        internal_gaps = await asyncio.to_thread(
+            find_internal_gaps, ticker, from_datetime, to_datetime
+        )
+        gaps.extend(internal_gaps)
+        # Deduplicate and sort
+        gaps = _merge_and_sort_gaps(gaps)
 
     if not gaps:
         logger.info(

@@ -9,6 +9,11 @@ from src.syncm.ibkr_layer.candles import (
 )
 
 
+def ts(dt: datetime) -> int:
+    """Convert a datetime to milliseconds timestamp (preserves intra-day time)."""
+    return int(dt.timestamp() * 1000)
+
+
 class TestCalculateGaps:
     """Test the calculate_gaps pure function - no mocking needed"""
 
@@ -49,6 +54,7 @@ class TestCalculateGaps:
             newest_existing=newest,
         )
 
+        # Backward gap ends at the oldest candle timestamp (exact), not midnight
         assert result == [(datetime(2024, 1, 1), datetime(2025, 6, 1))]
 
     def test_forward_gap_only(self):
@@ -63,12 +69,15 @@ class TestCalculateGaps:
             newest_existing=newest,
         )
 
-        assert result == [(datetime(2024, 7, 1), datetime(2025, 3, 1))]
+        # Forward gap starts at the newest candle timestamp (exact), not next midnight
+        forward_gap = result[0]
+        assert forward_gap[0] == datetime(2024, 6, 30)
+        assert forward_gap[1] == datetime(2025, 3, 1)
 
     def test_both_gaps(self):
         """When existing data is in the middle, return both backward and forward gaps"""
-        oldest = date_to_timestamp(datetime(2024, 6, 1))
-        newest = date_to_timestamp(datetime(2024, 9, 30))
+        oldest = ts(datetime(2024, 6, 1, 10, 0, 0))  # 10:00 AM
+        newest = ts(datetime(2024, 9, 30, 14, 0, 0))  # 2:00 PM
 
         result = calculate_gaps(
             requested_from=datetime(2024, 1, 1),
@@ -78,12 +87,14 @@ class TestCalculateGaps:
         )
 
         assert len(result) == 2
-        assert (datetime(2024, 1, 1), datetime(2024, 6, 1)) in result
-        assert (datetime(2024, 10, 1), datetime(2024, 12, 31)) in result
+        # Backward: everything before the OLDEST existing candle (exact timestamp)
+        assert result[0] == (datetime(2024, 1, 1), datetime(2024, 6, 1, 10, 0, 0))
+        # Forward: everything after the NEWEST existing candle (exact timestamp)
+        assert result[1] == (datetime(2024, 9, 30, 14, 0, 0), datetime(2024, 12, 31))
 
     def test_existing_only_oldest(self):
         """When only oldest exists (newest is None), handle correctly"""
-        oldest = date_to_timestamp(datetime(2024, 6, 1))
+        oldest = ts(datetime(2024, 6, 1, 10, 0, 0))
 
         result = calculate_gaps(
             requested_from=datetime(2024, 1, 1),
@@ -92,13 +103,14 @@ class TestCalculateGaps:
             newest_existing=None,
         )
 
+        # Single row: both oldest and newest point to the same timestamp
         assert len(result) == 2
-        assert (datetime(2024, 1, 1), datetime(2024, 6, 1)) in result
-        assert (datetime(2024, 6, 2), datetime(2024, 12, 31)) in result
+        assert result[0] == (datetime(2024, 1, 1), datetime(2024, 6, 1, 10, 0, 0))
+        assert result[1] == (datetime(2024, 6, 1, 10, 0, 0), datetime(2024, 12, 31))
 
     def test_existing_only_newest(self):
         """When only newest exists (oldest is None), handle correctly"""
-        newest = date_to_timestamp(datetime(2024, 6, 30))
+        newest = ts(datetime(2024, 6, 30, 14, 0, 0))
 
         result = calculate_gaps(
             requested_from=datetime(2024, 1, 1),
@@ -107,14 +119,15 @@ class TestCalculateGaps:
             newest_existing=newest,
         )
 
+        # Single row: both oldest and newest point to the same timestamp
         assert len(result) == 2
-        assert (datetime(2024, 1, 1), datetime(2024, 6, 30)) in result
-        assert (datetime(2024, 7, 1), datetime(2024, 12, 31)) in result
+        assert result[0] == (datetime(2024, 1, 1), datetime(2024, 6, 30, 14, 0, 0))
+        assert result[1] == (datetime(2024, 6, 30, 14, 0, 0), datetime(2024, 12, 31))
 
     def test_existing_touches_requested_boundary(self):
-        """When existing data touches the boundary, no gap for that side"""
-        oldest = date_to_timestamp(datetime(2024, 1, 2))
-        newest = date_to_timestamp(datetime(2024, 12, 30))
+        """When existing data touches the requested boundary, no gap for that side"""
+        oldest = date_to_timestamp(datetime(2024, 1, 1))  # exact boundary (date → ms)
+        newest = ts(datetime(2024, 12, 30, 14, 0, 0))
 
         result = calculate_gaps(
             requested_from=datetime(2024, 1, 1),
@@ -123,8 +136,26 @@ class TestCalculateGaps:
             newest_existing=newest,
         )
 
+        # oldest == requested_from, so no backward gap
         assert len(result) == 1
-        assert (datetime(2024, 1, 1), datetime(2024, 1, 2)) in result
+        assert result[0] == (datetime(2024, 12, 30, 14, 0, 0), datetime(2024, 12, 31))
+
+    def test_existing_fully_covers_within_day(self):
+        """When existing data sits within a day, gaps are at exact timestamps"""
+        oldest = ts(datetime(2024, 6, 1, 10, 0, 0))
+        newest = ts(datetime(2024, 6, 1, 14, 0, 0))
+
+        result = calculate_gaps(
+            requested_from=datetime(2024, 1, 1),
+            requested_to=datetime(2024, 12, 31),
+            oldest_existing=oldest,
+            newest_existing=newest,
+        )
+
+        # Both gaps should be present, with exact timestamps
+        assert len(result) == 2
+        assert result[0] == (datetime(2024, 1, 1), datetime(2024, 6, 1, 10, 0, 0))
+        assert result[1] == (datetime(2024, 6, 1, 14, 0, 0), datetime(2024, 12, 31))
 
 
 class TestGetExistingRangeSync:
@@ -155,16 +186,16 @@ class TestGetExistingRangeSync:
 class TestNoOverfetch:
     """Test that we don't overfetch when data already exists"""
 
+    @pytest.fixture(autouse=True)
+    def _mock_internal_gaps(self, mocker):
+        """Mock find_internal_gaps to avoid DB queries in unit tests."""
+        mocker.patch("src.syncm.ibkr_layer.candles.find_internal_gaps", return_value=[])
+
     @pytest.mark.asyncio
     async def test_skip_fetch_when_data_exists(self, mocker):
         """When existing data covers the requested range, skip API call"""
-        today = datetime.now()
-        yesterday = today - timedelta(days=1)
-
         oldest_ts = int(datetime(2024, 1, 1).timestamp() * 1000)
-        newest_ts = int(
-            datetime.combine(yesterday, datetime.min.time()).timestamp() * 1000
-        )
+        newest_ts = int(datetime(2024, 12, 31).timestamp() * 1000)
 
         mocker.patch(
             "src.syncm.ibkr_layer.candles.get_existing_range",
@@ -174,7 +205,7 @@ class TestNoOverfetch:
             "src.syncm.ibkr_layer.candles._fetch_candles_iterative", return_value=[]
         )
 
-        await candles(123, datetime(2024, 1, 1), to_datetime=yesterday, ticker="AAPL")
+        await candles(123, datetime(2024, 1, 1), datetime(2024, 12, 31), ticker="AAPL")
 
         spy.assert_not_called()
 
@@ -199,13 +230,8 @@ class TestNoOverfetch:
     @pytest.mark.asyncio
     async def test_force_fetch_ignores_existing(self, mocker):
         """When force_fetch=True, always fetch regardless of existing data"""
-        today = datetime.now()
-        yesterday = today - timedelta(days=1)
-
         oldest_ts = int(datetime(2024, 1, 1).timestamp() * 1000)
-        newest_ts = int(
-            datetime.combine(yesterday, datetime.min.time()).timestamp() * 1000
-        )
+        newest_ts = int(datetime(2024, 12, 31).timestamp() * 1000)
 
         mocker.patch(
             "src.syncm.ibkr_layer.candles.get_existing_range",
@@ -256,8 +282,8 @@ class TestNoOverfetch:
     @pytest.mark.asyncio
     async def test_fetches_both_gaps(self, mocker):
         """When there are gaps on both ends, fetch both"""
-        oldest_ts = int(datetime(2024, 6, 1).timestamp() * 1000)
-        newest_ts = int(datetime(2024, 9, 30).timestamp() * 1000)
+        oldest_ts = int(datetime(2024, 6, 1, 10, 0, 0).timestamp() * 1000)
+        newest_ts = int(datetime(2024, 9, 30, 14, 0, 0).timestamp() * 1000)
 
         mocker.patch(
             "src.syncm.ibkr_layer.candles.get_existing_range",
@@ -272,3 +298,11 @@ class TestNoOverfetch:
         )
 
         assert spy.call_count == 2
+        # Backward gap: from requested_from to oldest existing (exact)
+        spy.assert_any_call(
+            123, "AAPL", "1h", datetime(2024, 1, 1), datetime(2024, 6, 1, 10, 0, 0)
+        )
+        # Forward gap: from newest existing (exact) to requested_to
+        spy.assert_any_call(
+            123, "AAPL", "1h", datetime(2024, 9, 30, 14, 0, 0), datetime(2024, 12, 31)
+        )

@@ -23,6 +23,8 @@ from src.syncm.ibkr_layer.candles import (
     candles_batch,
     get_existing_range,
     calculate_gaps,
+    find_internal_gaps,
+    _merge_and_sort_gaps,
 )
 from src.syncm.ibkr_layer import get_contract_info, lookup
 from src.syncm.types import (
@@ -180,12 +182,16 @@ async def preview_sync(
     plans: list[FetchPlan] = []
     for symbol in symbols:
         oldest, newest = await get_existing_range(symbol.ticker)
-        gaps = calculate_gaps(from_dt, to_dt, oldest, newest)
+        edge_gaps = calculate_gaps(from_dt, to_dt, oldest, newest)
+        internal_gaps = await asyncio.to_thread(
+            find_internal_gaps, symbol.ticker, from_dt, to_dt
+        )
+        all_gaps = _merge_and_sort_gaps(edge_gaps + internal_gaps)
         plans.append(
             FetchPlan(
                 ticker=symbol.ticker,
                 conid=symbol.conid,
-                gaps=gaps,
+                gaps=all_gaps,
             )
         )
 

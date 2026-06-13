@@ -104,7 +104,9 @@ def ticks_generator(
 
     # Pre-compute HTF arrays for fast iteration
     htf_arrays: dict[tuple[str, str, str], np.ndarray] = {}  # (freq, sym, field)
-    htf_timestamps_map: dict[str, dict[str, np.ndarray]] = {}  # freq -> sym -> timestamps
+    htf_timestamps_map: dict[
+        str, dict[str, np.ndarray]
+    ] = {}  # freq -> sym -> timestamps
     for freq, htf_df in htf_dfs.items():
         if htf_df.empty:
             continue

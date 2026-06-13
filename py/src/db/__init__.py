@@ -4,12 +4,16 @@ import sys
 import atexit
 from peewee import SqliteDatabase
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 db_path = os.path.join(os.getcwd(), "..", "data", "db.sqlite")
 db = SqliteDatabase(db_path, pragmas={"journal_mode": "wal"})
 
 
 def close_db():
-    print("Closing database...")
+    logger.debug("Closing database...")
     db.close()
 
 

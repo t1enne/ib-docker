@@ -1,9 +1,33 @@
-from_date: 2024-01-01
+from_date: 2025-01-01
 symbols:
-  - SPY
-  - QQQ
-  - TLT
-  - GLD
-  - SLV
-  - XLE
-  - UUP
+  # broad
+  - spy
+  - qqq
+  # bond
+  - tlt
+  # commodities
+  - gld
+  - slv
+  # sectors
+  - xle
+  - xlv
+  - xlb
+  - xbi
+  - xlu
+  - xlp
+  - xly
+  - xlf
+  # - xlk
+  # dollar idx
+  - uup
+  # regional
+  - ewy # south korea
+  - ewj # japan
+  # other
+  - vwo # emerging markets
+  - smh
+  - btc
+  - cqqq # china tech
+  - tan # solar
+  - ura # uranium miners
+  - copx # copper

@@ -5,6 +5,8 @@ import pandas as pd
 import sqlite3
 import numpy as np
 from datetime import datetime, date
+from pathlib import Path
+import os
 
 
 _DEFAULT_START = pd.Timestamp("2020-01-01")
@@ -58,8 +60,8 @@ def get_local_candles(
     df = pd.DataFrame(data, columns=columns)
     df = df.assign(Date=pd.to_datetime(df["timestamp"], unit="ms"))
     df = df.set_index("Date").drop(columns=["timestamp"])
-    # if bar != "1h":
-    #     df = resample_ohlcv(df, bar, completed_only=True)
+    if bar != "1h":
+        return resample_ohlcv(df, bar, completed_only=True)
 
     return df
 
@@ -233,3 +235,19 @@ def get_days_from_now(from_date: date) -> int:
 
 def list_to_axes(l: list[str]) -> ExtensionArray:
     return cast(ExtensionArray, l)
+
+
+def load_env(path: str | Path = ".env") -> None:
+    """Load a .env file into os.environ. Never overrides existing env vars."""
+
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip().strip('"').strip("'")
+        if key not in os.environ:
+            os.environ[key] = val

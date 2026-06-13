@@ -13,13 +13,14 @@ def spread(
     start_date: Optional[Timestamp] = None,
     end_date: Optional[Timestamp] = None,
     rolling: Optional[int] = None,
+    bar="1d",
 ):
     sym1, sym2 = symbols
-    ma_windows = [14]
+    ma_windows = [50]
     _start = parse_timestamp(start_date) if start_date else None
     _end = parse_timestamp(end_date) if end_date else None
-    df1 = get_local_candles(sym1.upper(), _start, _end)
-    df2 = get_local_candles(sym2.upper(), _start, _end)
+    df1 = get_local_candles(sym1.upper(), _start, _end, bar)
+    df2 = get_local_candles(sym2.upper(), _start, _end, bar)
 
     prices1 = df1["close"].tolist()
     prices2 = df2["close"].tolist()
@@ -27,7 +28,7 @@ def spread(
 
     ratio = pd.DataFrame(
         {
-            "ratio": df1["close"] / df2["Close"],
+            "ratio": df1["close"] / df2["close"],
             f"{sym1}": df1["close"],
             f"{sym2}": df2["close"],
         },

@@ -277,7 +277,6 @@ def _process_tick(
 _raw_candle_rows: dict[str, list[dict[str, object]]] = {}
 
 
-
 def _update_price_buffers(
     state: BacktestState, tick: Tick, symbols: list[str]
 ) -> BacktestState:
@@ -298,7 +297,9 @@ def _update_price_buffers(
         if not rows:
             return state
         last_ts = rows[-1]["timestamp"]
-        assert isinstance(last_ts, pd.Timestamp), f"Expected Timestamp, got {type(last_ts)}"
+        assert isinstance(last_ts, pd.Timestamp), (
+            f"Expected Timestamp, got {type(last_ts)}"
+        )
         if last_ts != tick.timestamp:
             return state
 
@@ -347,14 +348,16 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
     sym = tick.symbol
     if sym not in _raw_candle_rows:
         _raw_candle_rows[sym] = []
-    _raw_candle_rows[sym].append({
-        "timestamp": tick.timestamp,
-        "open": tick.open,
-        "high": tick.high,
-        "low": tick.low,
-        "close": tick.close,
-        "volume": tick.volume,
-    })
+    _raw_candle_rows[sym].append(
+        {
+            "timestamp": tick.timestamp,
+            "open": tick.open,
+            "high": tick.high,
+            "low": tick.low,
+            "close": tick.close,
+            "volume": tick.volume,
+        }
+    )
 
     raw_rows = _raw_candle_rows[sym]
     candles = dict(state.candles)

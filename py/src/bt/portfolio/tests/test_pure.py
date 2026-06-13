@@ -11,6 +11,8 @@ def _ts(val: str) -> pd.Timestamp:
     result = cast(pd.Timestamp, pd.Timestamp(val))
     assert not pd.isna(result)
     return result
+
+
 from datetime import datetime
 
 from src.bt.state import (

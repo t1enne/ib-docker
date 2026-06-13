@@ -4,9 +4,7 @@ import numpy as np
 import pandas as pd
 
 
-def _ols_log_params(
-    x: np.ndarray, y: np.ndarray
-) -> Tuple[float, float]:
+def _ols_log_params(x: np.ndarray, y: np.ndarray) -> Tuple[float, float]:
     """Compute OLS (y ~ const + x) on log-transformed data using direct numpy.
 
     Avoids statsmodels overhead: for two-variable regression,

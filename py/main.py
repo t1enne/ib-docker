@@ -2,9 +2,7 @@ import os
 from src.utils import get_ts
 from typing import Optional
 import click
-import yaml
 import asyncio
-import subprocess
 
 import src.mx as mx_mod
 import src.spread as spread_mod
@@ -13,6 +11,7 @@ import src.pnd as pnd_mod
 import src.syncm as sync_mod
 import src.hmm as hmm_mod
 import src.signals as signals_mod
+import src.screen as screen_mod
 
 from src.bt import StrategyType, backtest, load_strategy, StrategyConfig, backtest_async
 from src.bt.metrics import get_backtest_results_analysis
@@ -161,6 +160,51 @@ def sync(universe: str):
 def signal(strategy_file: str):
     config = load_strategy(strategy_file)
     asyncio.run(signals_mod.generate_signals(config))
+
+
+@main.command(
+    help="FINVIZ like screener — rank and filter stocks using screen modules."
+)
+@click.argument("screen_name", required=False)
+@click.argument("universe", default="universe.yml", required=False)
+@click.option(
+    "-p",
+    "--param",
+    "params",
+    multiple=True,
+    help="Screen parameter as key=value (can be repeated)",
+)
+def screen(
+    screen_name: Optional[str] = None,
+    universe: str = "universe.yml",
+    params: tuple[str, ...] = (),
+):
+    """Screen stocks using a screen module and universe file.
+
+    SCREEN_NAME is the name of a screen module in the screens/ directory
+    (e.g., breakout_screen).
+
+    UNIVERSE is a universe YAML file (default: universe.yml).
+
+    Examples:
+
+        python main.py screen breakout_screen universe.yml
+
+        python main.py screen breakout_screen universe.yml \\
+            --param fast=50 --param slow=200
+    """
+    from src.screen import cli_screen
+
+    try:
+        output = cli_screen(
+            screen_name=screen_name,
+            universe=universe,
+            params=params,
+        )
+    except ValueError as e:
+        raise click.UsageError(str(e))
+
+    click.echo(output)
 
 
 if __name__ == "__main__":

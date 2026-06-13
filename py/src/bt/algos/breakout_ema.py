@@ -2,7 +2,7 @@ from typing import Optional
 import src.bt.indicators as ta
 from src.bt.algos.utils import open, close
 from typing import List, Dict, TYPE_CHECKING
-from src.bt.state import BacktestState, TradeSignal, Tick, ActionType, Position
+from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig
 import pandas as pd
 
@@ -57,10 +57,10 @@ def volume_spike(volume: pd.Series, window: int = 20, threshold: float = 1.5) ->
     return volume.iloc[-1] > avg_vol * threshold
 
 
-def on_tick(
-    state: BacktestState, tick: Tick, strategy_params: dict
+def on_candle(
+    state: BacktestState, candle: Candle, strategy_params: dict
 ) -> List[TradeSignal]:
-    symbol = tick.symbol
+    symbol = candle.symbol
     position = state.portfolio.positions.get(symbol)
     candles = state.candles[symbol]
     closes = candles["close"]
@@ -82,18 +82,18 @@ def on_tick(
     ema_spread = abs(ema_fast - ema_slow) / closes.iloc[-1]
 
     if is_squeeze(closes, high, low, fast, slow):
-        return handle_squeeze(tick, position)
+        return handle_squeeze(candle, position)
 
     if was_squeezing(closes, fast, slow, ema_th):
         return handle_breakout(
-            state, tick, strategy_params, candles, ema_fast, ema_slow, ema_spread
+            state, candle, strategy_params, candles, ema_fast, ema_slow, ema_spread
         )
 
     regime = "BULL" if ema_fast > ema_slow else "BEAR"
-    return handle_trend(state, tick, strategy_params, candles, regime)
+    return handle_trend(state, candle, strategy_params, candles, regime)
 
 
-def handle_squeeze(tick: Tick, position: Optional[Position] = None):
+def handle_squeeze(tick: Candle, position: Optional[Position] = None):
     if not position:
         return []
 
@@ -107,7 +107,7 @@ def handle_squeeze(tick: Tick, position: Optional[Position] = None):
 
 def handle_breakout(
     state: BacktestState,
-    tick: Tick,
+    tick: Candle,
     strategy_params: dict,
     candles: pd.DataFrame,
     ema_fast: float,
@@ -148,7 +148,7 @@ def handle_breakout(
 
 def handle_trend(
     state: BacktestState,
-    tick: Tick,
+    tick: Candle,
     strategy_params: dict,
     candles: pd.DataFrame,
     regime: str,

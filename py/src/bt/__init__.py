@@ -8,7 +8,7 @@ import logging
 import click
 import yaml
 
-from src.bt.engine.backtest import Backtest, ticks_generator, run_backtest, run
+from src.bt.engine.backtest import Backtest, candle_generator, run_backtest, run
 from src.bt.engine.handlers import (
     ExecutionHandler,
     RiskHandler,

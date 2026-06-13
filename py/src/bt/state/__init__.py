@@ -1,7 +1,7 @@
 """State module for functional backtesting."""
 
 from src.bt.state.types import (
-    Tick,
+    Candle,
     Position,
     Trade,
     EquityPoint,

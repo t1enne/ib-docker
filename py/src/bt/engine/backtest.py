@@ -2,19 +2,19 @@
 
 Provides a fully functional API for running backtests:
 - Backtest: dataclass holding config only
-- ticks_generator: creates tick generator from DataFrame
+- candle_generator: creates candle generator from DataFrame
 - run_backtest: runs the backtest loop with injected handlers
 
 Usage:
-    from src.bt.engine.backtest import Backtest, ticks_generator, run_backtest
+    from src.bt.engine.backtest import Backtest, candle_generator, run_backtest
     from src.bt.engine.handlers import default_execution_handler, default_risk_handler
 
     bt = Backtest(config)
-    gen = ticks_generator(df, config.symbols)
+    gen = candle_generator(df, config.symbols)
     results, state = run_backtest(bt, gen, exec_handler, risk_handler)
 """
 
-from src.bt.engine.utils import ticks_generator, merge_bt_state
+from src.bt.engine.utils import candle_generator, merge_bt_state
 
 from dataclasses import dataclass, field, replace
 from typing import Generator, Tuple, Optional, Any, List, Callable, cast
@@ -26,7 +26,7 @@ from src.bt.metrics import calculate_portfolio_result
 from src.bt.state import (
     ActionType,
     BacktestState,
-    Tick,
+    Candle,
     ModelState,
     TradeSignal,
     FillEvent,
@@ -75,21 +75,21 @@ class Backtest:
 
 def run_backtest(
     bt: Backtest,
-    tick_gen: Generator[Tick, None, None],
+    candle_gen: Generator[Candle, None, None],
     exec_handler: ExecutionHandler,
     risk_handler: RiskHandler,
     initial_state: Optional[BacktestState] = None,
     model_updater_fn: Any = None,
     strategy_mod: Any = None,
 ) -> Tuple[BacktestResults, BacktestState]:
-    """Run backtest with the given tick generator and handlers.
+    """Run backtest with the given candle generator and handlers.
 
     This is a pure function - given the same inputs, it always returns
     the same results.
 
     Args:
         bt: Backtest config
-        tick_gen: Generator yielding ticks
+        candle_gen: Generator yielding Candles (OHLCV bars)
         exec_handler: Execution handler with execute_signal, execute_risk_event, apply_fill
         risk_handler: Risk handler with check_risk
         initial_state: Optional initial state (default: create from config)
@@ -119,16 +119,16 @@ def run_backtest(
     # Clear per-session accumulators
     _raw_candle_rows.clear()
 
-    for tick in tick_gen:
-        can_trade = bt.window.test_start <= tick.timestamp <= bt.window.test_end
-        state = _process_tick(
+    for candle in candle_gen:
+        can_trade = bt.window.test_start <= candle.timestamp <= bt.window.test_end
+        state = _process_candle(
             state=state,
-            tick=tick,
+            candle=candle,
             config=config,
             exec_handler=exec_handler,
             risk_handler=risk_handler,
             model_updater_fn=model_updater_fn,
-            strategy_fn=strategy_mod.on_tick if strategy_mod else None,
+            strategy_fn=strategy_mod.on_candle if strategy_mod else None,
             can_trade=can_trade,
             exec_params=bt.execution_params,
             risk_config=bt.risk_config,
@@ -167,9 +167,9 @@ def run_backtest(
     )
 
 
-def _process_tick(
+def _process_candle(
     state: BacktestState,
-    tick: Tick,
+    candle: Candle,
     config: StrategyConfig,
     exec_handler: ExecutionHandler,
     risk_handler: RiskHandler,
@@ -179,29 +179,29 @@ def _process_tick(
     exec_params: ExecutionParams,
     risk_config: RiskConfig,
 ) -> BacktestState:
-    """Process a single tick through the pipeline."""
+    """Process a single OHLCV bar through the pipeline."""
 
-    # Handle HTF ticks: append to htf_data
-    if tick.interval and tick.interval != config.bar:
-        state = _append_htf_tick(state, tick)
+    # Handle HTF bars: append to htf_data
+    if candle.interval and candle.interval != config.bar:
+        state = _append_htf_bar(state, candle)
         return state
 
     # Update models
     if model_updater_fn:
-        state = model_updater_fn(state, tick)
+        state = model_updater_fn(state, candle)
 
     # Append candle
-    state = _append_candle(state, tick)
+    state = _append_candle(state, candle)
 
     symbols = list(config.symbols)
 
     # Update aligned price buffers for pairs strategies.
     # Appends {sym: close} at each timestamp where all symbols have data.
-    state = _update_price_buffers(state, tick, symbols)
+    state = _update_price_buffers(state, candle, symbols)
 
-    # Execute pending signals from previous tick
+    # Execute pending signals from previous candle
     portfolio, pending_signals = _execute_signals(
-        state, tick, exec_handler, config, exec_params
+        state, candle, exec_handler, config, exec_params
     )
 
     state = merge_bt_state(
@@ -216,7 +216,7 @@ def _process_tick(
     # redundant computation (both symbols share the same aligned data).
     last_symbol = symbols[-1] if symbols else None
 
-    if can_trade and strategy_fn and tick.symbol == last_symbol:
+    if can_trade and strategy_fn and candle.symbol == last_symbol:
         strategy_params = dict(config.strategy_params or {})
         if config.rolling_window_size is not None:
             strategy_params.setdefault(
@@ -224,7 +224,7 @@ def _process_tick(
             )
         if config.symbols:
             strategy_params.setdefault("symbols", list(config.symbols))
-        new_signals = strategy_fn(state, tick, strategy_params)
+        new_signals = strategy_fn(state, candle, strategy_params)
     else:
         new_signals = []
 
@@ -241,7 +241,7 @@ def _process_tick(
 
     # Execute any signals created on this tick
     portfolio, pending_signals = _execute_signals(
-        state, tick, exec_handler, config, exec_params
+        state, candle, exec_handler, config, exec_params
     )
 
     state = merge_bt_state(
@@ -254,19 +254,19 @@ def _process_tick(
 
     # Check and execute risk
     state = _check_and_execute_risk(
-        state, tick, exec_handler, risk_handler, exec_params, risk_config
+        state, candle, exec_handler, risk_handler, exec_params, risk_config
     )
 
     # Update prices
     from src.bt.portfolio.pure import update_prices
 
-    portfolio = update_prices(state.portfolio, tick)
+    portfolio = update_prices(state.portfolio, candle)
 
     return merge_bt_state(
         state,
         dict(
             portfolio=portfolio,
-            timestamp=tick.timestamp,
+            timestamp=candle.timestamp,
         ),
     )
 
@@ -278,16 +278,16 @@ _raw_candle_rows: dict[str, list[dict[str, object]]] = {}
 
 
 def _update_price_buffers(
-    state: BacktestState, tick: Tick, symbols: list[str]
+    state: BacktestState, candle: Candle, symbols: list[str]
 ) -> BacktestState:
     """Update model_state.price_buffers with aligned close prices.
 
     Only appends when ALL strategy symbols have a candle at this timestamp.
-    This provides a pre-aligned cache for the strategy's on_tick to use
+    This provides a pre-aligned cache for the strategy's on_candle to use
     directly as numpy arrays, avoiding DataFrame align/concat/dropna.
     """
-    # Only update on the last symbol's tick (all prior symbols already appended)
-    if tick.symbol != (symbols[-1] if symbols else None):
+    # Only update on the last symbol's candle (all prior symbols already appended)
+    if candle.symbol != (symbols[-1] if symbols else None):
         return state
 
     # Verify all symbols have this timestamp via raw row cache
@@ -300,7 +300,7 @@ def _update_price_buffers(
         assert isinstance(last_ts, pd.Timestamp), (
             f"Expected Timestamp, got {type(last_ts)}"
         )
-        if last_ts != tick.timestamp:
+        if last_ts != candle.timestamp:
             return state
 
     # All symbols aligned at this timestamp — append close pair
@@ -339,23 +339,23 @@ def _flush_candle_batches(state: BacktestState) -> BacktestState:
     return merge_bt_state(state, dict(candles=candles))
 
 
-def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
+def _append_candle(state: BacktestState, candle: Candle) -> BacktestState:
     """Append a candle to the per-symbol row accumulator.
 
     Raw rows are always kept for fast strategy access. DataFrames are
     rebuilt every _CANDLE_BATCH_SIZE rows to avoid per-tick pd.concat.
     """
-    sym = tick.symbol
+    sym = candle.symbol
     if sym not in _raw_candle_rows:
         _raw_candle_rows[sym] = []
     _raw_candle_rows[sym].append(
         {
-            "timestamp": tick.timestamp,
-            "open": tick.open,
-            "high": tick.high,
-            "low": tick.low,
-            "close": tick.close,
-            "volume": tick.volume,
+            "timestamp": candle.timestamp,
+            "open": candle.open,
+            "high": candle.high,
+            "low": candle.low,
+            "close": candle.close,
+            "volume": candle.volume,
         }
     )
 
@@ -372,22 +372,22 @@ def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
     return merge_bt_state(state, dict(candles=candles))
 
 
-def _append_htf_tick(state: BacktestState, tick: Tick) -> BacktestState:
-    """Append an HTF tick to the htf_data DataFrame."""
-    freq = tick.interval
+def _append_htf_bar(state: BacktestState, candle: Candle) -> BacktestState:
+    """Append an HTF bar to the htf_data DataFrame."""
+    freq = candle.interval
     if freq is None:
         return state
 
     new_row = pd.DataFrame(
         {
-            "open": [tick.open],
-            "high": [tick.high],
-            "low": [tick.low],
-            "close": [tick.close],
-            "volume": [tick.volume],
+            "open": [candle.open],
+            "high": [candle.high],
+            "low": [candle.low],
+            "close": [candle.close],
+            "volume": [candle.volume],
         },
         index=pd.MultiIndex.from_tuples(
-            [(tick.symbol, tick.timestamp)], names=["symbol", "timestamp"]
+            [(candle.symbol, candle.timestamp)], names=["symbol", "timestamp"]
         ),
     )
 
@@ -405,7 +405,7 @@ def _append_htf_tick(state: BacktestState, tick: Tick) -> BacktestState:
 
 def _execute_signals(
     state: BacktestState,
-    tick: Tick,
+    candle: Candle,
     exec_handler: ExecutionHandler,
     config: StrategyConfig,
     exec_params: ExecutionParams,
@@ -417,11 +417,11 @@ def _execute_signals(
     portfolio = state.portfolio
     remaining_signals: List[TradeSignal] = []
     for signal in state.pending_signals:
-        if signal.symbol != tick.symbol:
+        if signal.symbol != candle.symbol:
             remaining_signals.append(signal)
             continue
 
-        fill = exec_handler.execute_signal(signal, tick, exec_params)
+        fill = exec_handler.execute_signal(signal, candle, exec_params)
         portfolio = exec_handler.apply_fill(
             portfolio,
             fill,
@@ -435,21 +435,21 @@ def _execute_signals(
 
 def _check_and_execute_risk(
     state: BacktestState,
-    tick: Tick,
+    candle: Candle,
     exec_handler: ExecutionHandler,
     risk_handler: RiskHandler,
     exec_params: ExecutionParams,
     risk_config: RiskConfig,
 ) -> BacktestState:
     """Check risk and execute closes."""
-    risk_events = risk_handler.check_risk(state.portfolio, tick, risk_config)
+    risk_events = risk_handler.check_risk(state.portfolio, candle, risk_config)
 
     if not risk_events:
         return state
 
     portfolio = state.portfolio
     for event in risk_events:
-        fill = exec_handler.execute_risk_event(event, tick, exec_params)
+        fill = exec_handler.execute_risk_event(event, candle, exec_params)
         portfolio = exec_handler.apply_fill(portfolio, fill)
 
     return merge_bt_state(state, dict(portfolio=portfolio, risk_events=risk_events))
@@ -499,7 +499,7 @@ def run(bt: Backtest, data: pd.DataFrame, strat_mod) -> BacktestResults:
     """
     from src.bt.engine.handlers import default_execution_handler, default_risk_handler
 
-    gen = ticks_generator(data, bt.config)
+    gen = candle_generator(data, bt.config)
     exec_handler = default_execution_handler()
     risk_handler = default_risk_handler()
 

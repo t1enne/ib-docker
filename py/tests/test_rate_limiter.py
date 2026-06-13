@@ -1,14 +1,21 @@
 import pytest
 import asyncio
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from unittest.mock import AsyncMock
 
 from src.syncm.ibkr_layer.rate_limiter import (
     RateLimitConfig,
     with_retry,
+    _set_monotonic_sleep,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_sleep():
+    """Override the monotonic sleep with an instant mock for all retry tests."""
+    mock = AsyncMock()
+    _set_monotonic_sleep(mock)
+    yield mock
+    _set_monotonic_sleep(asyncio.sleep)
 
 
 class TestRateLimitConfig:
@@ -37,7 +44,7 @@ class TestRateLimitConfig:
 
 class TestWithRetry:
     @pytest.mark.asyncio
-    async def test_success_first_try(self):
+    async def test_success_first_try(self, _mock_sleep):
         call_count = 0
 
         @with_retry(max_retries=3, base_delay_ms=10)
@@ -49,9 +56,10 @@ class TestWithRetry:
         result = await succeed()
         assert result == "ok"
         assert call_count == 1
+        assert _mock_sleep.await_count == 0
 
     @pytest.mark.asyncio
-    async def test_retry_then_success(self):
+    async def test_retry_then_success(self, _mock_sleep):
         call_count = 0
 
         @with_retry(max_retries=3, base_delay_ms=10)
@@ -65,9 +73,11 @@ class TestWithRetry:
         result = await flaky()
         assert result == "ok"
         assert call_count == 3
+        # 2 failures before success = 2 retry sleeps
+        assert _mock_sleep.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_max_retries_exceeded(self):
+    async def test_max_retries_exceeded(self, _mock_sleep):
         call_count = 0
 
         @with_retry(max_retries=2, base_delay_ms=10)
@@ -79,9 +89,11 @@ class TestWithRetry:
         with pytest.raises(ValueError):
             await always_fails()
         assert call_count == 3
+        # 3 calls (1 original + 2 retries) = 2 sleeps
+        assert _mock_sleep.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_custom_exceptions(self):
+    async def test_custom_exceptions(self, _mock_sleep):
         call_count = 0
 
         @with_retry(max_retries=1, base_delay_ms=10, retryable_exceptions=(ValueError,))
@@ -93,3 +105,5 @@ class TestWithRetry:
         with pytest.raises(TypeError):
             await fails_with_type_error()
         assert call_count == 1
+        # TypeError is not retryable → no retry, no sleep
+        assert _mock_sleep.await_count == 0

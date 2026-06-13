@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from src.live.baragg.types import AggregatedBar, AggregatorState
 from src.live.baragg.pure import baragg_tick, baragg_current, create_initial_state
-from src.bt.state.types import Tick
+from src.bt.state.types import Candle
 
 
 class TimeBarAggregator:
@@ -36,7 +36,7 @@ class TimeBarAggregator:
         self.symbol = symbol
         self._state: AggregatorState = create_initial_state(symbol, interval)
 
-    def update(self, tick: Tick) -> tuple[AggregatedBar, ...]:
+    def update(self, tick: Candle) -> tuple[AggregatedBar, ...]:
         """Process one tick. Returns completed bars emitted by this update.
 
         Returns an empty tuple if no bar was completed.

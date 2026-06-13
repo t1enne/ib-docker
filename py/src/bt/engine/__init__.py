@@ -1,7 +1,7 @@
 # Engine module for backtesting
 from src.bt.engine.backtest import (
     Backtest,
-    ticks_generator,
+    candle_generator,
     run_backtest,
     run,
 )

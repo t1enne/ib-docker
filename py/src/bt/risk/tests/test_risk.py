@@ -5,7 +5,7 @@ from src.bt.risk import (
     update_trailing_stop,
     create_risk_config,
 )
-from src.bt.state import Position, Tick, ActionType, StopLossEvent, TakeProfitEvent
+from src.bt.state import Position, Candle, ActionType, StopLossEvent, TakeProfitEvent
 from src.utils import get_ts
 
 
@@ -40,7 +40,7 @@ def portfolio_state():
 
 def test_no_trades_returns_empty(risk_config, portfolio_state):
     """No positions should return no risk events."""
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=100.0,
@@ -66,7 +66,7 @@ def test_stop_loss_triggered_long(risk_config):
         type=ActionType.long,
     )
 
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=95.0,
@@ -97,7 +97,7 @@ def test_take_profit_triggered_long(risk_config):
         type=ActionType.long,
     )
 
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=115.0,
@@ -128,7 +128,7 @@ def test_stop_loss_triggered_short(risk_config):
         type=ActionType.short,
     )
 
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=105.0,
@@ -159,7 +159,7 @@ def test_take_profit_triggered_short(risk_config):
         type=ActionType.short,
     )
 
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=85.0,
@@ -190,7 +190,7 @@ def test_no_trailing_sl_update_when_sl_triggered(risk_config):
         type=ActionType.long,
     )
 
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=95.0,
@@ -227,7 +227,7 @@ def test_trailing_sl_updates_for_long(risk_config):
     )
 
     # Price goes up
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=105.0,
@@ -266,7 +266,7 @@ def test_trailing_sl_updates_for_short(risk_config):
     )
 
     # Price goes down
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=95.0,
@@ -316,7 +316,7 @@ def test_different_symbol_no_trigger(risk_config, portfolio_state):
     )
 
     # Tick for different symbol
-    tick = Tick(
+    tick = Candle(
         timestamp=get_ts("2025-01-02"),
         symbol="AAPL",
         open=80.0,  # Would trigger if it was GOOGL

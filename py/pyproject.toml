@@ -29,7 +29,8 @@ dependencies = [
 [tool.uv.sources]
 ib-rest-api-client = { path = "../ib-rest-api-client", package = true }
 
-[tool.pyright]
+# the project ACTUALLY uses `ty` for type checking.
+[tool.pyright] 
 venvPath = "."
 venv = ".venv"
 
@@ -40,4 +41,5 @@ addopts = ["--import-mode=importlib"]
 [dependency-groups]
 dev = [
 	"pytest-mock>=3.15.1",
+	"pytest-watch>=4.2.0",
 ]

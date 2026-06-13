@@ -1,24 +1,13 @@
-import os
 import pytest
 from peewee import SqliteDatabase
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timedelta
 
-# Test database path
-TEST_DB_PATH = os.path.join(os.getcwd(), "..", "data", "test_db.sqlite")
-
 
 @pytest.fixture(scope="session")
 def test_db():
-    """Create test database with required tables."""
-    # Ensure data directory exists
-    os.makedirs(os.path.dirname(TEST_DB_PATH), exist_ok=True)
-
-    # Remove existing test db to start fresh
-    if os.path.exists(TEST_DB_PATH):
-        os.remove(TEST_DB_PATH)
-
-    db = SqliteDatabase(TEST_DB_PATH, pragmas={"journal_mode": "wal"})
+    """Create test database with required tables using in-memory SQLite."""
+    db = SqliteDatabase(":memory:", pragmas={"journal_mode": "wal"})
 
     # Create tables
     from src.db.models import SymbolSchema, CandleSchema
@@ -36,8 +25,6 @@ def test_db():
 
     # Cleanup
     db.close()
-    if os.path.exists(TEST_DB_PATH):
-        os.remove(TEST_DB_PATH)
 
 
 @pytest.fixture(autouse=True)

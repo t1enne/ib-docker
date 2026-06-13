@@ -40,8 +40,8 @@ class TradeExitReason(Enum):
 
 
 @dataclass(frozen=True)
-class Tick:
-    """A single OHLCV tick."""
+class Candle:
+    """A single OHLCV bar."""
 
     timestamp: pd.Timestamp
     symbol: str

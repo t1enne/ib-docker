@@ -9,6 +9,15 @@ logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 T = TypeVar("T")
 
+# Monotonic clock — overridable in tests via patch()
+_monotonic_sleep = asyncio.sleep
+
+
+def _set_monotonic_sleep(sleep_fn: Callable[[float], Awaitable[None]]) -> None:
+    """Override the sleep implementation (for tests using a mock clock)."""
+    global _monotonic_sleep  # noqa: PLW0603
+    _monotonic_sleep = sleep_fn
+
 
 @dataclass(frozen=True)
 class RateLimitConfig:
@@ -60,7 +69,7 @@ def with_retry(
                             / 1000.0
                         )
                         logger.info("[%s] Retrying in %ss...", name, delay)
-                        await asyncio.sleep(delay)
+                        await _monotonic_sleep(delay)
                     else:
                         logger.error("[%s] All retries exhausted, raising: %s", name, e)
                         raise last_exception  # type: ignore[possibly-undefined]

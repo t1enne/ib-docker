@@ -9,7 +9,7 @@ from typing import Tuple, Dict, Any, Optional
 
 from src.bt.state import (
     TradeSignal,
-    Tick,
+    Candle,
     FillEvent,
     ExecutionParams,
     PortfolioState,

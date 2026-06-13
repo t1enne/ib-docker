@@ -14,7 +14,7 @@ from dataclasses import replace
 import pandas as pd
 
 from src.live.baragg.types import AggregatedBar, AggregatorState, PartialBar
-from src.bt.state.types import Tick
+from src.bt.state.types import Candle
 
 
 def create_initial_state(symbol: str, interval: str) -> AggregatorState:
@@ -27,7 +27,7 @@ def create_initial_state(symbol: str, interval: str) -> AggregatorState:
     return AggregatorState(symbol=symbol, interval=interval)
 
 
-def baragg_tick(state: AggregatorState, tick: Tick) -> AggregatorState:
+def baragg_tick(state: AggregatorState, tick: Candle) -> AggregatorState:
     """Process one tick. Returns new state with any completed bars.
 
     Bars are emitted when a tick crosses into a new interval bucket.
@@ -94,7 +94,7 @@ def baragg_current(state: AggregatorState) -> AggregatedBar | None:
 
 def _start_bar(
     state: AggregatorState,
-    tick: Tick,
+    tick: Candle,
     bucket: pd.Timestamp,
 ) -> AggregatorState:
     """Start a new partial bar from a tick."""
@@ -109,7 +109,7 @@ def _start_bar(
     return replace(state, partial=partial, bucket=bucket, completed=())
 
 
-def _update_bar(state: AggregatorState, tick: Tick) -> AggregatorState:
+def _update_bar(state: AggregatorState, tick: Candle) -> AggregatorState:
     """Update the in-progress bar with a new tick in the same bucket."""
     assert state.partial is not None
     p = state.partial

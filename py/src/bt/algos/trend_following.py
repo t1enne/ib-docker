@@ -1,7 +1,7 @@
 import src.bt.indicators as ta
 from src.bt.algos.utils import open, close, htf_candles
 from typing import List, Dict, TYPE_CHECKING, Optional, cast
-from src.bt.state import BacktestState, TradeSignal, Tick, ActionType, Position
+from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig
 import pandas as pd
 
@@ -44,10 +44,10 @@ def risk_hedge_multiplier(adx_value: float, base: float = 1.0) -> float:
     return base
 
 
-def on_tick(
-    state: BacktestState, tick: Tick, strategy_params: dict
+def on_candle(
+    state: BacktestState, candle: Candle, strategy_params: dict
 ) -> List[TradeSignal]:
-    symbol = tick.symbol
+    symbol = candle.symbol
     position = state.portfolio.positions.get(symbol)
     candles = state.candles[symbol]
 
@@ -80,7 +80,7 @@ def on_tick(
     if pd.isna(lsma.iloc[-1]) or pd.isna(ema.iloc[-1]):
         return []
 
-    htf = htf_candles(state, "4h", tick)
+    htf = htf_candles(state, "4h", candle)
 
     if htf.empty or len(htf) < window + 1:
         return []
@@ -126,7 +126,7 @@ def on_tick(
             if long_ok and mfi.iloc[-1] <= mfi_overbought:
                 hedge = risk_hedge_multiplier(htf_adx)
                 hedge = max(min(hedge, 2.0), 0.25)
-                return open(tick, ActionType.long, "[trend] enter long", hedge)
+                return open(candle, ActionType.long, "[trend] enter long", hedge)
 
         if htf_bear:
             short_ok = (
@@ -141,29 +141,29 @@ def on_tick(
             if short_ok and mfi.iloc[-1] >= mfi_oversold:
                 hedge = risk_hedge_multiplier(htf_adx)
                 hedge = max(min(hedge, 2.0), 0.25)
-                return open(tick, ActionType.short, "[trend] enter short", hedge)
+                return open(candle, ActionType.short, "[trend] enter short", hedge)
 
         return []
 
     is_long = position.type == ActionType.long
     if is_long:
         if ema.iloc[-1] > lsma.iloc[-1]:
-            return close(tick, position, "[trend] ema above lsma")
+            return close(candle, position, "[trend] ema above lsma")
         if mfi.iloc[-1] > mfi_overbought and adx_falling(adx):
-            return close(tick, position, "[trend] mfi overbought + adx falling")
+            return close(candle, position, "[trend] mfi overbought + adx falling")
         if minus_di.iloc[-1] > plus_di.iloc[-1]:
-            return close(tick, position, "[trend] di flip")
+            return close(candle, position, "[trend] di flip")
         if current_close < lsma_low.iloc[-1]:
-            return close(tick, position, "[trend] close below lsma low")
+            return close(candle, position, "[trend] close below lsma low")
     else:
         if ema.iloc[-1] < lsma.iloc[-1]:
-            return close(tick, position, "[trend] ema below lsma")
+            return close(candle, position, "[trend] ema below lsma")
         if mfi.iloc[-1] < mfi_oversold and adx_falling(adx):
-            return close(tick, position, "[trend] mfi oversold + adx falling")
+            return close(candle, position, "[trend] mfi oversold + adx falling")
         if plus_di.iloc[-1] > minus_di.iloc[-1]:
-            return close(tick, position, "[trend] di flip")
+            return close(candle, position, "[trend] di flip")
         if current_close > lsma_high.iloc[-1]:
-            return close(tick, position, "[trend] close above lsma high")
+            return close(candle, position, "[trend] close above lsma high")
 
     return []
 

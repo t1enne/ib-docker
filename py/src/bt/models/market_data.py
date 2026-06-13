@@ -6,7 +6,7 @@ Provides accumulated OHLCV history with sliceable access for indicator calculati
 from typing import List, Dict
 import pandas as pd
 import numpy as np
-from src.bt.types import Tick
+from src.bt.types import Candle
 
 
 class MarketDataView:
@@ -26,10 +26,10 @@ class MarketDataView:
 
     def __init__(self, symbols: List[str]):
         self._symbols = symbols
-        self._bars: List[Dict[str, Tick]] = []  # [{sym1: Tick, sym2: Tick}, ...]
+        self._bars: List[Dict[str, Candle]] = []  # [{sym1: Tick, sym2: Tick}, ...]
         self._timestamps: List[pd.Timestamp] = []
 
-    def append(self, tick: Tick) -> None:
+    def append(self, tick: Candle) -> None:
         """Add a new tick to the view.
 
         Args:
@@ -155,7 +155,7 @@ class MarketDataView:
         """Get list of all timestamps in the view."""
         return list(self._timestamps)
 
-    def get_latest(self) -> Dict[str, Tick]:
+    def get_latest(self) -> Dict[str, Candle]:
         """Get the most recent tick map."""
         if not self._bars:
             return {}

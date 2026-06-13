@@ -11,7 +11,7 @@ from typing import Protocol, TYPE_CHECKING
 import pandas as pd
 
 if TYPE_CHECKING:
-    from src.bt.state.types import Tick
+    from src.bt.state.types import Candle
 
 
 @dataclass(frozen=True)
@@ -48,15 +48,15 @@ class AggregatedBar:
     interval: str  # e.g. "5min", "1h", "1d"
     tick_count: int = 0
 
-    def to_tick(self) -> Tick:
+    def to_tick(self) -> Candle:
         """Convert to a Tick for compatibility with the existing StrategyFn pipeline.
 
         The Tick.interval field carries the aggregation interval so strategies
         can distinguish bar resolutions.
         """
-        from src.bt.state.types import Tick
+        from src.bt.state.types import Candle
 
-        return Tick(
+        return Candle(
             timestamp=self.timestamp,
             symbol=self.symbol,
             open=self.open,
@@ -96,7 +96,7 @@ class BarAggregator(Protocol):
     (via AggregatedBar.to_tick()), making the aggregation transparent.
     """
 
-    def update(self, tick: Tick) -> tuple[AggregatedBar, ...]:
+    def update(self, tick: Candle) -> tuple[AggregatedBar, ...]:
         """Process one tick. Returns completed bars emitted by this update.
 
         Returns an empty tuple if no bar was completed. Bars are not

@@ -8,14 +8,14 @@ from src.bt.state import (
     BacktestState,
     TradeSignal,
     ActionType,
-    Tick,
+    Candle,
     Position,
 )
 from src.market_data.resample import resample_multiindex
 
 
 def close(
-    tick: Tick,
+    tick: Candle,
     position: Position,
     reason: Any,
     z: Optional[float] = None,
@@ -34,7 +34,7 @@ def close(
 
 
 def open(
-    tick: Tick,
+    tick: Candle,
     dir: ActionType,
     reason: Optional[str] = "",
     hedge: Optional[float] = None,
@@ -54,7 +54,7 @@ def open(
 def htf_candles(
     state: BacktestState,
     freq: str,
-    tick: Tick,
+    tick: Candle,
 ) -> pd.DataFrame:
     """Get completed higher-timeframe candles for the tick's symbol.
 

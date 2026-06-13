@@ -19,7 +19,7 @@ from src.bt.state import (
     TradeStatus,
     create_initial_portfolio,
     create_execution_params,
-    Tick,
+    Candle,
 )
 from src.bt.portfolio.pure import apply_fill, update_prices
 from src.bt.execution.pure import execute_signal
@@ -44,7 +44,7 @@ class TestBothLegsExecution:
             fixed_commission=0.0,
         )
 
-        tick_spy = Tick(
+        tick_spy = Candle(
             timestamp=get_ts("2025-01-01"),
             symbol="SPY",
             open=500.0,
@@ -54,7 +54,7 @@ class TestBothLegsExecution:
             volume=1000000,
         )
 
-        tick_qqq = Tick(
+        tick_qqq = Candle(
             timestamp=get_ts("2025-01-01"),
             symbol="QQQ",
             open=400.0,
@@ -115,7 +115,7 @@ class TestPositionSizing:
             start_timestamp=get_ts("2025-01-01"),
         )
 
-        tick = Tick(
+        tick = Candle(
             timestamp=get_ts("2025-01-01"),
             symbol="SPY",
             open=500.0,
@@ -169,7 +169,7 @@ class TestStopLossTakeProfit:
             start_timestamp=get_ts("2025-01-01"),
         )
 
-        tick = Tick(
+        tick = Candle(
             timestamp=get_ts("2025-01-01"),
             symbol="SPY",
             open=500.0,
@@ -236,7 +236,7 @@ class TestEquityCurveUpdates:
 
         # Multiple ticks without any positions
         for i in range(5):
-            tick = Tick(
+            tick = Candle(
                 timestamp=get_ts(f"2025-01-{i + 2:02d}"),
                 symbol="SPY",
                 open=500.0 + i,

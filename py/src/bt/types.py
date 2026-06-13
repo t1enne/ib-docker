@@ -15,7 +15,7 @@ from typing import (
 from enum import Enum
 
 from src.bt.state import (
-    Tick,
+    Candle,
     Trade,
     TradeSignal,
     FillEvent,
@@ -100,8 +100,8 @@ class StrategyProtocol(Protocol):
     etc. from within your strategy.
     """
 
-    def on_tick(self, tick: Tick, open_trade: Optional[Trade]) -> List[TradeSignal]:
-        """Process a tick and return trading signals.
+    def on_candle(self, candle: Candle, open_trade: Optional[Trade]) -> List[TradeSignal]:
+        """Process a candle (OHLCV bar) and return trading signals.
 
         Access computed features via self.model:
             - self.model.z_score          # Current z-score
@@ -124,7 +124,7 @@ class StrategyFn(Protocol):
     def __call__(
         self,
         state: BacktestState,
-        tick: Tick,
+        tick: Candle,
         params: Dict[str, Any],
     ) -> List[TradeSignal]: ...
 
@@ -135,7 +135,7 @@ class ModelUpdaterFn(Protocol):
     def __call__(
         self,
         state: BacktestState,
-        tick: Tick,
+        tick: Candle,
     ) -> BacktestState: ...
 
 
@@ -145,7 +145,7 @@ class ExecutionFn(Protocol):
     def __call__(
         self,
         signal: TradeSignal,
-        tick: Tick,
+        tick: Candle,
         exec_params: ExecutionParams,
     ) -> FillEvent: ...
 
@@ -167,7 +167,7 @@ class RiskCheckFn(Protocol):
     def __call__(
         self,
         portfolio: PortfolioState,
-        tick: Tick,
+        tick: Candle,
         risk_config: RiskConfig,
     ) -> Tuple[StateRiskEvent, ...]: ...
 

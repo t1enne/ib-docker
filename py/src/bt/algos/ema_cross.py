@@ -2,7 +2,7 @@ import src.bt.indicators as ta
 from src.bt.portfolio import TradeExitReason
 from src.bt.algos.utils import open, close
 from typing import List, Dict, Optional
-from src.bt.state import BacktestState, TradeSignal, Tick, ActionType, Position
+from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig, StrategyConfig
 import pandas as pd
 
@@ -38,7 +38,7 @@ def is_ranging(
     return False
 
 
-def handle_ranging(tick: Tick, position: Optional[Position] = None):
+def handle_ranging(tick: Candle, position: Optional[Position] = None):
     if not position:
         return []
 
@@ -60,10 +60,10 @@ def volume_confirmed(
     return volume.iloc[-1] > avg_vol * threshold
 
 
-def on_tick(
-    state: BacktestState, tick: Tick, strategy_params: dict
+def on_candle(
+    state: BacktestState, candle: Candle, strategy_params: dict
 ) -> List[TradeSignal]:
-    symbol = tick.symbol
+    symbol = candle.symbol
     position = state.portfolio.positions.get(symbol)
     candles = state.candles[symbol]
     closes = candles["close"]
@@ -85,29 +85,29 @@ def on_tick(
         regime = "RANGE"
 
     if regime == "RANGE":
-        return handle_ranging(tick, position)
+        return handle_ranging(candle, position)
 
     if regime == "BULL":
-        return handle_bull(state, tick, strategy_params, candles)
+        return handle_bull(state, candle, strategy_params, candles)
 
-    return handle_bear(state, tick, strategy_params, candles)
+    return handle_bear(state, candle, strategy_params, candles)
 
 
 def handle_bear(
-    state: BacktestState, tick: Tick, strategy_params: dict, candles: pd.DataFrame
+    state: BacktestState, tick: Candle, strategy_params: dict, candles: pd.DataFrame
 ):
     return handle_entry_exit(state, tick, strategy_params, candles, "BEAR")
 
 
 def handle_bull(
-    state: BacktestState, tick: Tick, strategy_params: dict, candles: pd.DataFrame
+    state: BacktestState, tick: Candle, strategy_params: dict, candles: pd.DataFrame
 ):
     return handle_entry_exit(state, tick, strategy_params, candles, "BULL")
 
 
 def handle_entry_exit(
     state: BacktestState,
-    tick: Tick,
+    tick: Candle,
     strategy_params: dict,
     candles: pd.DataFrame,
     regime: str,

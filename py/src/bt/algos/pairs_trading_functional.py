@@ -12,7 +12,7 @@ from src.bt.state import (
     TradeSignal,
     ActionType,
     TradeExitReason,
-    Tick,
+    Candle,
     Position,
 )
 from src.bt.types import PlotConfig
@@ -50,18 +50,18 @@ def _compute_zscore(
     return (round(float(z), 3), alpha, beta)
 
 
-def on_tick(
-    state: BacktestState, tick: Tick, strategy_params: dict
+def on_candle(
+    state: BacktestState, candle: Candle, strategy_params: dict
 ) -> List[TradeSignal]:
     """Generate trading signals based on z-score.
 
     Uses model_state.price_buffers as an aligned-closes cache to avoid
-    DataFrame align/concat/dropna on every tick.
-    Each tick for the last symbol appends {sym: close} pairs to the buffer.
+    DataFrame align/concat/dropna on every candle.
+    Each candle for the last symbol appends {sym: close} pairs to the buffer.
 
     Args:
         state: Current backtest state
-        tick: Current tick event
+        candle: Current candle (OHLCV bar)
         strategy_params: entry_z, exit_z, rolling_window_size, symbols
 
     Returns:
@@ -114,7 +114,7 @@ def on_tick(
     row1 = rows1[-1]
     row2 = rows2[-1]
 
-    tick1 = Tick(
+    tick1 = Candle(
         timestamp=cast(pd.Timestamp, row1["timestamp"]),
         symbol=sym1,
         open=cast(float, row1["open"]),
@@ -123,7 +123,7 @@ def on_tick(
         close=cast(float, row1["close"]),
         volume=cast(float, row1["volume"]),
     )
-    tick2 = Tick(
+    tick2 = Candle(
         timestamp=cast(pd.Timestamp, row2["timestamp"]),
         symbol=sym2,
         open=cast(float, row2["open"]),

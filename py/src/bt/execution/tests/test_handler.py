@@ -5,7 +5,7 @@ from src.bt.execution import (
     calculate_adverse_selection,
     create_execution_params,
 )
-from src.bt.state import TradeSignal, Tick, ActionType
+from src.bt.state import TradeSignal, Candle, ActionType
 from src.utils import get_ts
 
 
@@ -39,8 +39,8 @@ def short_signal():
 
 
 @pytest.fixture
-def tick_bullish():
-    return Tick(
+def candle_bullish():
+    return Candle(
         timestamp=get_ts("2025-01-01"),
         symbol="AAPL",
         open=99.0,
@@ -52,8 +52,8 @@ def tick_bullish():
 
 
 @pytest.fixture
-def tick_bearish():
-    return Tick(
+def candle_bearish():
+    return Candle(
         timestamp=get_ts("2025-01-01"),
         symbol="AAPL",
         open=101.0,
@@ -69,9 +69,9 @@ def tick_bearish():
 # ---------------------------------------------------------------------------
 
 
-def test_long_entry_pays_spread(execution_params, long_signal, tick_bullish):
+def test_long_entry_pays_spread(execution_params, long_signal, candle_bullish):
     """Long entry should pay the spread (buy at higher price)."""
-    fill = execute_signal(long_signal, tick_bullish, execution_params)
+    fill = execute_signal(long_signal, candle_bullish, execution_params)
 
     # Spread = 100 * 10/10000 = 0.10
     # Expected executed price = 100 + 0.10 + slippage
@@ -79,18 +79,18 @@ def test_long_entry_pays_spread(execution_params, long_signal, tick_bullish):
     assert fill.commission == 0.5
 
 
-def test_short_entry_receives_spread(execution_params, short_signal, tick_bearish):
+def test_short_entry_receives_spread(execution_params, short_signal, candle_bearish):
     """Short entry should receive the spread (sell at lower price)."""
-    fill = execute_signal(short_signal, tick_bearish, execution_params)
+    fill = execute_signal(short_signal, candle_bearish, execution_params)
 
     # Spread = 100 * 10/10000 = 0.10
     # Expected executed price = 100 - 0.10 - slippage
     assert fill.executed_price < short_signal.price
 
 
-def test_adverse_selection_long(execution_params, long_signal, tick_bearish):
+def test_adverse_selection_long(execution_params, long_signal, candle_bearish):
     """Long entry in bearish conditions should have worse slippage."""
-    fill = execute_signal(long_signal, tick_bearish, execution_params)
+    fill = execute_signal(long_signal, candle_bearish, execution_params)
 
     # Bearish tick (close < open) should trigger adverse selection
     # Slippage should be higher
@@ -101,9 +101,9 @@ def test_adverse_selection_long(execution_params, long_signal, tick_bearish):
     assert fill.executed_price > expected_without_adverse
 
 
-def test_adverse_selection_short(execution_params, short_signal, tick_bullish):
+def test_adverse_selection_short(execution_params, short_signal, candle_bullish):
     """Short entry in bullish conditions should have worse slippage."""
-    fill = execute_signal(short_signal, tick_bullish, execution_params)
+    fill = execute_signal(short_signal, candle_bullish, execution_params)
 
     # Bullish tick (close > open) should trigger adverse selection
     # With adverse selection, slippage should be higher (1.5x)
@@ -112,9 +112,9 @@ def test_adverse_selection_short(execution_params, short_signal, tick_bullish):
     assert fill.commission == execution_params.fixed_commission
 
 
-def test_commission_applied(execution_params, long_signal, tick_bullish):
+def test_commission_applied(execution_params, long_signal, candle_bullish):
     """Commission should be applied to fills."""
-    fill = execute_signal(long_signal, tick_bullish, execution_params)
+    fill = execute_signal(long_signal, candle_bullish, execution_params)
 
     assert fill.commission == execution_params.fixed_commission
     assert fill.commission > 0

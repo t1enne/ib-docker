@@ -6,7 +6,7 @@ and can be used from strategies with data from self.model.market_data.
 Usage from strategy:
     from src.bt.indicators import ema, rsi, atr
 
-    def on_tick(self, tick, open_trade):
+    def on_candle(self, candle, open_trade):
         # Get last 14 bars of close prices for symbol
         closes = self.model.market_data[-14:].close["AAPL"]
 

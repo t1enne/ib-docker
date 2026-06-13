@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
-from src.bt.engine.backtest import Backtest, run_backtest, ticks_generator
+from src.bt.engine.backtest import Backtest, run_backtest, candle_generator
 from src.bt.engine.handlers import (
     ExecutionHandler,
     RiskHandler,
@@ -17,7 +17,7 @@ from src.bt.types import (
 )
 from src.bt.state import (
     ActionType,
-    Tick,
+    Candle,
     TradeSignal,
     PortfolioState,
     create_initial_portfolio,
@@ -30,7 +30,7 @@ from src.utils import get_ts, parse_timestamp
 def get_fill(s: TradeSignal, portfolio: PortfolioState):
     """Create a fill event from a signal."""
     params = create_execution_params()
-    tick = Tick(
+    candle = Candle(
         timestamp=s.timestamp,
         symbol=s.symbol,
         open=s.price,
@@ -39,7 +39,7 @@ def get_fill(s: TradeSignal, portfolio: PortfolioState):
         close=s.price,
         volume=0.0,
     )
-    return execute_signal(s, tick, params)
+    return execute_signal(s, candle, params)
 
 
 @pytest.fixture
@@ -75,23 +75,23 @@ def strategy_config():
     )
 
 
-class TestTicksGenerator:
-    """Test the ticks_generator function."""
+class TestCandleGenerator:
+    """Test the candle_generator function."""
 
     def test_empty_df_returns_empty_generator(self):
-        """Empty DataFrame yields no ticks."""
+        """Empty DataFrame yields no candles."""
         # Create empty DataFrame with proper MultiIndex structure
         df = pd.DataFrame(
             columns=pd.MultiIndex.from_product(
                 [["AAPL"], ["open", "high", "low", "close", "volume"]]
             )
         )
-        gen = ticks_generator(df, ["AAPL"])
-        ticks = list(gen)
-        assert ticks == []
+        gen = candle_generator(df, ["AAPL"])
+        candles = list(gen)
+        assert candles == []
 
     def test_single_symbol(self):
-        """Single symbol generates correct ticks."""
+        """Single symbol generates correct candles."""
         # Create DataFrame with MultiIndex like load_candles produces
         idx = pd.date_range("2025-01-01", periods=10, freq="h")
         data = {
@@ -104,13 +104,13 @@ class TestTicksGenerator:
         df = pd.DataFrame(data, index=idx)
         df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        gen = ticks_generator(df, ["AAPL"])
-        ticks = list(gen)
-        assert len(ticks) == 10
-        assert all(t.symbol == "AAPL" for t in ticks)
+        gen = candle_generator(df, ["AAPL"])
+        candles = list(gen)
+        assert len(candles) == 10
+        assert all(c.symbol == "AAPL" for c in candles)
 
     def test_multiple_symbols(self):
-        """Multiple symbols generate ticks for each."""
+        """Multiple symbols generate candles for each."""
         idx = pd.date_range("2025-01-01", periods=5, freq="h")
         data = {
             ("AAPL", "open"): [100] * 5,
@@ -127,14 +127,14 @@ class TestTicksGenerator:
         df = pd.DataFrame(data, index=idx)
         df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        gen = ticks_generator(df, ["AAPL", "GOOGL"])
-        ticks = list(gen)
+        gen = candle_generator(df, ["AAPL", "GOOGL"])
+        candles = list(gen)
 
-        aapl_ticks = [t for t in ticks if t.symbol == "AAPL"]
-        googl_ticks = [t for t in ticks if t.symbol == "GOOGL"]
+        aapl_candles = [c for c in candles if c.symbol == "AAPL"]
+        googl_candles = [c for c in candles if c.symbol == "GOOGL"]
 
-        assert len(aapl_ticks) == 5
-        assert len(googl_ticks) == 5
+        assert len(aapl_candles) == 5
+        assert len(googl_candles) == 5
 
 
 class TestBacktest:
@@ -181,7 +181,7 @@ class TestRunBacktest:
         """run_backtest works with default handlers."""
         bt = Backtest(strategy_config)
         df = self._create_test_df()
-        gen = ticks_generator(df, ["AAPL"])
+        gen = candle_generator(df, ["AAPL"])
         exec_handler = default_execution_handler()
         risk_handler = default_risk_handler()
 
@@ -195,7 +195,7 @@ class TestRunBacktest:
         """run_backtest tracks executed trades."""
         bt = Backtest(strategy_config)
         df = self._create_test_df()
-        gen = ticks_generator(df, ["AAPL"])
+        gen = candle_generator(df, ["AAPL"])
         exec_handler = default_execution_handler()
         risk_handler = default_risk_handler()
 

@@ -6,7 +6,7 @@ from typing import cast
 
 import pandas as pd
 
-from src.bt.state.types import Tick
+from src.bt.state.types import Candle
 from src.live.baragg.time_based import TimeBarAggregator
 
 
@@ -16,8 +16,8 @@ def _ts(val: str) -> pd.Timestamp:
     return result
 
 
-def _tick(symbol: str, ts: str, *, close: float = 100.0, volume: float = 0.0) -> Tick:
-    return Tick(
+def _tick(symbol: str, ts: str, *, close: float = 100.0, volume: float = 0.0) -> Candle:
+    return Candle(
         timestamp=_ts(ts),
         symbol=symbol,
         open=close,

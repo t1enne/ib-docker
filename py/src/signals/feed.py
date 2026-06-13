@@ -12,7 +12,7 @@ import pandas as pd
 import websockets
 import websockets.asyncio.client
 
-from src.bt.state import Tick
+from src.bt.state import Candle
 from typing import cast
 
 logger = logging.getLogger(__name__)
@@ -25,8 +25,8 @@ RECONNECT_MAX_DELAY_S = 30
 
 def _parse_bar_message(
     msg: dict, conid_to_ticker: dict[int, str], bar: str
-) -> Optional[Tick]:
-    """Parse an smh websocket message into a Tick.
+) -> Optional[Candle]:
+    """Parse an smh websocket message into a Candle (OHLCV bar).
 
     IBKR smh messages have the shape:
     {
@@ -65,7 +65,7 @@ def _parse_bar_message(
     try:
         pdt = cast(pd.Timestamp, pd.Timestamp(ts, unit="ms"))
         assert not pd.isna(pdt)
-        return Tick(
+        return Candle(
             timestamp=pdt,
             symbol=ticker,
             open=float(msg.get("o", 0)),
@@ -82,7 +82,7 @@ def _parse_bar_message(
 
 def _parse_bar_array_message(
     msg: dict, conid_to_ticker: dict[int, str], bar: str
-) -> list[Tick]:
+) -> list[Candle]:
     """Parse an smh message that contains an array of bars."""
     topic = msg.get("topic", "")
     if not topic.startswith("smh+"):
@@ -100,7 +100,7 @@ def _parse_bar_array_message(
         return []
 
     data = msg.get("data", [])
-    ticks = []
+    bars: list[Candle] = []
     for bar_data in data:
         ts = bar_data.get("t")
         if ts is None:
@@ -108,8 +108,8 @@ def _parse_bar_array_message(
         try:
             pdt = cast(pd.Timestamp, pd.Timestamp(ts, unit="ms"))
             assert not pd.isna(pdt)
-            ticks.append(
-                Tick(
+            bars.append(
+                Candle(
                     timestamp=pdt,
                     symbol=ticker,
                     open=float(bar_data.get("o", 0)),
@@ -122,7 +122,7 @@ def _parse_bar_array_message(
             )
         except (TypeError, ValueError) as e:
             logger.warning("Failed to parse bar in array: %s (%s)", bar_data, e)
-    return ticks
+    return bars
 
 
 class LiveBarFeed:
@@ -199,8 +199,8 @@ class LiveBarFeed:
             except Exception:
                 break
 
-    async def ticks(self) -> AsyncGenerator[Tick, None]:
-        """Yield Tick objects as new bars arrive from the websocket.
+    async def bars(self) -> AsyncGenerator[Candle, None]:
+        """Yield Candle objects as new bars arrive from the websocket.
 
         Handles reconnection on disconnect with exponential backoff.
         """
@@ -230,17 +230,17 @@ class LiveBarFeed:
                         continue
 
                     # Try single bar format first
-                    tick = _parse_bar_message(msg, self.conid_to_ticker, self.bar)
-                    if tick is not None:
-                        yield tick
+                    bar = _parse_bar_message(msg, self.conid_to_ticker, self.bar)
+                    if bar is not None:
+                        yield bar
                         continue
 
                     # Try array format
-                    bar_ticks = _parse_bar_array_message(
+                    bars = _parse_bar_array_message(
                         msg, self.conid_to_ticker, self.bar
                     )
-                    for tick in bar_ticks:
-                        yield tick
+                    for bar in bars:
+                        yield bar
 
             except websockets.exceptions.ConnectionClosed as e:
                 logger.warning("WebSocket disconnected: %s", e)

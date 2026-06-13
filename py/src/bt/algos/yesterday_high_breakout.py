@@ -1,7 +1,7 @@
 import src.bt.indicators as ta
 from src.bt.algos.utils import open, close, get_resampled_candles
 from typing import List, Dict, TYPE_CHECKING, Optional
-from src.bt.state import BacktestState, TradeSignal, Tick, ActionType
+from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 from src.bt.types import PlotConfig
 import pandas as pd
 
@@ -21,10 +21,10 @@ def reset_signal_state():
     _signal_state = {}
 
 
-def on_tick(
-    state: BacktestState, tick: Tick, strategy_params: dict
+def on_candle(
+    state: BacktestState, candle: Candle, strategy_params: dict
 ) -> List[TradeSignal]:
-    symbol = tick.symbol
+    symbol = candle.symbol
     signal_state = get_signal_state()
 
     if symbol not in signal_state:
@@ -37,14 +37,14 @@ def on_tick(
     position = state.portfolio.positions.get(symbol)
 
     if position:
-        return handle_exit(state, tick, strategy_params, symbol_state, position)
+        return handle_exit(state, candle, strategy_params, symbol_state, position)
 
-    return handle_entry(state, tick, strategy_params, symbol_state)
+    return handle_entry(state, candle, strategy_params, symbol_state)
 
 
 def handle_entry(
     state: BacktestState,
-    tick: Tick,
+    tick: Candle,
     strategy_params: dict,
     symbol_state: dict,
 ) -> List[TradeSignal]:
@@ -97,7 +97,7 @@ def handle_entry(
 
 def handle_exit(
     state: BacktestState,
-    tick: Tick,
+    tick: Candle,
     strategy_params: dict,
     symbol_state: dict,
     position,

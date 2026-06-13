@@ -1,6 +1,6 @@
 from dataclasses import asdict
 from src.bt.types import StrategyConfig
-from src.bt.state import Tick, BacktestState
+from src.bt.state import Candle, BacktestState
 from typing import List, Generator, TypedDict, cast
 from src.market_data.resample import resample_multiindex
 import pandas as pd
@@ -34,24 +34,24 @@ def _df_to_multiindex(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def ticks_generator(
+def candle_generator(
     df: pd.DataFrame,
     config,
-) -> Generator[Tick, None, None]:
-    """Create a generator that yields ticks from a DataFrame.
+) -> Generator[Candle, None, None]:
+    """Create a generator that yields Candles (OHLCV bars) from a DataFrame.
 
     This is a pure function - given the same inputs, it always yields
-    the same sequence of ticks. Yields base timeframe ticks and HTF ticks
+    the same sequence of Candles. Yields base timeframe and HTF Candles
     (if configured) interleaved by timestamp.
 
-    Uses pre-extracted numpy arrays to avoid per-tick DataFrame lookups.
+    Uses pre-extracted numpy arrays to avoid per-candle DataFrame lookups.
 
     Args:
         df: DataFrame with MultiIndex (symbol, timestamp) containing OHLCV
         config: StrategyConfig with symbols, bar, and htf settings, or list of symbols (legacy)
 
     Yields:
-        Tick objects for each symbol at each timestamp
+        Candle objects for each symbol at each timestamp
     """
     # Handle both StrategyConfig and legacy list of symbols
     if hasattr(config, "symbols"):
@@ -128,7 +128,7 @@ def ticks_generator(
         idx = ts_to_idx.get(ts)
         if idx is not None:
             for s in symbols:
-                yield Tick(
+                yield Candle(
                     timestamp=pdt,
                     symbol=s,
                     open=float(base_arrays[(s, "open")][idx]),
@@ -148,7 +148,7 @@ def ticks_generator(
             # Find if ts matches any HTF timestamp for this symbol
             htf_idx = np.searchsorted(sym_ts, ts)
             if htf_idx < len(sym_ts) and sym_ts[htf_idx] == ts:
-                yield Tick(
+                yield Candle(
                     timestamp=pdt,
                     symbol=s,
                     open=float(htf_arrays[(freq, s, "open")][htf_idx]),

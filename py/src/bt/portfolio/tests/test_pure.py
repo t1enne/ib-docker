@@ -218,7 +218,7 @@ class TestUpdatePrices:
 
     def test_update_position_price(self):
         """Test updating position prices."""
-        from src.bt.state import Tick
+        from src.bt.state import Candle
 
         position = Position(
             symbol="AAPL",
@@ -246,7 +246,7 @@ class TestUpdatePrices:
             initial_capital=10000,
         )
 
-        tick = Tick(
+        tick = Candle(
             timestamp=_ts("2024-01-02"),
             symbol="AAPL",
             open=100.0,

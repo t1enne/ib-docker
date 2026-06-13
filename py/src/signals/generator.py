@@ -13,7 +13,7 @@ from src.bt.algos import init_strat
 from src.bt.engine.utils import merge_bt_state
 from src.bt.state import (
     BacktestState,
-    Tick,
+    Candle,
     TradeSignal,
     create_initial_backtest_state,
 )
@@ -77,25 +77,25 @@ def _load_historical_candles(symbols: list[str], bar: str) -> dict[str, pd.DataF
     return result
 
 
-def _append_candle(state: BacktestState, tick: Tick) -> BacktestState:
+def _append_candle(state: BacktestState, candle: Candle) -> BacktestState:
     """Append a candle to the per-symbol candles dict."""
     new_row = pd.DataFrame(
         {
-            "open": [tick.open],
-            "high": [tick.high],
-            "low": [tick.low],
-            "close": [tick.close],
-            "volume": [tick.volume],
+            "open": [candle.open],
+            "high": [candle.high],
+            "low": [candle.low],
+            "close": [candle.close],
+            "volume": [candle.volume],
         },
-        index=pd.Index([tick.timestamp]),
+        index=pd.Index([candle.timestamp]),
     )
 
     candles = dict(state.candles)
-    current = candles.get(tick.symbol)
+    current = candles.get(candle.symbol)
     if current is None or current.empty:
-        candles[tick.symbol] = new_row
+        candles[candle.symbol] = new_row
     else:
-        candles[tick.symbol] = pd.concat([current, new_row])
+        candles[candle.symbol] = pd.concat([current, new_row])
 
     return merge_bt_state(state, dict(candles=candles))
 
@@ -117,7 +117,7 @@ class SignalGenerator:
     """Generates trading signals from live IBKR bar data using existing strategies.
 
     Bootstraps with historical candle data for indicator warmup, then
-    subscribes to live bars via websocket and runs the strategy on_tick()
+    subscribes to live bars via websocket and runs the strategy on_candle()
     for each new bar.
     """
 
@@ -171,19 +171,19 @@ class SignalGenerator:
 
         return symbol_conids
 
-    def _process_tick(self, tick: Tick) -> list[SignalEvent]:
-        """Process a single tick through the strategy and return any signals."""
+    def _process_bar(self, candle: Candle) -> list[SignalEvent]:
+        """Process a single OHLCV bar through the strategy and return any signals."""
         assert self.state is not None
 
         # Skip duplicate timestamps (ws may resend the current bar)
-        last_ts = self._seen_timestamps.get(tick.symbol)
-        if last_ts is not None and tick.timestamp <= last_ts:
+        last_ts = self._seen_timestamps.get(candle.symbol)
+        if last_ts is not None and candle.timestamp <= last_ts:
             return []
-        self._seen_timestamps[tick.symbol] = tick.timestamp
+        self._seen_timestamps[candle.symbol] = candle.timestamp
 
         # Append candle to state
-        self.state = _append_candle(self.state, tick)
-        self.state = merge_bt_state(self.state, dict(timestamp=tick.timestamp))
+        self.state = _append_candle(self.state, candle)
+        self.state = merge_bt_state(self.state, dict(timestamp=candle.timestamp))
 
         # Run strategy
         strategy_params = dict(self.config.strategy_params or {})
@@ -195,11 +195,11 @@ class SignalGenerator:
             strategy_params.setdefault("symbols", list(self.config.symbols))
 
         try:
-            trade_signals: List[TradeSignal] = self.strat_mod.on_tick(
-                self.state, tick, strategy_params
+            trade_signals: List[TradeSignal] = self.strat_mod.on_candle(
+                self.state, candle, strategy_params
             )
         except Exception as e:
-            logger.error("Strategy error on tick %s: %s", tick.timestamp, e)
+            logger.error("Strategy error on bar %s: %s", candle.timestamp, e)
             return []
 
         return [_signal_to_event(s, self.config.name) for s in trade_signals]
@@ -235,11 +235,11 @@ class SignalGenerator:
             loop.add_signal_handler(sig, _shutdown)
 
         try:
-            async for tick in self.feed.ticks():
+            async for candle in self.feed.bars():
                 if shutdown_event.is_set():
                     break
 
-                events = self._process_tick(tick)
+                events = self._process_bar(candle)
                 for event in events:
                     click.echo(str(event))
 

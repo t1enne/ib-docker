@@ -5,7 +5,7 @@ from typing import Tuple, Optional, Union
 from src.bt.state.types import (
     PortfolioState,
     Position,
-    Tick,
+    Candle,
     StopLossEvent,
     TakeProfitEvent,
     RiskConfig,
@@ -13,7 +13,7 @@ from src.bt.state.types import (
 )
 
 
-def check_risk(portfolio: PortfolioState, tick: Tick, config: RiskConfig) -> Tuple:
+def check_risk(portfolio: PortfolioState, tick: Candle, config: RiskConfig) -> Tuple:
     """Check if any positions hit risk limits.
 
     Returns tuple of risk events (StopLossEvent, TakeProfitEvent, etc.)
@@ -30,7 +30,7 @@ def check_risk(portfolio: PortfolioState, tick: Tick, config: RiskConfig) -> Tup
 
 
 def check_position_risk(
-    _position: Position, tick: Tick, config: RiskConfig
+    _position: Position, tick: Candle, config: RiskConfig
 ) -> Optional[Union[StopLossEvent, TakeProfitEvent]]:
     """Check single position for SL/TP triggers."""
     position = update_trailing_stop(_position, tick, config)
@@ -74,7 +74,7 @@ def check_position_risk(
 
 
 def update_trailing_stop(
-    position: Position, tick: Tick, config: RiskConfig
+    position: Position, tick: Candle, config: RiskConfig
 ) -> Position:
     """Update trailing stop, return new position."""
     if not config.trailing_stop:

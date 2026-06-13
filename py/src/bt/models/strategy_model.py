@@ -9,7 +9,7 @@ import pandas as pd
 from src.bt.models.market_data import MarketDataView
 from src.bt.models.regime_model import RegimeModel
 from src.bt.models.z_model import ZModel
-from src.bt.types import Tick
+from src.bt.types import Candle
 from src.hmm.hmm import MarketRegimeHMM
 
 
@@ -79,7 +79,7 @@ class StrategyModel:
     def market_data(self) -> MarketDataView:
         return self._market_data
 
-    def update(self, tick: Tick) -> None:
+    def update(self, tick: Candle) -> None:
         self._market_data.append(tick)
 
         prices = self._prices_from_latest()

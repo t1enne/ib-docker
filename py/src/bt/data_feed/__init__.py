@@ -1,24 +1,24 @@
 """Functional data feed module.
 
-Provides pure functions for loading and transforming market data into ticks.
+Provides pure functions for loading and transforming market data into Candles.
 Can be injected into Backtest engine via EngineDependencies.
 
 Usage:
-    from src.bt.data_feed import load_candles, ticks_from_dataframe
+    from src.bt.data_feed import load_candles, candles_from_dataframe
 
     # Load data
     df = load_candles(["AAPL", "MSFT"], start, end, "1h")
 
-    # Generate ticks
-    async for tick in ticks_from_dataframe(df, ["AAPL", "MSFT"]):
-        process(tick)
+    # Generate candles
+    async for candle in candles_from_dataframe(df, ["AAPL", "MSFT"]):
+        process(candle)
 """
 
 import pandas as pd
 from pandas import Timestamp
 from typing import AsyncGenerator, List, cast
 
-from src.bt.state import Tick
+from src.bt.state import Candle
 from src.utils import get_local_candles
 from src.syncm import sync_data
 
@@ -44,21 +44,21 @@ def load_candles(
     return pd.concat(time_series, axis=1, keys=symbols)
 
 
-def ticks_from_dataframe(
+def candles_from_dataframe(
     df: pd.DataFrame,
     symbols: List[str],
 ):
-    """Pure async generator - yields ticks from a DataFrame.
+    """Pure async generator - yields Candles (OHLCV bars) from a DataFrame.
 
     This function is stateless - given the same DataFrame and symbols,
-    it will always yield the same sequence of ticks.
+    it will always yield the same sequence of Candles.
 
     Args:
         df: DataFrame with MultiIndex (symbol, timestamp) containing OHLCV
-        symbols: List of symbols to generate ticks for
+        symbols: List of symbols to generate candles for
 
     Yields:
-        Tick objects for each symbol at each timestamp
+        Candle objects for each symbol at each timestamp
     """
     if df.empty or len(df.index) == 0:
         return
@@ -73,7 +73,7 @@ def ticks_from_dataframe(
                 row = df.xs(s, axis=1).loc[ts]
                 pdt = cast(pd.Timestamp, Timestamp(ts))
                 assert not pd.isna(pdt)
-                yield Tick(
+                yield Candle(
                     timestamp=pdt,
                     symbol=s,
                     open=float(row["open"]),

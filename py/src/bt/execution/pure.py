@@ -2,7 +2,7 @@
 
 from src.bt.state.types import (
     TradeSignal,
-    Tick,
+    Candle,
     FillEvent,
     ExecutionParams,
     StopLossEvent,
@@ -12,7 +12,7 @@ from src.bt.state.types import (
 
 
 def execute_signal(
-    signal: TradeSignal, tick: Tick, params: ExecutionParams
+    signal: TradeSignal, tick: Candle, params: ExecutionParams
 ) -> FillEvent:
     """Convert signal to fill with slippage/spread.
 
@@ -48,7 +48,7 @@ def execute_signal(
     )
 
 
-def execute_risk_event(event, tick: Tick, params: ExecutionParams) -> FillEvent:
+def execute_risk_event(event, tick: Candle, params: ExecutionParams) -> FillEvent:
     """Convert risk event (SL/TP) into fill event."""
     base_spread = event.trigger_price * (params.spread_bps / 10000)
     base_price = event.trigger_price - base_spread
@@ -76,7 +76,7 @@ def execute_risk_event(event, tick: Tick, params: ExecutionParams) -> FillEvent:
     )
 
 
-def calculate_adverse_selection(signal: TradeSignal, tick: Tick) -> bool:
+def calculate_adverse_selection(signal: TradeSignal, tick: Candle) -> bool:
     """Determine if slippage should be adverse."""
     price_move = tick.close - tick.open
     percent_move = price_move / tick.open if tick.open != 0 else 0

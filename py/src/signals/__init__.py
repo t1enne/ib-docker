@@ -1,7 +1,7 @@
 """Signal generation module for live trading.
 
 Subscribes to IBKR websocket bar data and runs existing strategy
-on_tick() logic to generate and print trading signals.
+on_candle() logic to generate and print trading signals.
 
 Usage:
     python main.py signal strats/breakout_ema.yaml

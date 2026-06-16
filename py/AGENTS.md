@@ -7,7 +7,7 @@
 
 - **Python 3.14+** (required)
 - **Package manager:** `uv` (not pip)
-- **Type checker:** `ty` (configured in `pyproject.toml`)
+- **Type checker:** `ty`
 - **Formatter:** `ruff format`
 - **Test runner:** `pytest` with `pytest-asyncio`
 
@@ -193,6 +193,6 @@ Strategies are defined in YAML files loaded via `load_strategy()` → `StrategyC
 - [ ] New logic has tests covering edge cases
 - [ ] Functions ≤ 50 LOC, classes ≤ 150 LOC (or extracted)
 - [ ] `ruff format` passes
-- [ ] `pyright` passes on changed files
+- [ ] `ty check` passes on changed files
 - [ ] Protocols used for injection, not inheritance
 - [ ] No dead code or commented-out blocks left behind

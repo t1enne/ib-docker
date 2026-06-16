@@ -1,19 +1,21 @@
 from typing import Optional
 import pandas as pd
 from pandas import Timestamp
-import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from src.utils import get_local_candles, parse_timestamp
-from src.bt.zscore import calculate_rolling_z
+from src.kalman.pure import run_pairs_kalman
+from src.kalman.types import PairsKalmanConfig, PairsKalmanResult
 
 
 def spread(
     symbols: tuple[str, str],
     start_date: Optional[Timestamp] = None,
     end_date: Optional[Timestamp] = None,
-    rolling: Optional[int] = None,
-    bar="1d",
+    process_noise: float = 1e-4,
+    measurement_noise: float = 1e-3,
+    mean_halflife: int = 50,
+    bar: str = "1d",
 ):
     sym1, sym2 = symbols
     ma_windows = [50]
@@ -22,52 +24,110 @@ def spread(
     df1 = get_local_candles(sym1.upper(), _start, _end, bar)
     df2 = get_local_candles(sym2.upper(), _start, _end, bar)
 
-    prices1 = df1["close"].tolist()
-    prices2 = df2["close"].tolist()
-    dates = df1.index
-
     ratio = pd.DataFrame(
         {
             "ratio": df1["close"] / df2["close"],
             f"{sym1}": df1["close"],
             f"{sym2}": df2["close"],
         },
-        index=dates,
+        index=df1.index,
     )
 
-    if rolling:
-        window = rolling
-
-        z_scores: list[float] = []
-        for i in range(len(prices1)):
-            s1 = prices1[: i + 1]
-            s2 = prices2[: i + 1]
-            z, _, _ = calculate_rolling_z(s1, s2, window)
-            z_scores.append(z)
-
-        z_score = pd.Series(z_scores, index=dates)
-    else:
-        z, _, _ = calculate_rolling_z(prices1, prices2, len(prices1))
-        z_score = pd.Series([z], index=[dates[-1]])
+    # Pairs Kalman filter: [α, β] two-state model
+    cfg = PairsKalmanConfig(
+        process_noise=process_noise,
+        measurement_noise=measurement_noise,
+        mean_halflife=mean_halflife,
+    )
+    result = run_pairs_kalman(df1["close"], df2["close"], config=cfg)
 
     fig = make_subplots(
-        rows=2,
+        rows=5,
         cols=1,
-        subplot_titles=["z", "ratio"],
+        subplot_titles=[
+            f"t-Statistic (spread / √S) {sym1}-{sym2}",
+            f"Hedge Ratio (β) {sym1}-{sym2}",
+            f"Intercept (α) {sym1}-{sym2}",
+            "Innovation Covariance S",
+            "Price Ratio",
+        ],
         shared_xaxes=True,
-        vertical_spacing=0.05,
+        vertical_spacing=0.04,
         horizontal_spacing=0.05,
+        row_heights=[0.25, 0.15, 0.15, 0.15, 0.3],
     )
+
+    # Row 1 — t_stat (THE trading signal)
     fig.add_trace(
         go.Scatter(
-            x=dates,
-            y=z_score,
+            x=result.t_stat.index,
+            y=result.t_stat,
             mode="lines",
-            name=f"z-score {sym1}-{sym2}",
+            name=f"t-stat {sym1}-{sym2}",
+            line=dict(color="purple", width=1.5),
         ),
         row=1,
         col=1,
     )
+    for window in ma_windows:
+        t_ema = result.t_stat.ewm(span=window).mean()
+        fig.add_trace(
+            go.Scatter(
+                x=result.t_stat.index,
+                y=t_ema,
+                mode="lines",
+                name=f"t-stat EMA {window}",
+                line=dict(width=1),
+            ),
+            row=1,
+            col=1,
+        )
+    fig.add_hline(y=2.0, line_dash="dash", line_color="gray", row=1, col=1)
+    fig.add_hline(y=-2.0, line_dash="dash", line_color="gray", row=1, col=1)
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", row=1, col=1)
+
+    # Row 2 — beta
+    fig.add_trace(
+        go.Scatter(
+            x=result.beta.index,
+            y=result.beta,
+            mode="lines",
+            name="β",
+            line=dict(color="seagreen", width=1.5),
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_hline(y=1.0, line_dash="dot", line_color="gray", row=2, col=1)
+
+    # Row 3 — alpha
+    fig.add_trace(
+        go.Scatter(
+            x=result.alpha.index,
+            y=result.alpha,
+            mode="lines",
+            name="α",
+            line=dict(color="darkorange", width=1.5),
+        ),
+        row=3,
+        col=1,
+    )
+    fig.add_hline(y=0.0, line_dash="dot", line_color="gray", row=3, col=1)
+
+    # Row 4 — innovation covariance S
+    fig.add_trace(
+        go.Scatter(
+            x=result.innovation_S.index,
+            y=result.innovation_S,
+            mode="lines",
+            name="S (innov cov)",
+            line=dict(color="crimson", width=1),
+        ),
+        row=4,
+        col=1,
+    )
+
+    # Row 5 — ratio
     fig.add_trace(
         go.Scatter(
             x=ratio.index,
@@ -77,24 +137,11 @@ def spread(
             hovertemplate=f"{sym1}: %{{customdata[0]:.2f}}<br>{sym2}: %{{customdata[1]:.2f}}<br>Ratio: %{{y:.4f}}<extra></extra>",
             customdata=ratio[[f"{sym1}", f"{sym2}"]].values,
         ),
-        row=2,
+        row=5,
         col=1,
     )
-
     for window in ma_windows:
-        z_score_ema = z_score.ewm(span=window).mean()
         ratio_ema = ratio["ratio"].ewm(span=window).mean()
-        fig.add_trace(
-            go.Scatter(
-                x=dates,
-                y=z_score_ema,
-                mode="lines",
-                name=f"z-score EMA {window}",
-                line=dict(width=1),
-            ),
-            row=1,
-            col=1,
-        )
         fig.add_trace(
             go.Scatter(
                 x=ratio.index,
@@ -103,7 +150,7 @@ def spread(
                 name=f"ratio EMA {window}",
                 line=dict(width=1),
             ),
-            row=2,
+            row=5,
             col=1,
         )
 

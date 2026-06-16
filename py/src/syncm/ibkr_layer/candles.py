@@ -198,7 +198,8 @@ def find_internal_gaps(
             if missing_day.weekday() >= 5 or _is_us_market_holiday(missing_day):
                 # If we were tracking a gap range, close it before the holiday
                 if missing_start is not None:
-                    gaps.append((missing_start, missing_end))  # type: ignore[arg-type]
+                    if missing_end is not None:
+                        gaps.append((missing_start, missing_end))
                     missing_start = None
                     missing_end = None
                 continue
@@ -209,8 +210,8 @@ def find_internal_gaps(
             missing_end = missing_day + timedelta(days=1)  # end is exclusive
 
         # Close any remaining gap range
-        if missing_start is not None:
-            gaps.append((missing_start, missing_end))  # type: ignore[arg-type]
+        if missing_start is not None and missing_end is not None:
+            gaps.append((missing_start, missing_end))
 
     return gaps
 

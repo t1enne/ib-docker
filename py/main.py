@@ -10,6 +10,7 @@ import src.nd as nd_mod
 import src.pnd as pnd_mod
 import src.syncm as sync_mod
 import src.hmm as hmm_mod
+import src.kalman as kalman_mod
 import src.signals as signals_mod
 import src.screen as screen_mod
 
@@ -44,16 +45,20 @@ def mx(
 @click.argument("symbols", nargs=2)
 @click.option("--start")
 @click.option("--end")
-@click.option("--rolling", "-r", type=int)
+@click.option("--process-noise", "-q", type=float, default=1e-4, help="Kalman process noise (Q)")
+@click.option("--measurement-noise", "-r", type=float, default=1e-3, help="Kalman measurement noise (R)")
+@click.option("--mean-halflife", "-m", type=int, default=50, help="EWMA halflife for spread mean/std")
 def spread(
     symbols: tuple[str, str],
     start: Optional[str],
     end: Optional[str],
-    rolling: Optional[int] = None,
+    process_noise: float = 1e-4,
+    measurement_noise: float = 1e-3,
+    mean_halflife: int = 50,
 ):
     s = get_ts(start) if start else None
     e = get_ts(end) if end else None
-    spread_mod.spread(symbols, s, e, rolling)
+    spread_mod.spread(symbols, s, e, process_noise, measurement_noise, mean_halflife)
 
 
 @main.command(help="plot normalized deviation between price/returns and relative MA")
@@ -119,6 +124,43 @@ def hmm(
         min_train_size,
         update_interval,
         output_dir,
+        plot,
+    )
+
+
+@main.command(help="Kalman filter price smoothing and trend estimation")
+@click.argument("symbol")
+@click.option("--start", help="Start date (YYYY-MM-DD)")
+@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--process-noise", "-q", type=float, default=1e-5, help="Process noise Q")
+@click.option(
+    "--measurement-noise", "-r", type=float, default=1e-3, help="Measurement noise R"
+)
+@click.option(
+    "--adaptive/--no-adaptive", default=False, help="Scale R by realized volatility"
+)
+@click.option(
+    "--vol-window", type=int, default=20, help="Window for adaptive volatility calc"
+)
+@click.option("--plot/--no-plot", default=True, help="Generate plots")
+def kalman(
+    symbol: str,
+    start: Optional[str],
+    end: Optional[str],
+    process_noise: float,
+    measurement_noise: float,
+    adaptive: bool,
+    vol_window: int,
+    plot: bool,
+):
+    kalman_mod.kalman(
+        symbol,
+        start,
+        end,
+        process_noise,
+        measurement_noise,
+        adaptive,
+        vol_window,
         plot,
     )
 

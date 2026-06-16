@@ -5,49 +5,49 @@ symbols:
   - qqq
 
   # ── Sector ETFs ──
-  - xlf   # financials
-  - xlk   # technology
-  - xli   # industrials
-  - xlb   # materials
-  - xle   # energy
-  - xlv   # healthcare
-  - xlp   # consumer staples
-  - xlu   # utilities
-  - xlre  # real estate
-  - xlc   # communication services
+  - xlf # financials
+  - xlk # technology
+  - xli # industrials
+  - xlb # materials
+  - xle # energy
+  - xlv # healthcare
+  - xlp # consumer staples
+  - xlu # utilities
+  - xlre # real estate
+  - xlc # communication services
   # non-cycle sector plays (kept from original universe)
-  - xly   # consumer discretionary
-  - xbi   # biotech
+  - xly # consumer discretionary
+  - xbi # biotech
 
   # ── Fixed income ──
-  - shy   # 1-3Y treasury
-  - iei   # 3-7Y treasury
-  - ief   # 7-10Y treasury
-  - tlt   # 20Y+ treasury
+  - shy # 1-3Y treasury
+  - iei # 3-7Y treasury
+  - ief # 7-10Y treasury
+  - tlt # 20Y+ treasury
 
   # ── Credit ──
-  - hyg   # high yield corporate
-  - lqd   # investment grade corporate
+  - hyg # high yield corporate
+  - lqd # investment grade corporate
 
   # ── Commodities (ETF proxies) ──
-  - gld   # gold
-  - slv   # silver
-  - uso   # crude oil
-  - ung   # natural gas
-  - cper  # copper
+  - gld # gold
+  - slv # silver
+  - uso # crude oil
+  - ung # natural gas
+  - cper # copper
 
   # ── Currency ──
-  - uup   # USD index proxy
+  - uup # USD index proxy
 
   # ── Original universe tickers (unrelated to cycle screener) ──
-  - ewy   # south korea
-  - ewj   # japan
-  - vwo   # emerging markets
+  - ewy # south korea
+  - ewj # japan
+  - vwo # emerging markets
   - smh
   - btc
-  - cqqq  # china tech
-  - tan   # solar
-  - ura   # uranium miners
-  - copx  # copper miners
+  - cqqq # china tech
+  - tan # solar
+  - ura # uranium miners
+  - copx # copper miners
   - reet
   - spmo

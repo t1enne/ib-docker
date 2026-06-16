@@ -72,6 +72,16 @@ PCT_DISPLAY_KEYS: Final[frozenset[str]] = frozenset(
         "pct_off_high",
         "max_drawdown",
         "return_pct",
+        "above_50dma",
+        "above_200dma",
+        "confidence",
+        "risk_score",
+        "growth_score",
+        "inflation_score",
+        "breadth_score",
+        "liquidity_score",
+        "confirmation",
+        "avg_momentum",
     }
 )
 

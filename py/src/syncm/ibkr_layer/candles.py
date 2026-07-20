@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 # Maximum number of candles per API request
 MAX_CANDLES_PER_REQUEST = 1000
 
+# Maximum period (in days) for a single IBKR API request.
+# The API rejects periods longer than 365 days. For bar sizes shorter
+# than 1d (e.g. 1h), the effective limit may be lower, but 365d is the
+# documented maximum for daily bars and serves as an upper bound.
+MAX_PERIOD_DAYS = 365
+
 
 def date_to_timestamp(d: date) -> int:
     return int(datetime.combine(d, datetime.min.time()).timestamp() * 1000)
@@ -288,6 +294,16 @@ async def _fetch_candles_iterative(
         delta = current_to - from_datetime
         days_to_fetch = max(1, delta.days + (1 if delta.seconds > 0 else 0))
 
+        if delta.days > MAX_PERIOD_DAYS:
+            logger.info(
+                "Range %s → %s exceeds %sd max, chunking (this request: %sd)",
+                from_datetime,
+                current_to,
+                MAX_PERIOD_DAYS,
+                days_to_fetch,
+            )
+        days_to_fetch = min(days_to_fetch, MAX_PERIOD_DAYS)
+
         logger.info(
             "Getting candles for %s for %sd, from %s, to %s",
             ticker,
@@ -296,17 +312,24 @@ async def _fetch_candles_iterative(
             current_to,
         )
 
-        r = await get_iserver_marketdata_history.asyncio(
+        resp = await get_iserver_marketdata_history.asyncio_detailed(
             client=auth_client,
             conid=conid,
             bar=bar,
             period=f"{days_to_fetch}d",
             start_time=current_to.strftime("%Y%m%d-%H:%M:%S"),
         )
+        r = resp.parsed
 
-        if not isinstance(r, IserverHistoryBidAskResponse) or not r.data:
-            logger.error("Unexpected response for %s: %r", ticker, r)
-            raise Exception("Unexpected response type")
+        if resp.status_code != 200 or not isinstance(r, IserverHistoryBidAskResponse) or not r.data:
+            body = resp.content.decode(errors="replace")[:200]
+            logger.error(
+                "Unexpected response for %s: status=%s, body=%r",
+                ticker,
+                resp.status_code,
+                body,
+            )
+            raise Exception(f"Unexpected response: status={resp.status_code}")
 
         sorted_data = sorted(r.data, key=lambda x: x.t)
         if not sorted_data or not sorted_data[0].t:

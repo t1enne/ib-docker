@@ -1,4 +1,4 @@
-from_date: 2025-01-01
+from_date: 2020-01-01
 symbols:
   # broad
   - spy
@@ -33,3 +33,107 @@ symbols:
   - copx # copper
   - reet
   - spmo
+  # nasdaq-100 constituents (103, verified via IBKR /trsrv/stocks)
+  - adbe
+  - amd
+  - abnb
+  - alny
+  - googl
+  - goog
+  - amzn
+  - aep
+  - amgn
+  - adi
+  - aapl
+  - amat
+  - app
+  - arm
+  - asml
+  - alab
+  - adsk
+  - adp
+  - axon
+  - bkr
+  - bkng
+  - avgo
+  - cdns
+  - ctas
+  - csco
+  - ccep
+  - cmcsa
+  - ceg
+  - cprt
+  - crwv
+  - cost
+  - crwd
+  - csx
+  - ddog
+  - dxcm
+  - fang
+  - dash
+  - ea
+  - exc
+  - fast
+  - fer
+  - ftnt
+  - gehc
+  - gild
+  - hona
+  - hon
+  - idxx
+  - intc
+  - intu
+  - isrg
+  - kdp
+  - klac
+  - khc
+  - lrcx
+  - lin
+  - lite
+  - mar
+  - mrvl
+  - meli
+  - meta
+  - mchp
+  - mu
+  - msft
+  - mstr
+  - mdlz
+  - mpwr
+  - mnst
+  - nbis
+  - nflx
+  - nvda
+  - nxpi
+  - orly
+  - odfl
+  - pcar
+  - pltr
+  - panw
+  - payx
+  - pypl
+  - pdd
+  - pep
+  - qcom
+  - regn
+  - rklb
+  - rop
+  - rost
+  - sndk
+  - stx
+  - shop
+  - spcx
+  - sbux
+  - snps
+  - tmus
+  - ttwo
+  - ter
+  - tsla
+  - txn
+  - tri
+  - vrtx
+  - wmt
+  - wbd
+  - wdc
+  - wday
+  - xel

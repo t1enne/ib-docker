@@ -18,4 +18,8 @@ gateway
 db.sqlite
 db.sqlite-*
 hono/static/main.css
+
+# generated
 ib-rest-api-client
+
+.nswarm

@@ -256,23 +256,20 @@ def calmar_ratio(equity_curve: pd.Series) -> float:
 
 
 def analyze_portfolio(result: PortfolioResult) -> PerformanceMetrics:
-    equity_curve = result.equity_curve
-    sharpe_ratio = result.sharpe_ratio if result.sharpe_ratio else 0.0
-    alpha, beta = alpha_beta(equity_curve)
-
+    """Project PortfolioResult → PerformanceMetrics (no recomputation)."""
     return PerformanceMetrics(
-        annual_return=annual_return(equity_curve),
-        annual_volatility=annual_volatility(equity_curve),
-        sharpe_ratio=sharpe_ratio,
-        calmar_ratio=calmar_ratio(equity_curve),
-        sortino_ratio=sortino_ratio(equity_curve),
-        stability=stability(equity_curve),
-        max_drawdown=max_drawdown(equity_curve),
-        omega_ratio=omega_ratio(equity_curve),
-        skewness=skewness(equity_curve),
-        kurtosis=kurtosis(equity_curve),
-        alpha=alpha,
-        beta=beta,
+        annual_return=result.annual_return,
+        annual_volatility=result.annual_volatility,
+        sharpe_ratio=result.sharpe_ratio,
+        calmar_ratio=result.calmar_ratio,
+        sortino_ratio=result.sortino_ratio,
+        stability=result.stability,
+        max_drawdown=result.max_drawdown,
+        omega_ratio=result.omega_ratio,
+        skewness=result.skewness,
+        kurtosis=result.kurtosis,
+        alpha=result.alpha,
+        beta=result.beta,
     )
 
 
@@ -298,6 +295,8 @@ def calculate_portfolio_result(
     if len(returns) > 0 and returns.std() != 0 and ppy > 0:
         sharpe = returns.mean() / returns.std() * np.sqrt(ppy)
 
+    alpha, beta = alpha_beta(equity_curve)
+
     return PortfolioResult(
         total_return=total_return,
         sharpe_ratio=sharpe,
@@ -312,8 +311,8 @@ def calculate_portfolio_result(
         skewness=skewness(equity_curve),
         kurtosis=kurtosis(equity_curve),
         stability=stability(equity_curve),
-        alpha=alpha_beta(equity_curve)[0],
-        beta=alpha_beta(equity_curve)[1],
+        alpha=alpha,
+        beta=beta,
     )
 
 

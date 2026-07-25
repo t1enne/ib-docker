@@ -9,11 +9,22 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Optional, Tuple
+from typing import Optional
 
 import click
-import numpy as np
 import pandas as pd
+
+from src.bt.indicators import (
+    adx,
+    atr,
+    bollinger_bands,
+    ema,
+    macd,
+    momentum,
+    rsi,
+    sma,
+    volatility,
+)
 
 
 # ── Stdin reader ──────────────────────────────────────────────────
@@ -23,7 +34,6 @@ def _read_ohlcv_stdin() -> pd.DataFrame:
     """Read OHLCV JSON lines from stdin."""
     if sys.stdin.isatty():
         return pd.DataFrame()
-
     records: list[dict] = []
     for line in sys.stdin:
         line = line.strip()
@@ -33,10 +43,8 @@ def _read_ohlcv_stdin() -> pd.DataFrame:
             records.append(json.loads(line))
         except json.JSONDecodeError:
             pass
-
     if not records:
         return pd.DataFrame()
-
     df = pd.DataFrame(records)
     df["timestamp"] = pd.to_datetime(df["t"])
     df = df.set_index("timestamp").drop(columns=["t"])
@@ -55,96 +63,7 @@ def _get_close(df: pd.DataFrame, symbol: Optional[str]) -> pd.Series:
     return pd.Series(dtype=float)
 
 
-# ── Indicators ────────────────────────────────────────────────────
-
-
-def ema(data: pd.Series, span: int) -> pd.Series:
-    """Exponential Moving Average."""
-    return data.ewm(span=span, adjust=False).mean()
-
-
-def sma(data: pd.Series, window: int) -> pd.Series:
-    """Simple Moving Average."""
-    return data.rolling(window=window).mean()
-
-
-def rsi(data: pd.Series, window: int = 14) -> pd.Series:
-    """Relative Strength Index (0-100)."""
-    delta = data.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-
-def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
-    """Average True Range (Wilder's smoothing)."""
-    tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.ewm(alpha=1 / window, adjust=False).mean()
-
-
-def bollinger_bands(
-    data: pd.Series, window: int = 20, num_std: float = 2.0
-) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """Bollinger Bands — returns (upper, middle, lower)."""
-    middle = sma(data, window)
-    std = data.rolling(window=window).std()
-    upper = middle + (std * num_std)
-    lower = middle - (std * num_std)
-    return upper, middle, lower
-
-
-def macd(
-    data: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
-) -> pd.DataFrame:
-    """MACD — returns DataFrame with macd_line, signal_line, histogram."""
-    ema_fast = data.ewm(span=fast, adjust=False).mean()
-    ema_slow = data.ewm(span=slow, adjust=False).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return pd.DataFrame({"macd_line": macd_line, "signal_line": signal_line, "histogram": histogram})
-
-
-def momentum(data: pd.Series, window: int = 10) -> pd.Series:
-    """Momentum: current - N periods ago."""
-    return data - data.shift(window)
-
-
-def volatility(data: pd.Series, window: int = 20, annualized: bool = True) -> pd.Series:
-    """Rolling volatility of log returns."""
-    returns = np.log(data / data.shift(1))
-    vol = returns.rolling(window=window).std()
-    if annualized:
-        vol = vol * np.sqrt(252)
-    return vol
-
-
-def adx(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
-    """Average Directional Index."""
-    up_move = high.diff()
-    down_move = low.shift(1) - low
-    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
-    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
-
-    tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-    tr_smooth = tr.ewm(alpha=1 / window, adjust=False).mean()
-    plus_di = 100 * plus_dm.ewm(alpha=1 / window, adjust=False).mean() / tr_smooth.replace(0, np.nan)
-    minus_di = 100 * minus_dm.ewm(alpha=1 / window, adjust=False).mean() / tr_smooth.replace(0, np.nan)
-
-    denom = (plus_di + minus_di).replace(0, np.nan)
-    dx = 100 * (plus_di - minus_di).abs() / denom
-    return dx.ewm(alpha=1 / window, adjust=False).mean().fillna(0)
-
-
-# ── Output helper ─────────────────────────────────────────────────
+# ── Output helpers ────────────────────────────────────────────────
 
 
 def _write_series(result: pd.Series, name: str) -> None:

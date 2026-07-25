@@ -9,7 +9,6 @@ initial_capital: 10000
 commission: 0.0005
 strategy_type: volatility_expansion_pullback_continuation
 bar: 1h
-plot: false
 stop_loss: 0.1
 take_profit: 1
 position_size: 0.1

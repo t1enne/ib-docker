@@ -5,7 +5,6 @@ trading_start: 2024-01-02
 trading_end: 2027-01-01
 commission: 0.1
 initial_capital: 10000
-plot: true
 position_size: 0.2
 strategy_type: trend_following
 stop_loss: 0.1
@@ -13,11 +12,10 @@ take_profit: 0.5
 bar: 1h
 htf:
   - 4h
-plot: true
 model_params: false
 strategy_params:
-  window: 14 
-  
+  window: 14
+
 symbols:
   # - XLE
   - COIN

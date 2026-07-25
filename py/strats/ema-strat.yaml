@@ -5,13 +5,11 @@ trading_start: 2024-01-02
 trading_end: 2027-01-01
 commission: 0.1
 initial_capital: 10000
-plot: false
 position_size: 0.2
 strategy_type: ema_cross
 stop_loss: 0.2
 take_profit: 0.5
 bar: 1h
-plot: true
 model_params: false
 strategy_params:
   fast: 9

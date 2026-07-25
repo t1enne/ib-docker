@@ -10,7 +10,6 @@ base_currency: USD
 
 strategy_type: cross_sectional_momentum_rotating
 bar: 1d
-plot: true
 
 rebalance_frequency: 1M
 turnover_cap: 0.5

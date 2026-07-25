@@ -104,7 +104,7 @@ def on_candle(
         return signals
 
     # Build Candle objects from state.candles DataFrames.
-    # DataFrames are refreshed every _CANDLE_BATCH_SIZE rows, so .iloc[-1] is up-to-date.
+    # DataFrames are refreshed every candle, so .iloc[-1] is current.
     df1 = state.candles.get(sym1)
     df2 = state.candles.get(sym2)
     if df1 is None or df2 is None or len(df1) == 0 or len(df2) == 0:

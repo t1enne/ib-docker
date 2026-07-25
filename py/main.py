@@ -19,7 +19,6 @@ import click
 from src.data.cli import data_group
 from src.kalman.cli import kalman_group
 from src.hmm.cli import hmm_group
-from src.indicators.cli import ind_group
 from src.bt.cli import bt_group
 
 
@@ -31,7 +30,6 @@ def main():
 main.add_command(data_group)
 main.add_command(kalman_group)
 main.add_command(hmm_group)
-main.add_command(ind_group)
 main.add_command(bt_group)
 
 

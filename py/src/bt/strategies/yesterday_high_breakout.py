@@ -1,5 +1,7 @@
+STRATEGY_TYPE = "yesterday_high_breakout"
+
 import src.bt.indicators as ta
-from src.bt.algos.utils import open, close, get_resampled_candles
+from src.bt.strategies.utils import open, close, get_resampled_candles
 from typing import List, Dict, TYPE_CHECKING, Optional
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 from src.bt.types import PlotConfig

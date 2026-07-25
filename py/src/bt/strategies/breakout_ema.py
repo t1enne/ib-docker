@@ -1,6 +1,8 @@
+STRATEGY_TYPE = "breakout_ema"
+
 from typing import Optional
 import src.bt.indicators as ta
-from src.bt.algos.utils import open, close
+from src.bt.strategies.utils import open, close
 from typing import List, Dict, TYPE_CHECKING
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig

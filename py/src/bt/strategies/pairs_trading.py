@@ -4,7 +4,9 @@ Pure functions that generate signals based on state.
 Uses model_state.price_buffers to cache aligned closes for performance.
 """
 
-from src.bt.algos.utils import close, open
+from src.bt.strategies.utils import close, open
+
+STRATEGY_TYPE = "pnd"
 
 from typing import Optional, List, TYPE_CHECKING, cast
 from src.bt.state import (

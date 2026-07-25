@@ -1,7 +1,7 @@
 # Live Trading Engine — Plan
 
 > Build production-grade live trading on top of the existing `SignalGenerator`.
-> Integrate backtest primitives (risk, portfolio, algos, models) and add the two
+> Integrate backtest primitives (risk, portfolio, strategies, models) and add the two
 > missing pillars: **BarAggregator** (tick → bar) and **LiveOrderBuilder** (IBKR order execution).
 
 ---
@@ -27,10 +27,10 @@ IBKR WS (tick / smh) ──→ BarAggregator ──→ StrategyFn.on_tick() ─�
 
 **Two data paths coexist from day one:**
 
-| Path | Source | Consumer | Resolution |
-|---|---|---|---|
-| **Bar path** (today) | IBKR `smh` WS | Existing `StrategyFn` strategies | 1h / 1d bars |
-| **Tick path** (phase 2) | IBKR `smd` WS → `BarAggregator` → resampled bars | Same `StrategyFn` strategies | 1s ticks → N-minute bars |
+| Path                    | Source                                           | Consumer                         | Resolution               |
+| ----------------------- | ------------------------------------------------ | -------------------------------- | ------------------------ |
+| **Bar path** (today)    | IBKR `smh` WS                                    | Existing `StrategyFn` strategies | 1h / 1d bars             |
+| **Tick path** (phase 2) | IBKR `smd` WS → `BarAggregator` → resampled bars | Same `StrategyFn` strategies     | 1s ticks → N-minute bars |
 
 The `BarAggregator` is the abstraction that makes this transparent: strategies
 always receive bars; whether those bars come from the wire or are aggregated
@@ -85,6 +85,7 @@ imports and wires the existing primitives; it doesn't modify them.
 
 Today `LiveBarFeed` subscribes to IBKR `smh` (streaming market data history)
 which sends pre-computed bars. This works for 1h/1d strategies but:
+
 - No sub-minute resolution
 - Tied to IBKR's bar boundaries
 - Cannot (later) accept raw tick data from `smd` subscriptions
@@ -475,7 +476,7 @@ class PortfolioAdapter(Protocol):
 
     async def reconcile(self, bt_portfolio: PortfolioState) -> PortfolioState:
         """Reconcile bt state → adjusted bt state based on external truth.
-        
+
         E.g., if IBKR has a position that bt doesn't know about (stop-loss
         that was filled while the engine was down), inject it here.
         """
@@ -527,6 +528,7 @@ class BtPortfolioAdapter:
 ```
 
 The adapter is selected at startup based on `LiveConfig.pf_mode`:
+
 - `pf_mode = "bt"` → `BtPortfolioAdapter` — pure simulation
 - `pf_mode = "ibkr"` → `IbkrPortfolioAdapter` — live sync with IBKR
 
@@ -672,20 +674,20 @@ class LiveEngine:
 
 ## 8. Integration with Existing `src/bt/` Primitives
 
-| Primitive | Where it lives | How live engine uses it |
-|---|---|---|
-| `StrategyFn` (Protocol) | `src/bt/types.py` | Injected via config, called on each completed bar |
-| `ModelUpdaterFn` | `src/bt/types.py` | Update z-score / regime / market data per bar |
-| `RiskCheckFn` | `src/bt/types.py` | Applied after each bar (SL/TP triggers) |
-| `ExecuteSignal` / `ExecuteRiskEvent` | `src/bt/execution/pure.py` | **Replaced** by `LiveOrderBuilder` + `IbkrOrderClient` for live. Kept as `BtExecutionAdapter` for simulation mode |
-| `apply_fill` (portfolio mutation) | `src/bt/portfolio/pure.py` | **Reused** directly — same `PortfolioState` type, same fill logic |
-| `check_risk` | `src/bt/risk/pure.py` | **Reused** directly for SL/TP detection |
-| `Tick`, `TradeSignal`, `FillEvent`, `PortfolioState`, `Position` | `src/bt/state/types.py` | **Reused** directly — types are identical |
-| `BacktestState` | `src/bt/state/types.py` | **Extended** via `LiveState` (adds order tracking fields) |
-| `StrategyConfig` | `src/bt/types.py` | **Reused** as-is (YAML → config) |
-| `BarAggregator` | `src/live/baragg/` (new) | New — converts 1s ticks to bars |
-| `LiveOrderBuilder` | `src/live/order/` (new) | New — maps `TradeSignal` → IBKR orders |
-| `IbkrPortfolioAdapter` | `src/live/pf/` (new) | New — reconciles bt state with IBKR | -->
+| Primitive                                                        | Where it lives             | How live engine uses it                                                                                           |
+| ---------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------- | --- |
+| `StrategyFn` (Protocol)                                          | `src/bt/types.py`          | Injected via config, called on each completed bar                                                                 |
+| `ModelUpdaterFn`                                                 | `src/bt/types.py`          | Update z-score / regime / market data per bar                                                                     |
+| `RiskCheckFn`                                                    | `src/bt/types.py`          | Applied after each bar (SL/TP triggers)                                                                           |
+| `ExecuteSignal` / `ExecuteRiskEvent`                             | `src/bt/execution/pure.py` | **Replaced** by `LiveOrderBuilder` + `IbkrOrderClient` for live. Kept as `BtExecutionAdapter` for simulation mode |
+| `apply_fill` (portfolio mutation)                                | `src/bt/portfolio/pure.py` | **Reused** directly — same `PortfolioState` type, same fill logic                                                 |
+| `check_risk`                                                     | `src/bt/risk/pure.py`      | **Reused** directly for SL/TP detection                                                                           |
+| `Tick`, `TradeSignal`, `FillEvent`, `PortfolioState`, `Position` | `src/bt/state/types.py`    | **Reused** directly — types are identical                                                                         |
+| `BacktestState`                                                  | `src/bt/state/types.py`    | **Extended** via `LiveState` (adds order tracking fields)                                                         |
+| `StrategyConfig`                                                 | `src/bt/types.py`          | **Reused** as-is (YAML → config)                                                                                  |
+| `BarAggregator`                                                  | `src/live/baragg/` (new)   | New — converts 1s ticks to bars                                                                                   |
+| `LiveOrderBuilder`                                               | `src/live/order/` (new)    | New — maps `TradeSignal` → IBKR orders                                                                            |
+| `IbkrPortfolioAdapter`                                           | `src/live/pf/` (new)       | New — reconciles bt state with IBKR                                                                               | --> |
 
 ---
 
@@ -714,14 +716,14 @@ strategy_params:
 # New: live trading config
 live:
   enabled: true
-  pf_mode: "ibkr"            # "bt" | "ibkr"
-  tick_source: "smd"         # "smh" | "smd" — tick path or bar path
-  bar_interval: "5min"       # used when tick_source == "smd"
+  pf_mode: "ibkr" # "bt" | "ibkr"
+  tick_source: "smd" # "smh" | "smd" — tick path or bar path
+  bar_interval: "5min" # used when tick_source == "smd"
   order_defaults:
-    order_type: "MKT"        # "MKT" | "LMT"
+    order_type: "MKT" # "MKT" | "LMT"
     tif: "DAY"
-    use_brackets: true       # auto-attach SL/TP as bracket orders
-  reconcile_interval_s: 60   # how often to poll IBKR for position reconciliation
+    use_brackets: true # auto-attach SL/TP as bracket orders
+  reconcile_interval_s: 60 # how often to poll IBKR for position reconciliation
   state_persistence: true
   account_id: "U1234567"
 ```
@@ -730,22 +732,22 @@ live:
 
 ## 10. Implementation Sequence
 
-| Step | Component | Estimated LOC | Depends On |
-|---|---|---|---|
-| **1** | `src/live/baragg/types.py` + `TimeBarAggregator` + `registry.py` | 150 | Nothing |
-| **2** | Bar aggregator tests (tick sequences, interval boundaries, edge cases) | 100 | Step 1 |
-| **3** | `src/live/order/types.py` — dataclasses (LiveOrder, OrderFill, OrderStatus) | 80 | Nothing |
-| **4** | `src/live/order/builder.py` — LiveOrderBuilder (entry, close, bracket) | 120 | Step 3 |
-| **5** | `src/live/order/client.py` — IbkrOrderClient (REST place/cancel/status) | 200 | Step 3 |
-| **6** | `src/live/order/fills.py` — FillConfirmer | 100 | Steps 3–5 |
-| **7** | `src/live/pf/ibkr_pf.py` + `bt_pf.py` — PortfolioAdapter implementations | 150 | Step 3, `bt/state/types.py` |
-| **8** | `src/live/state/persistence.py` — SqlitePersistence | 120 | `src/db/models.py` |
-| **9** | `src/live/state/types.py` — LiveState | 40 | `bt/state/types.py` |
-| **10** | `src/live/config.py` — LiveConfig dataclass | 50 | Nothing |
-| **11** | `src/live/daemon.py` — LiveEngine main loop | 250 | Steps 1–10 |
-| **12** | `src/live/__init__.py` — run_live() entry point | 40 | Step 11 |
-| **13** | CLI integration in `main.py` (new `live` command) | 30 | Step 12 |
-| **14** | Integration + smoke tests (mock IBKR, single tick sequence) | 150 | Steps 1–13 |
+| Step   | Component                                                                   | Estimated LOC | Depends On                  |
+| ------ | --------------------------------------------------------------------------- | ------------- | --------------------------- |
+| **1**  | `src/live/baragg/types.py` + `TimeBarAggregator` + `registry.py`            | 150           | Nothing                     |
+| **2**  | Bar aggregator tests (tick sequences, interval boundaries, edge cases)      | 100           | Step 1                      |
+| **3**  | `src/live/order/types.py` — dataclasses (LiveOrder, OrderFill, OrderStatus) | 80            | Nothing                     |
+| **4**  | `src/live/order/builder.py` — LiveOrderBuilder (entry, close, bracket)      | 120           | Step 3                      |
+| **5**  | `src/live/order/client.py` — IbkrOrderClient (REST place/cancel/status)     | 200           | Step 3                      |
+| **6**  | `src/live/order/fills.py` — FillConfirmer                                   | 100           | Steps 3–5                   |
+| **7**  | `src/live/pf/ibkr_pf.py` + `bt_pf.py` — PortfolioAdapter implementations    | 150           | Step 3, `bt/state/types.py` |
+| **8**  | `src/live/state/persistence.py` — SqlitePersistence                         | 120           | `src/db/models.py`          |
+| **9**  | `src/live/state/types.py` — LiveState                                       | 40            | `bt/state/types.py`         |
+| **10** | `src/live/config.py` — LiveConfig dataclass                                 | 50            | Nothing                     |
+| **11** | `src/live/daemon.py` — LiveEngine main loop                                 | 250           | Steps 1–10                  |
+| **12** | `src/live/__init__.py` — run_live() entry point                             | 40            | Step 11                     |
+| **13** | CLI integration in `main.py` (new `live` command)                           | 30            | Step 12                     |
+| **14** | Integration + smoke tests (mock IBKR, single tick sequence)                 | 150           | Steps 1–13                  |
 
 **Total: ~1,640 LOC of new code.** Zero changes to existing `src/bt/` or `src/screen/`.
 
@@ -755,12 +757,12 @@ live:
 
 The `BarAggregator` abstraction makes tick-migration non-breaking:
 
-| Phase | Data source | Aggregator | Strategy receives | User-visible change |
-|---|---|---|---|---|
-| Today | IBKR `smh` (pre-computed bars) | None | Pre-computed `Tick` with `interval` set | Nothing |
-| Phase 1 | IBKR `smh` | Still none | Same as today | Internal only |
-| Phase 2 | IBKR `smd` (1s real-time ticks) | `TimeBarAggregator` | `Tick` with `interval="5min"` | Set `tick_source: smd` in config |
-| Phase 3 | IBKR `smd` + custom tick filters | `TimeBarAggregator` + `TickCountAggregator` | Same | Extended config options |
+| Phase   | Data source                      | Aggregator                                  | Strategy receives                       | User-visible change              |
+| ------- | -------------------------------- | ------------------------------------------- | --------------------------------------- | -------------------------------- |
+| Today   | IBKR `smh` (pre-computed bars)   | None                                        | Pre-computed `Tick` with `interval` set | Nothing                          |
+| Phase 1 | IBKR `smh`                       | Still none                                  | Same as today                           | Internal only                    |
+| Phase 2 | IBKR `smd` (1s real-time ticks)  | `TimeBarAggregator`                         | `Tick` with `interval="5min"`           | Set `tick_source: smd` in config |
+| Phase 3 | IBKR `smd` + custom tick filters | `TimeBarAggregator` + `TickCountAggregator` | Same                                    | Extended config options          |
 
 Strategies never know the difference: their `on_tick()` always receives a `Tick`
 with a meaningful `interval` field.
@@ -769,14 +771,14 @@ with a meaningful `interval` field.
 
 ## 12. Risk & Edge Cases
 
-| Concern | Mitigation |
-|---|---|
-| **Duplicate orders** | `LiveEngine` tracks `_pending_orders` dict; same signal from same bar is idempotent |
-| **Engine crash mid-trade** | `IbkrPortfolioAdapter.snapshot()` on restart discovers open positions from IBKR |
-| **IBKR WS disconnect** | `LiveBarFeed` already has reconnection + exponential backoff |
-| **Order rejected** | `IbkrOrderClient.place_order()` catches non-200; logs + notifies; does not crash loop |
-| **Fill confirmation race** | `FillConfirmer.poll()` on each bar + periodic background reconciliation |
-| **Partial fills** | `LiveOrder` tracks `remaining_qty`; fill events carry partial qty; `PortfolioState` handles partial closes |
-| **Market close** | `LiveEngine` checks market hours; pauses processing; resumes on next open |
-| **Account ID missing** | `LiveConfig` validates `account_id` at construction time |
+| Concern                      | Mitigation                                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Duplicate orders**         | `LiveEngine` tracks `_pending_orders` dict; same signal from same bar is idempotent                               |
+| **Engine crash mid-trade**   | `IbkrPortfolioAdapter.snapshot()` on restart discovers open positions from IBKR                                   |
+| **IBKR WS disconnect**       | `LiveBarFeed` already has reconnection + exponential backoff                                                      |
+| **Order rejected**           | `IbkrOrderClient.place_order()` catches non-200; logs + notifies; does not crash loop                             |
+| **Fill confirmation race**   | `FillConfirmer.poll()` on each bar + periodic background reconciliation                                           |
+| **Partial fills**            | `LiveOrder` tracks `remaining_qty`; fill events carry partial qty; `PortfolioState` handles partial closes        |
+| **Market close**             | `LiveEngine` checks market hours; pauses processing; resumes on next open                                         |
+| **Account ID missing**       | `LiveConfig` validates `account_id` at construction time                                                          |
 | **Bracket order references** | IBKR requires `parent_id` in the child; the client ensures the entry order's returned ID is threaded to its SL/TP |

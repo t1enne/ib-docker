@@ -1,5 +1,7 @@
+STRATEGY_TYPE = "trend_following"
+
 import src.bt.indicators as ta
-from src.bt.algos.utils import open, close, htf_candles
+from src.bt.strategies.utils import open, close, htf_candles
 from typing import List, Dict, TYPE_CHECKING, Optional, cast
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig

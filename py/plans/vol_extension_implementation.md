@@ -56,7 +56,7 @@ class ModelState:
 
 ## Phase 2: Vol Extension Pullback Algo
 
-### 2.1 Create `src/bt/algos/vol_extension_pullback.py`
+### 2.1 Create `src/bt/strategies/vol_extension_pullback.py`
 
 #### Signal Phases (per symbol)
 
@@ -177,10 +177,10 @@ def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
 
 ## Phase 3: Integration
 
-### 3.1 Update `src/bt/algos/__init__.py`
+### 3.1 Update `src/bt/strategies/__init__.py`
 
 ```python
-import src.bt.algos.vol_extension_pullback
+import src.bt.strategies.vol_extension_pullback
 
 __all__ = ["pairs_trading_functional", "ema_cross", "vol_extension_pullback"]
 ```
@@ -190,7 +190,7 @@ __all__ = ["pairs_trading_functional", "ema_cross", "vol_extension_pullback"]
 **Import (line ~18)**:
 
 ```python
-from src.bt.algos import ema_cross, pairs_trading_functional, vol_extension_pullback
+from src.bt.strategies import ema_cross, pairs_trading_functional, vol_extension_pullback
 ```
 
 **\_strat_wrap() (line ~215)**:
@@ -220,10 +220,10 @@ elif self.config.strategy_type == "volatility_expansion_pullback_continuation":
 
 ## Files to Create/Modify
 
-| File                                     | Action                                              |
-| ---------------------------------------- | --------------------------------------------------- |
-| `src/bt/models/correlation_model.py`     | Create                                              |
-| `src/bt/state/types.py`                  | Modify - add correlation_model field                |
-| `src/bt/engine/backtest.py`              | Modify - integrate correlation model + new strategy |
-| `src/bt/algos/vol_extension_pullback.py` | Create                                              |
-| `src/bt/algos/__init__.py`               | Modify - add export                                 |
+| File                                          | Action                                              |
+| --------------------------------------------- | --------------------------------------------------- |
+| `src/bt/models/correlation_model.py`          | Create                                              |
+| `src/bt/state/types.py`                       | Modify - add correlation_model field                |
+| `src/bt/engine/backtest.py`                   | Modify - integrate correlation model + new strategy |
+| `src/bt/strategies/vol_extension_pullback.py` | Create                                              |
+| `src/bt/strategies/__init__.py`               | Modify - add export                                 |

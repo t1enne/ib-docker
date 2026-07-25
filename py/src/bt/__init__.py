@@ -1,7 +1,8 @@
 """BT module — backtesting engine."""
+
 from src.bt.cli import bt_group
 
-from src.bt.algos import init_strat
+from src.bt.strategies import init_strat
 from src.bt.engine.backtest import Backtest, candle_generator, run_backtest, run
 from src.bt.engine.handlers import (
     ExecutionHandler,

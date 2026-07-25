@@ -48,10 +48,10 @@ The innovation (spread) is then genuinely mean-zero by construction. The t-stat
 
 Why not raw prices? Practitioners use both:
 
-| Space | Observation | β meaning | Signal units | Best for |
-|-------|-------------|-----------|--------------|----------|
-| Log | `log(P1) = α + β·log(P2) + v` | Elasticity (% move ratio) | Dimensionless | Long-horizon, cointegration |
-| Raw | `P1 = α + β·P2 + v` | Hedge ratio (share ratio) | Dollars | Short-horizon, intraday |
+| Space | Observation                   | β meaning                 | Signal units  | Best for                    |
+| ----- | ----------------------------- | ------------------------- | ------------- | --------------------------- |
+| Log   | `log(P1) = α + β·log(P2) + v` | Elasticity (% move ratio) | Dimensionless | Long-horizon, cointegration |
+| Raw   | `P1 = α + β·P2 + v`           | Hedge ratio (share ratio) | Dollars       | Short-horizon, intraday     |
 
 The existing codebase operates in log-space throughout (`_ols_log_params`,
 `calculate_zscore_spread`, the backtest strategy, the current Kalman). Switching
@@ -79,7 +79,7 @@ event means the same thing for any pair.
 | `src/kalman/cli.py`                     | Update output columns / plot labels                                                                                                                                 | Low                               |
 | `src/spread/__init__.py`                | Update the `spread()` plotting function: remove z-score EMA subplot, add t-stat and α subplots                                                                      | Low                               |
 
-**Not touched:** `src/bt/algos/pairs_trading_functional.py` (it doesn't use
+**Not touched:** `src/bt/strategies/pairs_trading_functional.py` (it doesn't use
 the Kalman), `src/bt/zscore.py`, `src/utils.py`.
 
 ---

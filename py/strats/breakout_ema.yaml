@@ -8,7 +8,6 @@ initial_capital: 10000
 commission: 0.0005
 strategy_type: breakout_ema
 bar: 1h
-plot: true
 stop_loss: 0.2
 take_profit: 0.5
 position_size: 0.2

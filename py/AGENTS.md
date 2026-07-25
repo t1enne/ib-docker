@@ -141,7 +141,7 @@ src/bt/
 ├── state/types.py      # All immutable state dataclasses
 ├── types.py            # Protocols, StrategyConfig, enums
 ├── engine/             # Backtest loop (pure functional)
-├── algos/              # Strategy implementations
+├── strategies/              # Strategy implementations
 ├── models/             # Z-score, regime, market data models
 ├── portfolio/pure.py   # Pure functions for position/PnL
 ├── execution/pure.py   # Signal → fill execution

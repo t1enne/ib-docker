@@ -1,6 +1,8 @@
+STRATEGY_TYPE = "volatility_expansion_pullback_continuation"
+
 from src.bt.portfolio import TradeExitReason
 import src.bt.indicators as ta
-from src.bt.algos.utils import open, close
+from src.bt.strategies.utils import open, close
 from typing import List, Dict, TYPE_CHECKING, Optional
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 from src.bt.types import PlotConfig

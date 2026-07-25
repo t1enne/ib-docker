@@ -701,7 +701,7 @@ def update_regime(
 **Files to Create**:
 
 - `src/bt/strategies/pure.py` - Strategy interface
-- `src/bt/algos/pairs_trading_pure.py` - Pure pairs strategy
+- `src/bt/strategies/pairs_trading_pure.py` - Pure pairs strategy
 
 ```python
 # src/bt/strategies/pure.py
@@ -724,7 +724,7 @@ class PureStrategy(Protocol):
         """
         ...
 
-# src/bt/algos/pairs_trading_pure.py
+# src/bt/strategies/pairs_trading_pure.py
 
 def pairs_trading_strategy(
     model_state: ModelState,

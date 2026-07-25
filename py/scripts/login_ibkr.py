@@ -25,6 +25,7 @@ import os
 from typing import Literal
 
 from playwright.async_api import async_playwright
+from src.utils import load_env
 
 TradingMode = Literal["paper", "live"]
 
@@ -93,4 +94,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    load_env()
     main()

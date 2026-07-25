@@ -103,19 +103,18 @@ def on_candle(
     if np.isnan(z_score):
         return signals
 
-    # Build Tick objects from raw row cache (avoid DataFrame .loc[] overhead)
-    from src.bt.engine.backtest import _raw_candle_rows
-
-    rows1 = _raw_candle_rows.get(sym1, [])
-    rows2 = _raw_candle_rows.get(sym2, [])
-    if not rows1 or not rows2:
+    # Build Candle objects from state.candles DataFrames.
+    # DataFrames are refreshed every _CANDLE_BATCH_SIZE rows, so .iloc[-1] is up-to-date.
+    df1 = state.candles.get(sym1)
+    df2 = state.candles.get(sym2)
+    if df1 is None or df2 is None or len(df1) == 0 or len(df2) == 0:
         return signals
 
-    row1 = rows1[-1]
-    row2 = rows2[-1]
+    row1 = df1.iloc[-1]
+    row2 = df2.iloc[-1]
 
     tick1 = Candle(
-        timestamp=cast(pd.Timestamp, row1["timestamp"]),
+        timestamp=cast(pd.Timestamp, row1.name),
         symbol=sym1,
         open=cast(float, row1["open"]),
         high=cast(float, row1["high"]),
@@ -124,7 +123,7 @@ def on_candle(
         volume=cast(float, row1["volume"]),
     )
     tick2 = Candle(
-        timestamp=cast(pd.Timestamp, row2["timestamp"]),
+        timestamp=cast(pd.Timestamp, row2.name),
         symbol=sym2,
         open=cast(float, row2["open"]),
         high=cast(float, row2["high"]),

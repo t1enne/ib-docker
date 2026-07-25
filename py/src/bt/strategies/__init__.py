@@ -3,6 +3,9 @@
 Scans src/bt/strategies/ for modules with on_candle + STRATEGY_TYPE.
 No manual registration needed — drop a .py file with STRATEGY_TYPE
 and on_candle() and it's available.
+
+Typed params: if a strategy module defines a Params dataclass (subclass of
+StrategyParams), the engine auto-instantiates it from strategy_params dict.
 """
 
 from __future__ import annotations
@@ -10,7 +13,10 @@ from __future__ import annotations
 import glob
 import importlib
 import os
-from typing import Protocol, cast
+from typing import Protocol, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from src.bt.strategies.types import StrategyParams
 
 
 class _StrategyModule(Protocol):
@@ -18,9 +24,10 @@ class _StrategyModule(Protocol):
 
     STRATEGY_TYPE: str
     __name__: str
+    Params: type[StrategyParams] | None
 
     def on_candle(
-        self, state: object, candle: object, params: dict
+        self, state: object, candle: object, params: object
     ) -> list[object]: ...
 
 
@@ -76,4 +83,13 @@ def init_strat(strat_name: str) -> _StrategyModule:
         ) from None
 
 
-__all__ = ["init_strat"]
+def resolve_params(strat_name: str, raw_params: dict) -> object:
+    """Instantiate typed Params if strategy defines them, else return raw dict."""
+    mod = init_strat(strat_name)
+    params_cls = getattr(mod, "Params", None)
+    if params_cls is None:
+        return raw_params
+    return params_cls.from_dict(raw_params)
+
+
+__all__ = ["init_strat", "resolve_params"]

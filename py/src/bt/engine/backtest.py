@@ -109,6 +109,11 @@ def run_backtest(
     strategy_fn = strategy_mod.on_candle if strategy_mod else None
     last_symbol = symbols[-1] if symbols else None
 
+    # Resolve typed params once if strategy defines them
+    from src.bt.strategies import resolve_params
+
+    resolved_params = resolve_params(config.strategy_type, config.strategy_params)
+
     def get_initial_state():
         start_date = parse_timestamp(config.trading_start)
         return create_initial_backtest_state(
@@ -146,7 +151,12 @@ def run_backtest(
 
         # Stage 6: generate new signals (only on last symbol per timestamp)
         state = _generate_signals(
-            state, candle, config, strategy_fn, last_symbol, can_trade
+            state,
+            candle,
+            resolved_params,
+            strategy_fn,
+            last_symbol,
+            can_trade,
         )
 
         # Stage 7: execute signals generated this tick
@@ -224,7 +234,7 @@ def _execute_pending(
 def _generate_signals(
     state: BacktestState,
     candle: Candle,
-    config: StrategyConfig,
+    resolved_params: object,
     strategy_fn: Optional[Callable],
     last_symbol: Optional[str],
     can_trade: bool,
@@ -233,13 +243,7 @@ def _generate_signals(
     if not (can_trade and strategy_fn and candle.symbol == last_symbol):
         return state
 
-    strategy_params = dict(config.strategy_params or {})
-    if config.rolling_window_size is not None:
-        strategy_params.setdefault("rolling_window_size", config.rolling_window_size)
-    if config.symbols:
-        strategy_params.setdefault("symbols", list(config.symbols))
-
-    new_signals = strategy_fn(state, candle, strategy_params)
+    new_signals = strategy_fn(state, candle, resolved_params)
     if not new_signals:
         return state
 

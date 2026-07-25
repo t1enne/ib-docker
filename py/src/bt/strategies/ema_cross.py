@@ -1,158 +1,117 @@
-import src.bt.indicators as ta
-from src.bt.strategies.utils import open, close
+from dataclasses import dataclass
 from typing import List, Dict, Optional
-from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
-from src.bt.types import PlotConfig, StrategyConfig
 import pandas as pd
+
+import src.bt.indicators as ta
+from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
+from src.bt.strategies.types import StrategyParams
+from src.bt.strategies.utils import open, close
+from src.bt.types import PlotConfig, StrategyConfig
 
 STRATEGY_TYPE = "ema_cross"
 
 
-regime = None
+@dataclass(frozen=True)
+class Params(StrategyParams):
+    fast: int = 9
+    slow: int = 14
+    vol_window: int = 20
+    vol_multiplier: float = 1.5
+    atr_period: int = 14
+    atr_threshold: float = 0.5
+    ema_threshold: float = 0.05
 
 
 def is_ranging(
-    closes: pd.Series, high: pd.Series, low: pd.Series, strategy_params: dict
+    closes: pd.Series, high: pd.Series, low: pd.Series, params: Params
 ) -> bool:
     """Detect ranging market using EMA convergence + ATR."""
-    fast = strategy_params.get("fast", 9)
-    slow = strategy_params.get("slow", 14)
-    # atr
-    atr_threshold = strategy_params.get("atr_threshold", 0.5)
-    atr_period = strategy_params.get("atr_period", 14)
-
-    # ema
-    strategy_params.get("ema_threshold", 0.05)
-    ema_fast = ta.ema(closes, fast).iloc[-1]
-    ema_slow = ta.ema(closes, slow).iloc[-1]
-    round(abs(ema_fast - ema_slow) / closes.iloc[-1], 4)
-
-    if len(closes) < max(slow, atr_period):
+    if len(closes) < max(params.slow, params.atr_period):
         return True
 
-    atr_val = ta.atr(high, low, closes, atr_period).iloc[-1]
-    atr_ranging = atr_val < atr_threshold
+    ema_fast = ta.ema(closes, params.fast).iloc[-1]
+    ema_slow = ta.ema(closes, params.slow).iloc[-1]
+    ema_spread = round(abs(ema_fast - ema_slow) / closes.iloc[-1], 4)
 
-    if atr_ranging:
-        return True
-
-    return False
-
-
-def handle_ranging(tick: Candle, position: Optional[Position] = None):
-    if not position:
-        return []
-
-    if position and position.type == ActionType.short:
-        return close(tick, position, "[bear] ranging - short")
-    if position and position.type == ActionType.long:
-        return close(tick, position, "[bear] ranging - long")
-
-    return []
+    atr_val = ta.atr(high, low, closes, params.atr_period).iloc[-1]
+    return atr_val < params.atr_threshold or ema_spread < params.ema_threshold
 
 
-def volume_confirmed(
-    volume: pd.Series, window: int = 20, threshold: float = 1.5
-) -> bool:
+def volume_confirmed(volume: pd.Series, params: Params) -> bool:
     """Check if current volume is above threshold * average."""
-    if len(volume) < window:
+    if len(volume) < params.vol_window:
         return True
-    avg_vol = volume.iloc[-window:].mean()
-    return volume.iloc[-1] > avg_vol * threshold
+    avg_vol = volume.iloc[-params.vol_window :].mean()
+    return volume.iloc[-1] > avg_vol * params.vol_multiplier
 
 
 def on_candle(
-    state: BacktestState, candle: Candle, strategy_params: dict
+    state: BacktestState, candle: Candle, params: Params
 ) -> List[TradeSignal]:
     symbol = candle.symbol
     position = state.portfolio.positions.get(symbol)
     candles = state.candles[symbol]
     closes = candles["close"]
-    candles["volume"]
     high = candles["high"]
     low = candles["low"]
-    fast = strategy_params.get("fast", 9)
-    slow = strategy_params.get("slow", 14)
-    strategy_params.get("vol_window", 20)
-    strategy_params.get("vol_multiplier", 1.5)
 
-    if len(closes) < slow:
+    if len(closes) < params.slow:
         return []
 
-    ema_fast = ta.ema(closes, fast).iloc[-1]
-    ema_slow = ta.ema(closes, slow).iloc[-1]
-    regime = "BULL" if ema_fast > ema_slow else "BEAR"
-    if is_ranging(closes, high, low, strategy_params):
+    ema_fast = ta.ema(closes, params.fast).iloc[-1]
+    ema_slow = ta.ema(closes, params.slow).iloc[-1]
+
+    regime: str
+    if is_ranging(closes, high, low, params):
         regime = "RANGE"
+    elif ema_fast > ema_slow:
+        regime = "BULL"
+    else:
+        regime = "BEAR"
 
     if regime == "RANGE":
-        return handle_ranging(candle, position)
+        return _handle_ranging(candle, position)
 
-    if regime == "BULL":
-        return handle_bull(state, candle, strategy_params, candles)
-
-    return handle_bear(state, candle, strategy_params, candles)
+    return _handle_trending(state, candle, params, candles, regime)
 
 
-def handle_bear(
-    state: BacktestState, tick: Candle, strategy_params: dict, candles: pd.DataFrame
-):
-    return handle_entry_exit(state, tick, strategy_params, candles, "BEAR")
+def _handle_ranging(tick: Candle, position: Optional[Position]) -> List[TradeSignal]:
+    if not position:
+        return []
+    if position.type == ActionType.short:
+        return close(tick, position, "[range] close short")
+    return close(tick, position, "[range] close long")
 
 
-def handle_bull(
-    state: BacktestState, tick: Candle, strategy_params: dict, candles: pd.DataFrame
-):
-    return handle_entry_exit(state, tick, strategy_params, candles, "BULL")
-
-
-def handle_entry_exit(
+def _handle_trending(
     state: BacktestState,
     tick: Candle,
-    strategy_params: dict,
+    params: Params,
     candles: pd.DataFrame,
     regime: str,
-):
-    fast = strategy_params.get("fast", 9)
-    slow = strategy_params.get("slow", 14)
-    vol_window = strategy_params.get("vol_window", 20)
-    vol_multiplier = strategy_params.get("vol_multiplier", 1.5)
-
+) -> List[TradeSignal]:
     closes = candles["close"]
     volumes = candles["volume"]
 
-    ta.ema(closes, fast).iloc[-1]
-    ema_slow = ta.ema(closes, slow).iloc[-1]
+    ema_slow = ta.ema(closes, params.slow).iloc[-1]
     last_close = closes.iloc[-1]
     position = state.portfolio.positions.get(tick.symbol)
 
-    with_volume = volume_confirmed(volumes, vol_window, vol_multiplier)
-    hedge = 1.0
-    # if extremely volatile, use the close instead of the ema
-    fast_signal = last_close
+    with_volume = volume_confirmed(volumes, params)
+    fast_signal = last_close  # use close instead of ema when volatile
     crossed_above = fast_signal > ema_slow
     crossed_below = ema_slow > fast_signal
 
     if not position:
-        if regime == "BULL":
-            if crossed_above and with_volume:
-                if hedge != 1.0:
-                    print("Hedging!")
-                return open(tick, ActionType.long, f"emaspread: {0}", hedge)
-        else:
-            if crossed_below and with_volume:
-                if hedge != 1.0:
-                    print("Hedging!")
-                return open(tick, ActionType.short, f"emaspread: {0}", hedge)
-        return []
-
-    if not position:
+        if regime == "BULL" and crossed_above and with_volume:
+            return open(tick, ActionType.long, f"[{regime.lower()}] enter")
+        if regime == "BEAR" and crossed_below and with_volume:
+            return open(tick, ActionType.short, f"[{regime.lower()}] enter")
         return []
 
     is_long = position.type == ActionType.long
     if is_long and crossed_below:
         return close(tick, position, f"[{regime.lower()}] ema cross below")
-
     if not is_long and crossed_above:
         return close(tick, position, f"[{regime.lower()}] ema cross above")
 
@@ -161,37 +120,34 @@ def handle_entry_exit(
 
 def plot(state: BacktestState, config: StrategyConfig) -> PlotConfig:
     """Calculate EMAs from candles and return as price overlays."""
-    fast = config.strategy_params.get("fast", 9)
-    slow = config.strategy_params.get("slow", 14)
-    atr_period = config.strategy_params.get("atr_period", 14)
+    params = Params.from_dict(config.strategy_params)
 
     price_overlays: Dict[str, Dict[str, pd.Series]] = {}
 
     for symbol in config.symbols:
         closes = state.candles[symbol]["close"]
         volumes = state.candles[symbol]["volume"]
-        if len(closes) < slow:
+        if len(closes) < params.slow:
             continue
 
-        ema_fast = ta.ema(closes, fast)
-        ema_slow = ta.ema(closes, slow)
+        ema_fast = ta.ema(closes, params.fast)
+        ema_slow = ta.ema(closes, params.slow)
         ema_spread = abs(ema_fast - ema_slow) / closes.iloc[-1]
 
         high = state.candles[symbol]["high"]
         low = state.candles[symbol]["low"]
-        atr = ta.atr(high, low, closes, atr_period)
-
+        atr = ta.atr(high, low, closes, params.atr_period)
         obv = ta.obv(closes, volumes)
 
         price_overlays[symbol] = {
-            f"ema_{fast}": ema_fast,
-            f"ema_{slow}": ema_slow,
+            f"ema_{params.fast}": ema_fast,
+            f"ema_{params.slow}": ema_slow,
         }
 
-        sublots = [
-            (f"ema_spread {fast}/{slow}", ema_spread),
+        subplots: List[tuple[str, pd.Series]] = [
+            (f"ema_spread {params.fast}/{params.slow}", ema_spread),
             ("atr", atr),
             ("obv", obv),
         ]
 
-    return PlotConfig(price_overlays=price_overlays, subplots=sublots)
+    return PlotConfig(price_overlays=price_overlays, subplots=subplots)

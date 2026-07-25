@@ -4,8 +4,7 @@ from datetime import datetime, timedelta, date
 from typing import Optional, cast
 
 from peewee import fn
-from src.db.models import CandleSchema
-from src.db import db
+from src.syncm.types import CandleSchema, db
 from ib_rest_api_client.api.trading_market_data import get_iserver_marketdata_history
 from ib_rest_api_client.models import IserverHistoryBidAskResponse
 

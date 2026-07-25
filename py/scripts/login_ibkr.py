@@ -20,8 +20,6 @@ from pathlib import Path
 _proj_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_proj_root))
 
-from src.utils import load_env
-
 import asyncio
 import os
 from typing import Literal
@@ -95,5 +93,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    load_env()
     main()

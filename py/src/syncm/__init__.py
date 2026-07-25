@@ -18,7 +18,7 @@ from typing import Optional
 
 import yaml
 
-from src.db.models import SymbolSchema, ISymbol
+from src.syncm.types import SymbolSchema, ISymbol
 from src.syncm.ibkr_layer.candles import (
     candles_batch,
     get_existing_range,

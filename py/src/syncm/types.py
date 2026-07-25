@@ -10,11 +10,86 @@ Types defined here:
   FetchPlan      — frozen per-symbol gap plan for dry-run
   PreviewResult  — frozen result of a dry-run preview
   ProgressFn     — Protocol for progress callbacks (I/O boundary)
+  ISymbol        — dataclass mirroring SymbolSchema peewee model
+  ICandle        — dataclass mirroring CandleSchema peewee model
+  SymbolSchema   — peewee ORM model for symbols
+  CandleSchema   — peewee ORM model for candles
+  db             — SqliteDatabase instance (shared by models)
 """
+
+import atexit
+import os
 
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional, Protocol, TypedDict
+
+from peewee import Model, IntegerField, CharField, FloatField, SqliteDatabase
+
+
+# ── Database instance ───────────────────────────────────────────
+
+db_path = os.path.join(os.getcwd(), "..", "data", "db.sqlite")
+db = SqliteDatabase(db_path, pragmas={"journal_mode": "wal"})
+atexit.register(db.close)
+
+
+# ── Dataclass mirrors of ORM models ────────────────────────────
+
+
+@dataclass
+class ISymbol:
+    """Dataclass matching SymbolSchema Peewee model."""
+
+    conid: int
+    ticker: str
+    market: str
+    currency: str
+    name: Optional[str] = None
+
+
+@dataclass
+class ICandle:
+    """Dataclass matching CandleSchema Peewee model."""
+
+    conid: int
+    ticker: str
+    timestamp: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+# ── Peewee ORM models ──────────────────────────────────────────
+
+
+class SymbolSchema(Model):
+    conid = IntegerField(primary_key=True)
+    ticker = CharField()
+    name = CharField(null=True)
+    market = CharField()
+    currency = CharField()
+
+    class Meta:
+        database = db
+        table_name = "symbol"
+
+
+class CandleSchema(Model):
+    conid = IntegerField()
+    ticker = CharField()
+    timestamp = IntegerField()
+    open = FloatField()
+    high = FloatField()
+    low = FloatField()
+    close = FloatField()
+    volume = FloatField()
+
+    class Meta:
+        database = db
+        table_name = "candle"
 
 
 # ── Candle data ──────────────────────────────────────────────────

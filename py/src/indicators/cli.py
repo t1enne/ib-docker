@@ -12,7 +12,10 @@ import sys
 from typing import Optional
 
 import click
+import numpy as np
 import pandas as pd
+
+from src.utils import to_optional_ts
 
 from src.bt.indicators import (
     adx,
@@ -20,9 +23,7 @@ from src.bt.indicators import (
     bollinger_bands,
     ema,
     macd,
-    momentum,
     rsi,
-    sma,
     volatility,
 )
 
@@ -69,13 +70,23 @@ def _get_close(df: pd.DataFrame, symbol: Optional[str]) -> pd.Series:
 def _write_series(result: pd.Series, name: str) -> None:
     """Write a Series as JSON lines with timestamp + value."""
     for ts, val in result.dropna().items():
-        click.echo(json.dumps({"t": ts.isoformat() if hasattr(ts, "isoformat") else str(ts), name: round(float(val), 6)}, default=str))
+        click.echo(
+            json.dumps(
+                {
+                    "t": ts.isoformat() if isinstance(ts, pd.Timestamp) else str(ts),
+                    name: round(float(val), 6),
+                },
+                default=str,
+            )
+        )
 
 
 def _write_df(result: pd.DataFrame) -> None:
     """Write a DataFrame as JSON lines."""
     for idx, row in result.dropna().iterrows():
-        rec: dict = {"t": idx.isoformat() if hasattr(idx, "isoformat") else str(idx)}
+        rec: dict = {
+            "t": idx.isoformat() if isinstance(idx, pd.Timestamp) else str(idx)
+        }
         for col in result.columns:
             rec[col] = round(float(row[col]), 6) if not np.isnan(row[col]) else None
         click.echo(json.dumps(rec, default=str))
@@ -95,13 +106,22 @@ def ind_group():
 @click.option("--from", "-f", "from_date", help="Start date for DB query (YYYY-MM-DD)")
 @click.option("--to", "-t", "to_date", help="End date for DB query (YYYY-MM-DD)")
 @click.option("--bar", default="1h", help="Bar size for DB query")
-def ema_cmd(span: int, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def ema_cmd(
+    span: int,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Exponential Moving Average."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol, "--symbol required for DB query"
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     close = _get_close(df, symbol)
     result = ema(close, span)
     _write_series(result, f"ema_{span}")
@@ -113,13 +133,22 @@ def ema_cmd(span: int, symbol: Optional[str], from_date: Optional[str], to_date:
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
-def rsi_cmd(window: int, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def rsi_cmd(
+    window: int,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Relative Strength Index."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     close = _get_close(df, symbol)
     result = rsi(close, window)
     _write_series(result, "rsi")
@@ -131,13 +160,22 @@ def rsi_cmd(window: int, symbol: Optional[str], from_date: Optional[str], to_dat
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
-def atr_cmd(window: int, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def atr_cmd(
+    window: int,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Average True Range."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     result = atr(df["high"], df["low"], df["close"], window)
     _write_series(result, "atr")
 
@@ -150,13 +188,24 @@ def atr_cmd(window: int, symbol: Optional[str], from_date: Optional[str], to_dat
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
-def macd_cmd(fast: int, slow: int, signal: int, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def macd_cmd(
+    fast: int,
+    slow: int,
+    signal: int,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """MACD indicator."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     close = _get_close(df, symbol)
     result = macd(close, fast, slow, signal)
     _write_df(result)
@@ -169,16 +218,30 @@ def macd_cmd(fast: int, slow: int, signal: int, symbol: Optional[str], from_date
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
-def bbands_cmd(window: int, num_std: float, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def bbands_cmd(
+    window: int,
+    num_std: float,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Bollinger Bands."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     close = _get_close(df, symbol)
     upper, middle, lower = bollinger_bands(close, window, num_std)
-    _write_df(pd.DataFrame({"upper": upper, "middle": middle, "lower": lower}, index=close.index))
+    _write_df(
+        pd.DataFrame(
+            {"upper": upper, "middle": middle, "lower": lower}, index=close.index
+        )
+    )
 
 
 @ind_group.command(name="adx")
@@ -187,13 +250,22 @@ def bbands_cmd(window: int, num_std: float, symbol: Optional[str], from_date: Op
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
-def adx_cmd(window: int, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def adx_cmd(
+    window: int,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Average Directional Index."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     result = adx(df["high"], df["low"], df["close"], window)
     _write_series(result, "adx")
 
@@ -205,13 +277,23 @@ def adx_cmd(window: int, symbol: Optional[str], from_date: Optional[str], to_dat
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
-def vol_cmd(window: int, annualized: bool, symbol: Optional[str], from_date: Optional[str], to_date: Optional[str], bar: str):
+def vol_cmd(
+    window: int,
+    annualized: bool,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Rolling volatility."""
     df = _read_ohlcv_stdin()
     if df.empty and from_date:
         from src.shared.db import query_candles
+
         assert symbol
-        df = query_candles(symbol.upper(), pd.Timestamp(from_date) if from_date else None, pd.Timestamp(to_date) if to_date else None, bar)
+        df = query_candles(
+            symbol.upper(), to_optional_ts(from_date), to_optional_ts(to_date), bar
+        )
     close = _get_close(df, symbol)
     result = volatility(close, window, annualized)
     _write_series(result, "volatility")

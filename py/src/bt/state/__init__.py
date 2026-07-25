@@ -34,6 +34,7 @@ from src.bt.state.factories import (
 
 __all__ = [
     # Types
+    "Candle",
     "Tick",
     "Position",
     "Trade",

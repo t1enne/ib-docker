@@ -1,4 +1,4 @@
-from ib_rest_api_client import AuthenticatedClient, Client
+from ib_rest_api_client import Client
 import httpx
 from typing import Dict, Any
 from src.db.models import SymbolSchema, ISymbol

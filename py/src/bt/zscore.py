@@ -1,7 +1,6 @@
 from collections.abc import Sequence
-from typing import List, Tuple
+from typing import Tuple
 import numpy as np
-import pandas as pd
 
 
 def _ols_log_params(x: np.ndarray, y: np.ndarray) -> Tuple[float, float]:

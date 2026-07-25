@@ -29,8 +29,9 @@ import importlib.util
 import logging
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
+from src.screen.style import Fmt, Style
 from src.screen.types import (
     ScreenFn,
     ScreenResult,
@@ -195,9 +196,6 @@ async def run_screen(
         results=tuple(ranked),
         params=dict(params),  # type: ignore[arg-type]
     )
-
-
-from src.screen.style import Fmt, Style, PCT_DISPLAY_KEYS
 
 
 # ── Table rendering ────────────────────────────────────────────

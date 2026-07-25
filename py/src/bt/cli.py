@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
 
 import click
-import pandas as pd
 
 
 @click.group(name="bt")
@@ -22,8 +20,14 @@ def bt_group():
 
 @bt_group.command(name="run")
 @click.argument("strategy_file", type=click.Path(exists=True))
-@click.option("--format", "-F", "fmt", type=click.Choice(["jsonl", "text"]), default="text",
-              help="Output format: jsonl (equity curve + trades) or text (summary)")
+@click.option(
+    "--format",
+    "-F",
+    "fmt",
+    type=click.Choice(["jsonl", "text"]),
+    default="text",
+    help="Output format: jsonl (equity curve + trades) or text (summary)",
+)
 def bt_run(strategy_file: str, fmt: str):
     """Run a backtest from a strategy YAML config file.
 
@@ -57,7 +61,7 @@ def bt_analyze(strategy_file: str):
     output = asyncio.run(backtest_async(config))
 
     # Parse metrics from text output
-    import re
+
     metrics: dict = {}
     for line in output.split("\n"):
         if ":" in line:
@@ -99,14 +103,16 @@ def _output_jsonl_from_text(text: str) -> None:
             parts = line.split()
             if len(parts) >= 5:
                 try:
-                    trades.append({
-                        "symbol": parts[0],
-                        "entry": parts[1],
-                        "exit": parts[2],
-                        "pnl": parts[3],
-                        "reason": " ".join(parts[4:]) if len(parts) > 4 else "",
-                    })
-                except (ValueError, IndexError):
+                    trades.append(
+                        {
+                            "symbol": parts[0],
+                            "entry": parts[1],
+                            "exit": parts[2],
+                            "pnl": parts[3],
+                            "reason": " ".join(parts[4:]) if len(parts) > 4 else "",
+                        }
+                    )
+                except ValueError, IndexError:
                     pass
         else:
             if ":" in line and not line.startswith(" "):

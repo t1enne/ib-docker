@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 import click
 import pandas as pd
+
+from src.utils import to_optional_ts
 
 from src.shared.db import query_candles
 
@@ -29,7 +31,7 @@ def _jsonl_out(df: pd.DataFrame) -> str:
     lines: list[str] = []
     for idx, row in df.iterrows():
         rec = {
-            "t": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
+            "t": idx.isoformat() if isinstance(idx, pd.Timestamp) else str(idx),
             "o": row.get("open"),
             "h": row.get("high"),
             "l": row.get("low"),
@@ -105,11 +107,15 @@ def data_group():
 @click.option("--from", "-f", "from_date", help="Start date (YYYY-MM-DD)")
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 @click.option("--bar", default="1h", help="Bar size (1h, 1d, etc.)")
-@click.option("--format", "-F", "fmt", type=click.Choice(["jsonl", "csv"]), default="jsonl")
-def query_cmd(symbol: str, from_date: Optional[str], to_date: Optional[str], bar: str, fmt: str):
+@click.option(
+    "--format", "-F", "fmt", type=click.Choice(["jsonl", "csv"]), default="jsonl"
+)
+def query_cmd(
+    symbol: str, from_date: Optional[str], to_date: Optional[str], bar: str, fmt: str
+):
     """Query OHLCV candles for SYMBOL from the local database."""
-    start_ts = pd.Timestamp(from_date) if from_date else None
-    end_ts = pd.Timestamp(to_date) if to_date else None
+    start_ts = to_optional_ts(from_date)
+    end_ts = to_optional_ts(to_date)
 
     df = query_candles(symbol.upper(), start_ts, end_ts, bar)
     _write_output(df, fmt)
@@ -117,11 +123,17 @@ def query_cmd(symbol: str, from_date: Optional[str], to_date: Optional[str], bar
 
 @data_group.command(name="dl")
 @click.argument("symbols", nargs=-1, required=True)
-@click.option("--from", "-f", "from_date", required=True, help="Start date (YYYY-MM-DD)")
+@click.option(
+    "--from", "-f", "from_date", required=True, help="Start date (YYYY-MM-DD)"
+)
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 @click.option("--bar", default="1h", help="Bar size (1h, 1d, etc.)")
-@click.option("--format", "-F", "fmt", type=click.Choice(["jsonl", "csv"]), default="jsonl")
-def dl_cmd(symbols: tuple[str, ...], from_date: str, to_date: Optional[str], bar: str, fmt: str):
+@click.option(
+    "--format", "-F", "fmt", type=click.Choice(["jsonl", "csv"]), default="jsonl"
+)
+def dl_cmd(
+    symbols: tuple[str, ...], from_date: str, to_date: Optional[str], bar: str, fmt: str
+):
     """Download historical data from IBKR for SYMBOLS."""
     from src.syncm import sync_data
 
@@ -133,24 +145,28 @@ def dl_cmd(symbols: tuple[str, ...], from_date: str, to_date: Optional[str], bar
 
     result = asyncio.run(_run())
     click.echo(
-        json.dumps({
-            "resolved": result.resolved,
-            "fetched": len(result.fetched),
-            "gaps_found": result.gaps_found,
-        }),
+        json.dumps(
+            {
+                "resolved": result.resolved,
+                "fetched": len(result.fetched),
+                "gaps_found": result.gaps_found,
+            }
+        ),
         err=True,
     )
 
     for sym in symbols:
-        start_ts = pd.Timestamp(from_date)
-        end_ts = pd.Timestamp(to_date) if to_date else None
+        start_ts = to_optional_ts(from_date)
+        end_ts = to_optional_ts(to_date)
         df = query_candles(sym.upper(), start_ts, end_ts, bar)
         _write_output(df, fmt)
 
 
 @data_group.command(name="preview")
 @click.argument("symbols", nargs=-1, required=True)
-@click.option("--from", "-f", "from_date", required=True, help="Start date (YYYY-MM-DD)")
+@click.option(
+    "--from", "-f", "from_date", required=True, help="Start date (YYYY-MM-DD)"
+)
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 def preview_cmd(symbols: tuple[str, ...], from_date: str, to_date: Optional[str]):
     """Preview what gaps exist without downloading."""

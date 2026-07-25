@@ -1,7 +1,5 @@
-from dataclasses import asdict
-from src.bt.types import StrategyConfig
 from src.bt.state import Candle, BacktestState
-from typing import List, Generator, TypedDict, cast
+from typing import Generator, cast
 from src.market_data.resample import resample_multiindex
 import pandas as pd
 import numpy as np

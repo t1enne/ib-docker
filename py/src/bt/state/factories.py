@@ -1,7 +1,6 @@
 """Factory functions for creating initial states."""
 
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, cast, Any
+from typing import List, Optional
 import pandas as pd
 
 from src.bt.state.types import (

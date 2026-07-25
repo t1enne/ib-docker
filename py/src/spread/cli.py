@@ -16,6 +16,7 @@ import pandas as pd
 
 from src.kalman.pure import run_pairs_kalman
 from src.kalman.types import PairsKalmanConfig
+from src.utils import to_optional_ts
 
 
 @click.group(name="spread")
@@ -26,7 +27,9 @@ def spread_group():
 @spread_group.command(name="analyze")
 @click.argument("symbol1", required=False)
 @click.argument("symbol2", required=False)
-@click.option("--stdin", "use_stdin", is_flag=True, help="Read OHLCV from stdin (two symbols)")
+@click.option(
+    "--stdin", "use_stdin", is_flag=True, help="Read OHLCV from stdin (two symbols)"
+)
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1d")
@@ -58,18 +61,20 @@ def spread_analyze(
                 raise click.UsageError(f"Need 2 symbols, got {list(syms)}")
             p1 = df[df["symbol"] == syms[0]]["close"]
             p2 = df[df["symbol"] == syms[1]]["close"]
-            sym1_name, sym2_name = str(syms[0]), str(syms[1])
+            _sym1_name, _sym2_name = str(syms[0]), str(syms[1])
         else:
             raise click.UsageError("Stdin data must include 'symbol' column")
     else:
+        assert symbol2 is not None, "symbol2 required when not using stdin"
         from src.shared.db import query_candles
-        start_ts = pd.Timestamp(from_date) if from_date else None
-        end_ts = pd.Timestamp(to_date) if to_date else None
+
+        start_ts = to_optional_ts(from_date)
+        end_ts = to_optional_ts(to_date)
         df1 = query_candles(symbol1.upper(), start_ts, end_ts, bar)
         df2 = query_candles(symbol2.upper(), start_ts, end_ts, bar)
         p1 = df1["close"]
         p2 = df2["close"]
-        sym1_name, sym2_name = symbol1, symbol2
+        _ = (symbol1, symbol2)  # keep references alive
 
     config = PairsKalmanConfig(
         process_noise=process_noise,
@@ -83,7 +88,7 @@ def spread_analyze(
     for i in range(n):
         ts = result.t_stat.index[i]
         rec = {
-            "t": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "t": ts.isoformat() if isinstance(ts, pd.Timestamp) else str(ts),
             "t_stat": round(float(result.t_stat.iloc[i]), 4),
             "beta": round(float(result.beta.iloc[i]), 6),
             "alpha": round(float(result.alpha.iloc[i]), 6),

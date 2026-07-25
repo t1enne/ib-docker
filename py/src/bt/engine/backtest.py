@@ -26,24 +26,20 @@ from dataclasses import dataclass, field, replace
 from typing import Generator, Tuple, Optional, Any, List, Callable, cast
 
 import pandas as pd
-from pandas import Timestamp
 
 from src.bt.metrics import calculate_portfolio_result
 from src.bt.state import (
     ActionType,
     BacktestState,
     Candle,
-    ModelState,
     TradeSignal,
     FillEvent,
     ExecutionParams,
     RiskConfig,
-    RiskEvent,
     create_initial_backtest_state,
     create_execution_params,
     create_risk_config,
     TradeExitReason,
-    PortfolioState,
 )
 from src.bt.types import StrategyConfig, EngineWindow, BacktestResults, PlotConfig
 from src.bt.engine.handlers import ExecutionHandler, RiskHandler
@@ -144,7 +140,9 @@ def run_backtest(
         state = _update_price_buffers(rows, state, candle, symbols)
 
         # Stage 5: execute pending signals (from prior candles)
-        state = _execute_pending(state, candle, exec_handler, config, bt.execution_params)
+        state = _execute_pending(
+            state, candle, exec_handler, config, bt.execution_params
+        )
 
         # Stage 6: generate new signals (only on last symbol per timestamp)
         state = _generate_signals(
@@ -152,11 +150,18 @@ def run_backtest(
         )
 
         # Stage 7: execute signals generated this tick
-        state = _execute_pending(state, candle, exec_handler, config, bt.execution_params)
+        state = _execute_pending(
+            state, candle, exec_handler, config, bt.execution_params
+        )
 
         # Stage 8: check stop-loss / take-profit
         state = _check_risk(
-            state, candle, exec_handler, risk_handler, bt.execution_params, bt.risk_config
+            state,
+            candle,
+            exec_handler,
+            risk_handler,
+            bt.execution_params,
+            bt.risk_config,
         )
 
         # Stage 9: mark to market

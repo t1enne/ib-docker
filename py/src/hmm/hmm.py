@@ -9,7 +9,7 @@ from src.hmm.types import RegimeStats
 
 import pickle
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Optional
 import warnings
 
 import numpy as np

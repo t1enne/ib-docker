@@ -11,7 +11,9 @@ from typing import Optional
 
 import pandas as pd
 
-_DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent.parent / "data" / "db.sqlite"
+_DEFAULT_DB_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent / "data" / "db.sqlite"
+)
 
 
 def get_connection(db_path: Optional[str | Path] = None) -> sqlite3.Connection:
@@ -66,6 +68,7 @@ def query_candles(
 
     if bar != "1h":
         from src.market_data import resample_ohlcv
+
         return resample_ohlcv(df, bar, completed_only=True)
 
     return df

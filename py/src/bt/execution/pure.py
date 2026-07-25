@@ -5,8 +5,6 @@ from src.bt.state.types import (
     Candle,
     FillEvent,
     ExecutionParams,
-    StopLossEvent,
-    TakeProfitEvent,
     ActionType,
 )
 

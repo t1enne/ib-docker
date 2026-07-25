@@ -19,7 +19,7 @@ Usage from strategy:
         atr_14 = atr(bars["high"], bars["low"], bars["close"], 14)
 """
 
-from typing import Union, Tuple
+from typing import Tuple
 import pandas as pd
 import numpy as np
 

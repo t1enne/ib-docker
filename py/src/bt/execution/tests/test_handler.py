@@ -1,8 +1,6 @@
 import pytest
-from unittest.mock import patch, MagicMock
 from src.bt.execution import (
     execute_signal,
-    calculate_adverse_selection,
     create_execution_params,
 )
 from src.bt.state import TradeSignal, Candle, ActionType

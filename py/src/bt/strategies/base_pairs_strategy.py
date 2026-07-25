@@ -1,6 +1,5 @@
-from typing import List, Optional
+from typing import Optional
 import pandas as pd
-from collections import defaultdict
 
 from src.bt.types import TradeSignal, ActionType, TradeExitReason
 

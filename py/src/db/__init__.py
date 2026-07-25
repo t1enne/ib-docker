@@ -1,6 +1,4 @@
 import os
-import signal
-import sys
 import atexit
 from peewee import SqliteDatabase
 

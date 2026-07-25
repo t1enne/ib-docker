@@ -7,16 +7,9 @@ Tests verify:
 """
 
 import pytest
-import pandas as pd
 from src.bt.state import (
-    PortfolioState,
-    Position,
-    Trade,
     TradeSignal,
-    FillEvent,
-    EquityPoint,
     ActionType,
-    TradeStatus,
     create_initial_portfolio,
     create_execution_params,
     Candle,

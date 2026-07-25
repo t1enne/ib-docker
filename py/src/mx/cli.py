@@ -12,6 +12,8 @@ from typing import Optional
 import click
 import pandas as pd
 
+from src.utils import to_optional_ts
+
 
 @click.group(name="mx")
 def mx_group():
@@ -39,13 +41,14 @@ def mx_matrix(
 
     if universe:
         from src.syncm import load_universe_config
+
         conf = load_universe_config(universe)
         syms = conf.symbols
     else:
         syms = list(symbols)
 
-    start_ts = pd.Timestamp(from_date) if from_date else None
-    end_ts = pd.Timestamp(to_date) if to_date else None
+    start_ts = to_optional_ts(from_date)
+    end_ts = to_optional_ts(to_date)
 
     # Load closes for all symbols
     closes: dict[str, pd.Series] = {}
@@ -60,13 +63,14 @@ def mx_matrix(
 
     # Align to common index
     aligned = pd.DataFrame(closes).dropna()
-    n = len(aligned.columns)
+    len(aligned.columns)
 
     # Correlation matrix
     corr = aligned.corr()
 
     # Cointegration p-values (pairwise)
     from src.utils import symmetric_cointegration_p
+
     coint_p: dict[str, dict[str, Optional[float]]] = {}
     cols = list(aligned.columns)
     for i, s1 in enumerate(cols):
@@ -85,8 +89,7 @@ def mx_matrix(
         "symbols": cols,
         "n_observations": len(aligned),
         "correlation": {
-            s1: {s2: round(float(corr.loc[s1, s2]), 4) for s2 in cols}
-            for s1 in cols
+            s1: {s2: round(float(corr.loc[s1, s2]), 4) for s2 in cols} for s1 in cols
         },
         "cointegration_pvalues": coint_p,
     }

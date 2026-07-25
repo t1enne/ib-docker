@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import date
-from typing import Optional
 
 import click
 
@@ -22,8 +21,12 @@ def screen_group():
 @screen_group.command(name="run")
 @click.argument("screen_name")
 @click.argument("universe", default="universe.yml")
-@click.option("-p", "--param", "params", multiple=True, help="Screen parameter as key=value")
-@click.option("--format", "-F", "fmt", type=click.Choice(["jsonl", "text"]), default="text")
+@click.option(
+    "-p", "--param", "params", multiple=True, help="Screen parameter as key=value"
+)
+@click.option(
+    "--format", "-F", "fmt", type=click.Choice(["jsonl", "text"]), default="text"
+)
 def screen_run(
     screen_name: str,
     universe: str,
@@ -39,7 +42,7 @@ def screen_run(
         py screen run breakout_screen universe.yml --param fast=50
     """
     from src.syncm import load_universe_config
-    from src.screen import make_screen, run_screen, print_screen_output
+    from src.screen import run_screen, print_screen_output
 
     parsed_params: dict[str, str | float | int | bool] = {}
     for p in params:
@@ -63,8 +66,10 @@ def screen_run(
     from_date = universe_data.from_date
     to_date = universe_data.to_date or date.today()
 
-    click.echo(f"Screening {len(universe_data.symbols)} symbols with '{screen_name}'...",
-               err=True)
+    click.echo(
+        f"Screening {len(universe_data.symbols)} symbols with '{screen_name}'...",
+        err=True,
+    )
 
     output = asyncio.run(
         run_screen(
@@ -80,17 +85,24 @@ def screen_run(
     if fmt == "jsonl":
         results = []
         for r in output.results:
-            results.append({
-                "symbol": r.symbol,
-                "signal": r.signal,
-                "score": r.score,
-                "price": r.price,
-                "metadata": r.metadata,
-            })
-        click.echo(json.dumps({
-            "screen": output.screen_name,
-            "params": output.params,
-            "results": results,
-        }, indent=2))
+            results.append(
+                {
+                    "symbol": r.symbol,
+                    "signal": r.signal,
+                    "score": r.score,
+                    "price": r.price,
+                    "metadata": r.metadata,
+                }
+            )
+        click.echo(
+            json.dumps(
+                {
+                    "screen": output.screen_name,
+                    "params": output.params,
+                    "results": results,
+                },
+                indent=2,
+            )
+        )
     else:
         click.echo(print_screen_output(output))

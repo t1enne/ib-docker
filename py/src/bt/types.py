@@ -1,20 +1,9 @@
 from dataclasses import dataclass, field
-import pandas as pd
-from typing import (
-    List,
-    Optional,
-    Any,
-    Protocol,
-    Union,
-    TypedDict,
-    Dict,
-    Callable,
-    Tuple,
-    AsyncGenerator,
-)
+from typing import Any, Dict, List, Optional, Protocol, Tuple, Union
 from enum import Enum
+import pandas as pd
 
-from src.bt.state import (
+from src.bt.state import (  # noqa: F401
     Candle,
     Trade,
     TradeSignal,
@@ -22,13 +11,13 @@ from src.bt.state import (
     StopLossEvent,
     TakeProfitEvent,
     ExecutionParams,
+    BacktestState,
+    PortfolioState,
     PortfolioResult,
     BacktestResults,
     ActionType,
     TradeStatus,
     TradeExitReason,
-    BacktestState,
-    PortfolioState,
     RiskConfig,
 )
 from src.bt.state import RiskEvent as StateRiskEvent
@@ -99,7 +88,9 @@ class StrategyProtocol(Protocol):
     etc. from within your strategy.
     """
 
-    def on_candle(self, candle: Candle, open_trade: Optional[Trade]) -> List[TradeSignal]:
+    def on_candle(
+        self, candle: Candle, open_trade: Optional[Trade]
+    ) -> List[TradeSignal]:
         """Process a candle (OHLCV bar) and return trading signals.
 
         Access computed features via self.model:

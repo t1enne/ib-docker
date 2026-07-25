@@ -1,9 +1,9 @@
 """Tests for pure portfolio functions."""
 
+# ruff: noqa: E402 — imports follow module-level helpers after test class
 import pytest
 import pandas as pd
 from typing import cast
-from datetime import datetime
 
 
 def _ts(val: str) -> pd.Timestamp:
@@ -12,8 +12,6 @@ def _ts(val: str) -> pd.Timestamp:
     assert not pd.isna(result)
     return result
 
-
-from datetime import datetime
 
 from src.bt.state import (
     PortfolioState,
@@ -26,7 +24,7 @@ from src.bt.state import (
     TradeStatus,
     create_initial_portfolio,
 )
-from src.bt.portfolio.pure import apply_fill, update_prices, calculate_equity
+from src.bt.portfolio.pure import apply_fill, update_prices
 
 
 class TestApplyFill:

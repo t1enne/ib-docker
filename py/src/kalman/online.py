@@ -311,8 +311,8 @@ class PairsKalmanOnline:
         self._beta = float(beta_prior + K[1, 0] * y)
 
         # Joseph-form P update (correct for 2D, not the scalar shortcut)
-        I = np.eye(2, dtype=float)
-        P_post = (I - K @ H) @ P_prior @ (I - K @ H).T + K @ K.T * r_eff
+        eye = np.eye(2, dtype=float)
+        P_post = (eye - K @ H) @ P_prior @ (eye - K @ H).T + K @ K.T * r_eff
         # Force symmetry for numerical stability
         self._P = np.asarray((P_post + P_post.T) / 2.0, dtype=float)
 

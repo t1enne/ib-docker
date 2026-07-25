@@ -320,7 +320,7 @@ class TestBatchPairsKalman:
             (result_short.alpha.iloc[5:30] - result_long.alpha.iloc[5:30]).abs().mean()
         )
         assert diff > 0.0, (
-            f"Different mean_halflife values should yield different output sequences"
+            "Different mean_halflife values should yield different output sequences"
         )
 
 

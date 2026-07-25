@@ -1,13 +1,12 @@
-STRATEGY_TYPE = "volatility_expansion_pullback_continuation"
-
-from src.bt.portfolio import TradeExitReason
 import src.bt.indicators as ta
-from src.bt.strategies.utils import open, close
-from typing import List, Dict, TYPE_CHECKING, Optional
+from src.bt.strategies.utils import close
+from typing import List, Dict, TYPE_CHECKING
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 from src.bt.types import PlotConfig
 import pandas as pd
-import numpy as np
+
+STRATEGY_TYPE = "volatility_expansion_pullback_continuation"
+
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
@@ -86,29 +85,29 @@ def handle_entry(
     vol_lookback = brk.get("volume_lookback_days", 30)
 
     pull = strategy_params.get("pullback", {})
-    ema_short = pull.get("ema_short_period", 5)
-    ema_long = pull.get("ema_long_period", 10)
-    retracement_min = pull.get("retracement_min", 0.3)
-    retracement_max = pull.get("retracement_max", 0.5)
-    max_pullback_days = pull.get("max_pullback_days", 4)
+    pull.get("ema_short_period", 5)
+    pull.get("ema_long_period", 10)
+    pull.get("retracement_min", 0.3)
+    pull.get("retracement_max", 0.5)
+    pull.get("max_pullback_days", 4)
 
     cont = strategy_params.get("continuation_trigger", {})
-    require_close_above_prev_high = cont.get("require_close_above_prev_high", True)
-    allow_bullish_engulfing = cont.get("allow_bullish_engulfing", True)
+    cont.get("require_close_above_prev_high", True)
+    cont.get("allow_bullish_engulfing", True)
 
     trend = strategy_params.get("trend_filter", {})
-    ma_fast = trend.get("ma_fast", 20)
-    ma_slow = trend.get("ma_slow", 50)
-    require_positive_slope = trend.get("require_positive_slope", True)
-    momentum_lookback = trend.get("momentum_lookback_days", 63)
-    require_positive_return = trend.get("require_positive_return", True)
+    trend.get("ma_fast", 20)
+    trend.get("ma_slow", 50)
+    trend.get("require_positive_slope", True)
+    trend.get("momentum_lookback_days", 63)
+    trend.get("require_positive_return", True)
 
     risk = strategy_params.get("risk_management", {})
-    risk_per_trade = risk.get("risk_per_trade", 0.01)
+    risk.get("risk_per_trade", 0.01)
 
     corr = strategy_params.get("correlation_filter", {})
-    corr_enabled = corr.get("enabled", True)
-    max_corr = corr.get("max_pairwise_correlation", 0.8)
+    corr.get("enabled", True)
+    corr.get("max_pairwise_correlation", 0.8)
 
     candles = state.candles[symbol]
     if len(candles) < atr_long + breakout_lookback + vol_lookback:
@@ -178,7 +177,7 @@ def handle_pullback_entry(
     ema_long = pull.get("ema_long_period", 10)
     retracement_min = pull.get("retracement_min", 0.3)
     retracement_max = pull.get("retracement_max", 0.5)
-    max_pullback_days = pull.get("max_pullback_days", 4)
+    pull.get("max_pullback_days", 4)
 
     cont = strategy_params.get("continuation_trigger", {})
     require_close_above_prev_high = cont.get("require_close_above_prev_high", True)
@@ -219,7 +218,7 @@ def handle_pullback_entry(
     current_close = closes.iloc[-1]
     prev_high = highs.iloc[-2]
     current_open = opens.iloc[-1]
-    current_low = lows.iloc[-1]
+    lows.iloc[-1]
     prev_close = closes.iloc[-2]
     prev_open = opens.iloc[-2]
 
@@ -271,7 +270,7 @@ def handle_pullback_entry(
     ma_20_val = ma_20.iloc[-1]
     ma_50_val = ma_50.iloc[-1]
     ma_20_prev = ma_20.iloc[-2] if len(ma_20) > 1 else ma_20_val
-    ma_50_prev = ma_50.iloc[-2] if len(ma_50) > 1 else ma_50_val
+    ma_50.iloc[-2] if len(ma_50) > 1 else ma_50_val
 
     trend_ok = True
     if ma_20_val <= ma_50_val:
@@ -364,7 +363,7 @@ def handle_exit(
     atr_at_entry = symbol_state.get("atr_at_entry", atr_val)
 
     trailing_stop = entry_price - trailing_atr_multiple * atr_at_entry
-    current_stop = max(trailing_stop, current_close - trailing_atr_multiple * atr_val)
+    max(trailing_stop, current_close - trailing_atr_multiple * atr_val)
 
     days_in_trade = (
         tick.timestamp - symbol_state.get("entry_date", tick.timestamp)

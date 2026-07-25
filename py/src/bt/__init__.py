@@ -4,7 +4,7 @@ from src.bt.cli import bt_group
 
 from src.bt.strategies import init_strat
 from src.bt.engine.backtest import Backtest, candle_generator, run_backtest, run
-from src.bt.engine.handlers import (
+from src.bt.engine.handlers import (  # noqa: F401
     ExecutionHandler,
     RiskHandler,
     default_execution_handler,

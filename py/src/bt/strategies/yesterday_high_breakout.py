@@ -1,11 +1,12 @@
-STRATEGY_TYPE = "yesterday_high_breakout"
-
 import src.bt.indicators as ta
 from src.bt.strategies.utils import open, close, get_resampled_candles
-from typing import List, Dict, TYPE_CHECKING, Optional
+from typing import List, Dict, TYPE_CHECKING
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 from src.bt.types import PlotConfig
 import pandas as pd
+
+STRATEGY_TYPE = "yesterday_high_breakout"
+
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
@@ -53,8 +54,8 @@ def handle_entry(
     symbol = tick.symbol
 
     gap = strategy_params.get("gap", 1.0)
-    stop_loss = strategy_params.get("stop_loss", 3.0)
-    take_profit = strategy_params.get("take_profit", 9.0)
+    strategy_params.get("stop_loss", 3.0)
+    strategy_params.get("take_profit", 9.0)
 
     roc_cfg = strategy_params.get("roc_filter", {})
     roc_enabled = roc_cfg.get("enabled", False)
@@ -89,7 +90,7 @@ def handle_entry(
             return []
 
     gap_offset = (yesterday_high * gap) / 100
-    entry_price = yesterday_high + gap_offset
+    yesterday_high + gap_offset
 
     if tick.close < yesterday_high:
         return open(tick, ActionType.long, "tick below YH")
@@ -110,9 +111,9 @@ def handle_exit(
     take_profit = strategy_params.get("take_profit", 9.0)
 
     ts_cfg = strategy_params.get("trailing_stop", {})
-    ts_enabled = ts_cfg.get("enabled", True)
-    ts_activation = ts_cfg.get("activation_pct", 2.0)
-    ts_distance = ts_cfg.get("distance_pct", 1.0)
+    ts_cfg.get("enabled", True)
+    ts_cfg.get("activation_pct", 2.0)
+    ts_cfg.get("distance_pct", 1.0)
 
     ema_cfg = strategy_params.get("ema_exit", {})
     ema_enabled = ema_cfg.get("enabled", False)
@@ -149,15 +150,15 @@ def handle_exit(
 def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
     strategy_params = config.strategy_params
     gap = strategy_params.get("gap", 1.0)
-    stop_loss = strategy_params.get("stop_loss", 3.0)
-    take_profit = strategy_params.get("take_profit", 9.0)
+    strategy_params.get("stop_loss", 3.0)
+    strategy_params.get("take_profit", 9.0)
 
     ts_cfg = strategy_params.get("trailing_stop", {})
-    ts_enabled = ts_cfg.get("enabled", True)
-    ts_activation = ts_cfg.get("activation_pct", 2.0)
+    ts_cfg.get("enabled", True)
+    ts_cfg.get("activation_pct", 2.0)
 
     ema_cfg = strategy_params.get("ema_exit", {})
-    ema_enabled = ema_cfg.get("enabled", False)
+    ema_cfg.get("enabled", False)
     ema_period = ema_cfg.get("period", 10)
 
     price_overlays: Dict[str, Dict[str, pd.Series]] = {}

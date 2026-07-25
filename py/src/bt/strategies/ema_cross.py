@@ -1,12 +1,12 @@
-STRATEGY_TYPE = "ema_cross"
-
 import src.bt.indicators as ta
-from src.bt.portfolio import TradeExitReason
 from src.bt.strategies.utils import open, close
 from typing import List, Dict, Optional
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig, StrategyConfig
 import pandas as pd
+
+STRATEGY_TYPE = "ema_cross"
+
 
 regime = None
 
@@ -22,17 +22,16 @@ def is_ranging(
     atr_period = strategy_params.get("atr_period", 14)
 
     # ema
-    ema_threshold = strategy_params.get("ema_threshold", 0.05)
+    strategy_params.get("ema_threshold", 0.05)
     ema_fast = ta.ema(closes, fast).iloc[-1]
     ema_slow = ta.ema(closes, slow).iloc[-1]
-    ema_spread = round(abs(ema_fast - ema_slow) / closes.iloc[-1], 4)
+    round(abs(ema_fast - ema_slow) / closes.iloc[-1], 4)
 
     if len(closes) < max(slow, atr_period):
         return True
 
     atr_val = ta.atr(high, low, closes, atr_period).iloc[-1]
     atr_ranging = atr_val < atr_threshold
-    ema_ranging = ema_spread < ema_threshold
 
     if atr_ranging:
         return True
@@ -69,13 +68,13 @@ def on_candle(
     position = state.portfolio.positions.get(symbol)
     candles = state.candles[symbol]
     closes = candles["close"]
-    volumes = candles["volume"]
+    candles["volume"]
     high = candles["high"]
     low = candles["low"]
     fast = strategy_params.get("fast", 9)
     slow = strategy_params.get("slow", 14)
-    vol_window = strategy_params.get("vol_window", 20)
-    vol_multiplier = strategy_params.get("vol_multiplier", 1.5)
+    strategy_params.get("vol_window", 20)
+    strategy_params.get("vol_multiplier", 1.5)
 
     if len(closes) < slow:
         return []
@@ -122,7 +121,7 @@ def handle_entry_exit(
     closes = candles["close"]
     volumes = candles["volume"]
 
-    ema_fast = ta.ema(closes, fast).iloc[-1]
+    ta.ema(closes, fast).iloc[-1]
     ema_slow = ta.ema(closes, slow).iloc[-1]
     last_close = closes.iloc[-1]
     position = state.portfolio.positions.get(tick.symbol)

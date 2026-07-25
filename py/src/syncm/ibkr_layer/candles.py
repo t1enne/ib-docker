@@ -321,7 +321,11 @@ async def _fetch_candles_iterative(
         )
         r = resp.parsed
 
-        if resp.status_code != 200 or not isinstance(r, IserverHistoryBidAskResponse) or not r.data:
+        if (
+            resp.status_code != 200
+            or not isinstance(r, IserverHistoryBidAskResponse)
+            or not r.data
+        ):
             body = resp.content.decode(errors="replace")[:200]
             logger.error(
                 "Unexpected response for %s: status=%s, body=%r",

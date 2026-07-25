@@ -8,11 +8,9 @@ All state is immutable (frozen dataclasses) to enable:
 """
 
 from dataclasses import dataclass, field
-from typing import Tuple, Dict, Optional, Any, List, Union, Literal, TYPE_CHECKING
-from enum import Enum, auto
+from typing import Tuple, Dict, Optional, Any, List, TYPE_CHECKING
+from enum import Enum
 import pandas as pd
-import numpy as np
-from typing import FrozenSet
 
 if TYPE_CHECKING:
     from src.bt.types import PlotConfig

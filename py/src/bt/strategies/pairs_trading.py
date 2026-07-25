@@ -4,24 +4,22 @@ Pure functions that generate signals based on state.
 Uses model_state.price_buffers to cache aligned closes for performance.
 """
 
-from src.bt.strategies.utils import close, open
-
-STRATEGY_TYPE = "pnd"
-
-from typing import Optional, List, TYPE_CHECKING, cast
+from typing import List, TYPE_CHECKING, cast
 from src.bt.state import (
     BacktestState,
     TradeSignal,
     ActionType,
     TradeExitReason,
     Candle,
-    Position,
 )
 from src.bt.types import PlotConfig
 import pandas as pd
 import numpy as np
 from src.bt.zscore import _ols_log_params
 from src.utils import calculate_zscore_spread
+from src.bt.strategies.utils import close, open
+
+STRATEGY_TYPE = "pnd"
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig

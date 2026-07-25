@@ -1,11 +1,12 @@
-STRATEGY_TYPE = "trend_following"
-
 import src.bt.indicators as ta
 from src.bt.strategies.utils import open, close, htf_candles
-from typing import List, Dict, TYPE_CHECKING, Optional, cast
-from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
+from typing import List, Dict, TYPE_CHECKING, cast
+from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 from src.bt.types import PlotConfig
 import pandas as pd
+
+STRATEGY_TYPE = "trend_following"
+
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
@@ -106,7 +107,7 @@ def on_candle(
 
     with_volume = volume_confirmed(volumes, vol_window, vol_multiplier)
     adx_last = adx.iloc[-1]
-    adx_prev = adx.iloc[-2]
+    adx.iloc[-2]
     no_trade = news_blackout or (
         adx_last < adx_no_trade and adx_flat(adx, adx_flat_slope)
     )

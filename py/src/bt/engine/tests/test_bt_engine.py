@@ -1,30 +1,21 @@
 import pytest
 import pandas as pd
-from unittest.mock import MagicMock, patch
 from src.bt.engine.backtest import Backtest, run_backtest, candle_generator
 from src.bt.engine.handlers import (
-    ExecutionHandler,
-    RiskHandler,
     default_execution_handler,
     default_risk_handler,
 )
 from src.bt.execution.pure import execute_signal
 from src.bt.types import (
-    FillEvent,
-    ExecutionParams,
     StrategyConfig,
-    EngineWindow,
 )
 from src.bt.state import (
-    ActionType,
     Candle,
     TradeSignal,
     PortfolioState,
-    create_initial_portfolio,
     create_execution_params,
 )
-from src.bt.portfolio.pure import apply_fill
-from src.utils import get_ts, parse_timestamp
+from src.utils import parse_timestamp
 
 
 def get_fill(s: TradeSignal, portfolio: PortfolioState):

@@ -1,11 +1,9 @@
 from ib_rest_api_client.models import (
-    GetIserverSecdefSearchSecType,
     ErrorOnlyResponse,
     SecdefSearchResponseItem,
 )
 from ib_rest_api_client.api.trading_contracts import get_iserver_secdef_search
-from src.syncm.ibkr_layer.shared import client, auth_client
-from pprint import pprint
+from src.syncm.ibkr_layer.shared import auth_client
 
 
 def _is_usd_stock(entry: SecdefSearchResponseItem):

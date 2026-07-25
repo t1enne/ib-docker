@@ -17,6 +17,7 @@ import pandas as pd
 
 from src.kalman.pure import run_filter, run_pairs_kalman, compute_stats
 from src.kalman.types import KalmanConfig, PairsKalmanConfig
+from src.utils import to_optional_ts
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -93,12 +94,15 @@ def _load_prices(
 
     if df.empty and symbol:
         from src.shared.db import query_candles
-        start_ts = pd.Timestamp(from_date) if from_date else None
-        end_ts = pd.Timestamp(to_date) if to_date else None
+
+        start_ts = to_optional_ts(from_date)
+        end_ts = to_optional_ts(to_date)
         df = query_candles(symbol.upper(), start_ts, end_ts, bar)
 
     if df.empty:
-        raise click.UsageError("No data: provide symbol + dates, or pipe OHLCV via stdin")
+        raise click.UsageError(
+            "No data: provide symbol + dates, or pipe OHLCV via stdin"
+        )
 
     return cast(pd.Series, df["close"])
 
@@ -113,7 +117,12 @@ def kalman_group():
 
 @kalman_group.command(name="run")
 @click.argument("symbol", required=False)
-@click.option("--stdin", "use_stdin", is_flag=True, help="Read OHLCV from stdin (no symbol needed)")
+@click.option(
+    "--stdin",
+    "use_stdin",
+    is_flag=True,
+    help="Read OHLCV from stdin (no symbol needed)",
+)
 @click.option("--from", "-f", "from_date", help="Start date (YYYY-MM-DD)")
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 @click.option("--bar", default="1h", help="Bar size")
@@ -156,13 +165,18 @@ def kalman_run(
 
     if stats:
         s = compute_stats(prices, result)
-        click.echo(json.dumps({
-            "rmse": round(s.rmse, 6),
-            "mae": round(s.mae, 6),
-            "coverage_95": round(s.coverage_95, 4),
-            "avg_kalman_gain": round(s.avg_kalman_gain, 6),
-            "n_observations": s.n_observations,
-        }), err=True)
+        click.echo(
+            json.dumps(
+                {
+                    "rmse": round(s.rmse, 6),
+                    "mae": round(s.mae, 6),
+                    "coverage_95": round(s.coverage_95, 4),
+                    "avg_kalman_gain": round(s.avg_kalman_gain, 6),
+                    "n_observations": s.n_observations,
+                }
+            ),
+            err=True,
+        )
 
     _write_kalman_result(result)
 
@@ -170,13 +184,17 @@ def kalman_run(
 @kalman_group.command(name="pairs")
 @click.argument("symbol1", required=False)
 @click.argument("symbol2", required=False)
-@click.option("--stdin", "use_stdin", is_flag=True, help="Read two OHLCV streams from stdin")
+@click.option(
+    "--stdin", "use_stdin", is_flag=True, help="Read two OHLCV streams from stdin"
+)
 @click.option("--from", "-f", "from_date")
 @click.option("--to", "-t", "to_date")
 @click.option("--bar", default="1h")
 @click.option("--process-noise", "-q", type=float, default=1e-4)
 @click.option("--measurement-noise", "-r", type=float, default=1e-3)
-@click.option("--mean-halflife", "-m", type=int, default=50, help="OLS warm-start window")
+@click.option(
+    "--mean-halflife", "-m", type=int, default=50, help="OLS warm-start window"
+)
 @click.option("--adaptive/--no-adaptive", default=False)
 @click.option("--vol-window", type=int, default=20)
 def kalman_pairs(
@@ -199,7 +217,9 @@ def kalman_pairs(
     if use_stdin or not symbol1:
         df = _read_ohlcv_stdin()
         if df.empty:
-            raise click.UsageError("No data: pipe OHLCV via stdin or provide SYMBOL1 SYMBOL2")
+            raise click.UsageError(
+                "No data: pipe OHLCV via stdin or provide SYMBOL1 SYMBOL2"
+            )
         # Assume stdin has both symbols
         if "symbol" in df.columns:
             syms = df["symbol"].unique()
@@ -210,9 +230,11 @@ def kalman_pairs(
         else:
             raise click.UsageError("Stdin data must include 'symbol' column for pairs")
     else:
+        assert symbol2 is not None, "symbol2 required when not using stdin"
         from src.shared.db import query_candles
-        start_ts = pd.Timestamp(from_date) if from_date else None
-        end_ts = pd.Timestamp(to_date) if to_date else None
+
+        start_ts = to_optional_ts(from_date)
+        end_ts = to_optional_ts(to_date)
         df1 = query_candles(symbol1.upper(), start_ts, end_ts, bar)
         df2 = query_candles(symbol2.upper(), start_ts, end_ts, bar)
         p1 = df1["close"]
@@ -246,8 +268,8 @@ def kalman(
     from src.shared.db import query_candles
     from src.kalman.pure import run_filter, compute_stats
 
-    start_ts = pd.Timestamp(start) if start else None
-    end_ts = pd.Timestamp(end) if end else None
+    start_ts = to_optional_ts(start)
+    end_ts = to_optional_ts(end)
     df = query_candles(symbol.upper(), start_ts, end_ts)
 
     if df.empty:
@@ -266,13 +288,18 @@ def kalman(
     stats = compute_stats(prices, result)
 
     # Print stats to stderr
-    click.echo(json.dumps({
-        "symbol": symbol,
-        "observations": stats.n_observations,
-        "rmse": round(stats.rmse, 6),
-        "mae": round(stats.mae, 6),
-        "coverage_95": round(stats.coverage_95, 4),
-        "avg_kalman_gain": round(stats.avg_kalman_gain, 6),
-    }), err=True)
+    click.echo(
+        json.dumps(
+            {
+                "symbol": symbol,
+                "observations": stats.n_observations,
+                "rmse": round(stats.rmse, 6),
+                "mae": round(stats.mae, 6),
+                "coverage_95": round(stats.coverage_95, 4),
+                "avg_kalman_gain": round(stats.avg_kalman_gain, 6),
+            }
+        ),
+        err=True,
+    )
 
     _write_kalman_result(result)

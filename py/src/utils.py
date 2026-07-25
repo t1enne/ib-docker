@@ -48,7 +48,9 @@ def get_local_candles(
     res = cur.execute(q)
     data = res.fetchall()
     con.close()
-    columns = pd.Index(["symbol", "timestamp", "open", "high", "low", "close", "volume"])
+    columns = pd.Index(
+        ["symbol", "timestamp", "open", "high", "low", "close", "volume"]
+    )
     df = pd.DataFrame(data, columns=columns)
     df = df.assign(Date=pd.to_datetime(df["timestamp"], unit="ms"))
     df = df.set_index("Date").drop(columns=["timestamp"])
@@ -95,6 +97,17 @@ def get_ts(ds: str) -> pd.Timestamp:
     if isinstance(_ts, pd.Timestamp):
         return _ts
     raise ValueError(f"Failed when creating timestamp for {ds}")
+
+
+def to_optional_ts(value: str | None) -> pd.Timestamp | None:
+    """Convert optional string to Optional[Timestamp]. NaT → None."""
+    if value is None:
+        return None
+    ts = pd.Timestamp(value)
+    if pd.isna(ts):
+        return None
+    assert isinstance(ts, pd.Timestamp), f"Expected Timestamp, got {type(ts)}"
+    return ts
 
 
 def parse_timestamp(value: Union[str, pd.Timestamp]) -> pd.Timestamp:
@@ -146,8 +159,12 @@ def _calculate_rolling_zscore_spread(s1: pd.Series, s2: pd.Series, rolling_windo
         return s1.loc[idx] - (alpha + beta * s2.loc[idx])
 
     spread_series = pd.Series([calc_spread(i) for i in range(len(s1))], index=s1.index)
-    rolling_mean = spread_series.rolling(window=rolling_window, min_periods=rolling_window).mean()
-    rolling_std = spread_series.rolling(window=rolling_window, min_periods=rolling_window).std()
+    rolling_mean = spread_series.rolling(
+        window=rolling_window, min_periods=rolling_window
+    ).mean()
+    rolling_std = spread_series.rolling(
+        window=rolling_window, min_periods=rolling_window
+    ).std()
     return (spread_series - rolling_mean) / rolling_std
 
 

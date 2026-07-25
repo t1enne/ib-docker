@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from peewee import Model, IntegerField, CharField, FloatField
 from . import db
 
-from dataclasses import dataclass
 from typing import Optional
 
 

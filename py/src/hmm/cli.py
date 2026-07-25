@@ -17,7 +17,8 @@ import click
 import numpy as np
 import pandas as pd
 
-from src.hmm.hmm import MarketRegimeHMM, create_regime_features
+from src.hmm.hmm import MarketRegimeHMM
+from src.utils import to_optional_ts
 
 
 # ── Helpers ───────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ def _write_regimes(regimes: pd.Series, probas: Optional[pd.DataFrame] = None) ->
     """Write regime labels + optional probabilities as JSON lines."""
     for i, (ts, r) in enumerate(regimes.dropna().items()):
         rec = {
-            "t": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "t": ts.isoformat() if isinstance(ts, pd.Timestamp) else str(ts),
             "regime": int(r),
         }
         if probas is not None and i < len(probas):
@@ -72,12 +73,18 @@ def hmm_group():
 @click.option("--from", "-f", "from_date", help="Start date (YYYY-MM-DD)")
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 @click.option("--bar", default="1h")
-@click.option("--n-regimes", "-n", type=int, default=3, help="Number of regime states (2 or 3)")
+@click.option(
+    "--n-regimes", "-n", type=int, default=3, help="Number of regime states (2 or 3)"
+)
 @click.option("--vol-window", "-v", type=int, default=20)
 @click.option("--momentum-window", "-m", type=int, default=10)
 @click.option("--min-train-size", type=int, default=252)
-@click.option("--output-dir", "-o", default="./hmm_models", help="Output directory for models")
-@click.option("--predict/--no-predict", default=True, help="Output regime predictions after fit")
+@click.option(
+    "--output-dir", "-o", default="./hmm_models", help="Output directory for models"
+)
+@click.option(
+    "--predict/--no-predict", default=True, help="Output regime predictions after fit"
+)
 def hmm_fit(
     symbol: Optional[str],
     use_stdin: bool,
@@ -101,14 +108,17 @@ def hmm_fit(
 
     if symbol:
         from src.shared.db import query_candles
-        start_ts = pd.Timestamp(from_date) if from_date else None
-        end_ts = pd.Timestamp(to_date) if to_date else None
+
+        start_ts = to_optional_ts(from_date)
+        end_ts = to_optional_ts(to_date)
         df = query_candles(symbol.upper(), start_ts, end_ts, bar)
     else:
         df = _read_ohlcv_stdin()
 
     if df.empty:
-        raise click.UsageError("No data: provide symbol + dates, or pipe OHLCV via stdin")
+        raise click.UsageError(
+            "No data: provide symbol + dates, or pipe OHLCV via stdin"
+        )
 
     prices = df["close"]
     sym = symbol or "stdin"
@@ -137,15 +147,26 @@ def hmm_fit(
     }
     for r in range(n_regimes):
         stats_dict["regimes"][str(r)] = {
-            "mean_return_annual": round(float(stats.mean_return.get(r, float("nan"))), 6) if not np.isnan(stats.mean_return.get(r, float("nan"))) else None,
-            "volatility": round(float(stats.volatility.get(r, float("nan"))), 6) if not np.isnan(stats.volatility.get(r, float("nan"))) else None,
+            "mean_return_annual": round(
+                float(stats.mean_return.get(r, float("nan"))), 6
+            )
+            if not np.isnan(stats.mean_return.get(r, float("nan")))
+            else None,
+            "volatility": round(float(stats.volatility.get(r, float("nan"))), 6)
+            if not np.isnan(stats.volatility.get(r, float("nan")))
+            else None,
             "frequency": round(float(stats.frequency.get(r, 0)), 4),
         }
 
     # Transition matrix
     try:
         transmat = hmm_model.get_transition_matrix()
-        stats_dict["transition_matrix"] = {str(i): {str(j): round(float(transmat.iloc[i, j]), 4) for j in range(n_regimes)} for i in range(n_regimes)}
+        stats_dict["transition_matrix"] = {
+            str(i): {
+                str(j): round(float(transmat.iloc[i, j]), 4) for j in range(n_regimes)
+            }
+            for i in range(n_regimes)
+        }
     except Exception:
         pass
 
@@ -158,7 +179,9 @@ def hmm_fit(
 
 
 @hmm_group.command(name="predict")
-@click.option("--model", "-m", "model_path", required=True, help="Path to saved HMM model (.pkl)")
+@click.option(
+    "--model", "-m", "model_path", required=True, help="Path to saved HMM model (.pkl)"
+)
 @click.argument("symbol", required=False)
 @click.option("--stdin", "use_stdin", is_flag=True)
 @click.option("--from", "-f", "from_date")
@@ -196,8 +219,9 @@ def hmm_predict(
 
     if symbol:
         from src.shared.db import query_candles
-        start_ts = pd.Timestamp(from_date) if from_date else None
-        end_ts = pd.Timestamp(to_date) if to_date else None
+
+        start_ts = to_optional_ts(from_date)
+        end_ts = to_optional_ts(to_date)
         df = query_candles(symbol.upper(), start_ts, end_ts, bar)
     else:
         df = _read_ohlcv_stdin()

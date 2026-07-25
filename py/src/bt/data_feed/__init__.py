@@ -16,7 +16,7 @@ Usage:
 
 import pandas as pd
 from pandas import Timestamp
-from typing import AsyncGenerator, List, cast
+from typing import List, cast
 
 from src.bt.state import Candle
 from src.utils import get_local_candles

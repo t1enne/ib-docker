@@ -5,7 +5,6 @@ No mutations, no side effects.
 """
 
 from typing import Dict, Optional
-import pandas as pd
 
 from src.bt.state.types import (
     PortfolioState,
@@ -93,7 +92,6 @@ def _open_position(
     )
 
     # Calculate new cash
-    direction = 1 if is_long else -1
     cash_used = qty * fill.executed_price + fill.commission
     new_cash = portfolio.cash - cash_used
 

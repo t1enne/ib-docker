@@ -5,18 +5,7 @@ and checking risk during backtesting.
 """
 
 from dataclasses import dataclass
-from typing import Tuple, Dict, Any, Optional
-
-from src.bt.state import (
-    TradeSignal,
-    Candle,
-    FillEvent,
-    ExecutionParams,
-    PortfolioState,
-    RiskConfig,
-    RiskEvent,
-    BacktestState,
-)
+from typing import Any
 
 
 @dataclass

@@ -11,7 +11,6 @@ from src.bt.state import (
     Candle,
     Position,
 )
-from src.market_data.resample import resample_multiindex
 
 
 def close(

@@ -1,5 +1,3 @@
-STRATEGY_TYPE = "breakout_ema"
-
 from typing import Optional
 import src.bt.indicators as ta
 from src.bt.strategies.utils import open, close
@@ -7,6 +5,9 @@ from typing import List, Dict, TYPE_CHECKING
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.types import PlotConfig
 import pandas as pd
+
+STRATEGY_TYPE = "breakout_ema"
+
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
@@ -66,15 +67,15 @@ def on_candle(
     position = state.portfolio.positions.get(symbol)
     candles = state.candles[symbol]
     closes = candles["close"]
-    volumes = candles["volume"]
+    candles["volume"]
     high = candles["high"]
     low = candles["low"]
     fast = strategy_params.get("fast", 9)
     slow = strategy_params.get("slow", 14)
-    vol_window = strategy_params.get("vol_window", 20)
-    vol_multiplier = strategy_params.get("vol_multiplier", 1.5)
+    strategy_params.get("vol_window", 20)
+    strategy_params.get("vol_multiplier", 1.5)
     ema_th = strategy_params.get("ema_th", 0.05)
-    atr_th = strategy_params.get("atr_th", 0.05)
+    strategy_params.get("atr_th", 0.05)
 
     if len(closes) < slow:
         return []
@@ -116,8 +117,8 @@ def handle_breakout(
     ema_slow: float,
     ema_spread: float,
 ):
-    fast = strategy_params.get("fast", 9)
-    slow = strategy_params.get("slow", 14)
+    strategy_params.get("fast", 9)
+    strategy_params.get("slow", 14)
     vol_window = strategy_params.get("vol_window", 20)
     vol_multiplier = strategy_params.get("vol_multiplier", 1.5)
 
@@ -125,7 +126,7 @@ def handle_breakout(
     volumes = candles["volume"]
 
     position = state.portfolio.positions.get(tick.symbol)
-    last_close = closes.iloc[-1]
+    closes.iloc[-1]
 
     with_volume = volume_spike(volumes, vol_window, vol_multiplier)
     crossed_above = ema_fast > ema_slow
@@ -167,7 +168,7 @@ def handle_trend(
     ema_slow = ta.ema(closes, slow).iloc[-1]
 
     position = state.portfolio.positions.get(tick.symbol)
-    last_close = closes.iloc[-1]
+    closes.iloc[-1]
 
     with_volume = volume_spike(volumes, vol_window, vol_multiplier)
     crossed_above = ema_fast > ema_slow

@@ -313,13 +313,10 @@ def _update_price_buffers(
     return merge_bt_state(state, dict(model_state=new_ms))
 
 
-_CANDLE_BATCH_SIZE = 50
-
-
 def _append_candle(
     rows: CandleRows, state: BacktestState, candle: Candle
 ) -> Tuple[CandleRows, BacktestState]:
-    """Stage 3: Stash candle row; rebuild DataFrame every N rows."""
+    """Stage 3: Stash candle row; rebuild DataFrame every candle."""
     sym = candle.symbol
     if sym not in rows:
         rows[sym] = []
@@ -335,11 +332,10 @@ def _append_candle(
     )
 
     candles = dict(state.candles)
-    if len(rows[sym]) % _CANDLE_BATCH_SIZE == 0:
-        new_df = pd.DataFrame(rows[sym]).set_index("timestamp")
-        for col in ["open", "high", "low", "close", "volume"]:
-            new_df.loc[:, col] = pd.to_numeric(new_df[col])
-        candles[sym] = new_df
+    new_df = pd.DataFrame(rows[sym]).set_index("timestamp")
+    for col in ["open", "high", "low", "close", "volume"]:
+        new_df.loc[:, col] = pd.to_numeric(new_df[col])
+    candles[sym] = new_df
 
     return rows, merge_bt_state(state, dict(candles=candles))
 

@@ -150,18 +150,12 @@ def run_backtest(
         equity_series, state.portfolio.trades, state.portfolio.initial_capital
     )
 
-    plot_config: PlotConfig = (
-        strategy_mod.plot(state, config)
-        if (strategy_mod and config.plot)
-        else PlotConfig()
-    )
-
     return (
         BacktestResults(
             pf=pf_result,
             data=state.candles,
             final_state=state,
-            plot_config=plot_config,
+            plot_config=PlotConfig(),
         ),
         state,
     )

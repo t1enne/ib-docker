@@ -1,252 +1,50 @@
-import os
-from src.utils import get_ts
-from typing import Optional
+"""IBKR Trading Library — agent-friendly CLI.
+
+Usage:
+    py data query AAPL --from 2026-01-01
+    py data dl AAPL MSFT --from 2026-01-01
+    py kalman run AAPL --q 1e-5
+    py kalman pairs AAPL MSFT
+    py hmm fit AAPL --n-regimes 3
+    py hmm predict AAPL --model hmm_models/AAPL.pkl
+    py ind ema --span 20 --symbol AAPL --from 2026-01-01
+    py ind rsi --window 14 --symbol AAPL
+    py spread analyze AAPL MSFT --from 2024-01-01
+    py mx matrix AAPL MSFT GOOGL --from 2024-01-01
+    py bt run strategy.yml
+    py screen run breakout_screen universe.yml
+
+Pipe composition:
+    py data query AAPL --from 2026-01-01 | py kalman run --stdin
+    py data query AAPL | py ind ema --span 20 | py ind rsi --window 14
+    py data dl AAPL MSFT --from 2026-01-01 | py kalman pairs --stdin | py ind ema --span 50
+"""
+
 import click
-import asyncio
 
-import src.mx as mx_mod
-import src.spread as spread_mod
-import src.nd as nd_mod
-import src.pnd as pnd_mod
-import src.syncm as sync_mod
-import src.hmm as hmm_mod
-import src.kalman as kalman_mod
-import src.signals as signals_mod
-import src.screen as screen_mod
-
-from src.bt import StrategyType, backtest, load_strategy, StrategyConfig, backtest_async
-from src.bt.metrics import get_backtest_results_analysis
+from src.data.cli import data_group
+from src.kalman.cli import kalman_group
+from src.hmm.cli import hmm_group
+from src.indicators.cli import ind_group
+from src.spread.cli import spread_group
+from src.mx.cli import mx_group
+from src.bt.cli import bt_group
+from src.screen.cli import screen_group
 
 
 @click.group()
 def main():
-    pass
+    """IBKR — composable CLI for market data, indicators, models, and backtesting."""
 
 
-@main.command(help="log correlation and cointegrations for the passed symbols")
-@click.argument("symbols", nargs=-1)
-@click.option("--universe", "-u", default=None, help="Path to universe config file")
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--plot/--no-plot", default=False, help="Generate plotly heatmaps")
-def mx(
-    symbols: list[str],
-    universe: Optional[str],
-    start: Optional[str],
-    end: Optional[str],
-    plot: bool,
-):
-    s = get_ts(start) if start else None
-    e = get_ts(end) if end else None
-    mx_mod.matrix(symbols, s, e, plot, universe)
-
-
-@main.command()
-@click.argument("symbols", nargs=2)
-@click.option("--start")
-@click.option("--end")
-@click.option("--process-noise", "-q", type=float, default=1e-4, help="Kalman process noise (Q)")
-@click.option("--measurement-noise", "-r", type=float, default=1e-3, help="Kalman measurement noise (R)")
-@click.option("--mean-halflife", "-m", type=int, default=50, help="EWMA halflife for spread mean/std")
-def spread(
-    symbols: tuple[str, str],
-    start: Optional[str],
-    end: Optional[str],
-    process_noise: float = 1e-4,
-    measurement_noise: float = 1e-3,
-    mean_halflife: int = 50,
-):
-    s = get_ts(start) if start else None
-    e = get_ts(end) if end else None
-    spread_mod.spread(symbols, s, e, process_noise, measurement_noise, mean_halflife)
-
-
-@main.command(help="plot normalized deviation between price/returns and relative MA")
-@click.argument("symbol")
-@click.argument("ma", default=10)
-def nd(symbol: str, ma: int):
-    nd_mod.nd(symbol, ma)
-
-
-@main.command(
-    help="plot normalized deviation between pairs prices/returns vs their MAs"
-)
-@click.argument("symbols", nargs=2)
-def pnd(symbols: list[str]):
-    pnd_mod.pnd(symbols)
-
-
-@main.command(help="analyze market regimes using Hidden Markov Model")
-@click.argument("symbol")
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option(
-    "--n-regimes", "-n", type=int, default=3, help="Number of regime states (2 or 3)"
-)
-@click.option(
-    "--vol-window", "-v", type=int, default=20, help="Volatility calculation window"
-)
-@click.option(
-    "--momentum-window", "-m", type=int, default=10, help="Momentum calculation window"
-)
-@click.option(
-    "--min-train-size", type=int, default=252, help="Minimum observations for training"
-)
-@click.option("--update-interval", type=int, default=50, help="Retraining interval")
-@click.option(
-    "--output-dir",
-    "-o",
-    default="./hmm_models",
-    help="Output directory for models and plots",
-)
-@click.option("--plot/--no-plot", default=True, help="Generate plots")
-def hmm(
-    symbol: str,
-    start: Optional[str],
-    end: Optional[str],
-    n_regimes: int,
-    vol_window: int,
-    momentum_window: int,
-    min_train_size: int,
-    update_interval: int,
-    output_dir: str,
-    plot: bool,
-):
-    s = get_ts(start) if start else None
-    e = get_ts(end) if end else None
-    hmm_mod.hmm(
-        symbol,
-        s,
-        e,
-        n_regimes,
-        vol_window,
-        momentum_window,
-        min_train_size,
-        update_interval,
-        output_dir,
-        plot,
-    )
-
-
-@main.command(help="Kalman filter price smoothing and trend estimation")
-@click.argument("symbol")
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--process-noise", "-q", type=float, default=1e-5, help="Process noise Q")
-@click.option(
-    "--measurement-noise", "-r", type=float, default=1e-3, help="Measurement noise R"
-)
-@click.option(
-    "--adaptive/--no-adaptive", default=False, help="Scale R by realized volatility"
-)
-@click.option(
-    "--vol-window", type=int, default=20, help="Window for adaptive volatility calc"
-)
-@click.option("--plot/--no-plot", default=True, help="Generate plots")
-def kalman(
-    symbol: str,
-    start: Optional[str],
-    end: Optional[str],
-    process_noise: float,
-    measurement_noise: float,
-    adaptive: bool,
-    vol_window: int,
-    plot: bool,
-):
-    kalman_mod.kalman(
-        symbol,
-        start,
-        end,
-        process_noise,
-        measurement_noise,
-        adaptive,
-        vol_window,
-        plot,
-    )
-
-
-@main.command(help="run walk-forward backtest from strategy file")
-@click.argument("strategy_file")
-def bt(strategy_file: str):
-    config = load_strategy(strategy_file)
-    output = asyncio.run(backtest_async(config))
-    click.echo(output)
-
-
-@main.command(help="sync historical candle data for universe")
-@click.option("--universe", default="universe.yml", help="Path to universe config file")
-def sync(universe: str):
-    data = sync_mod.load_universe_config(universe)
-    if data.from_date is None:
-        raise click.UsageError(
-            "from_date is required. Set it in universe.yml, e.g.:\n"
-            '  from_date: "2024-01-01"'
-        )
-    result = asyncio.run(
-        sync_mod.sync_data(
-            data.symbols,
-            data.from_date,
-            to_date=data.to_date,
-            bar=data.bar,
-        )
-    )
-    click.echo(
-        f"Sync complete: {result.resolved} resolved, "
-        f"{result.total_fetched} fetched, "
-        f"{result.gaps_found} gaps filled"
-    )
-
-
-@main.command(help="generate live trading signals from strategy file")
-@click.argument("strategy_file")
-def signal(strategy_file: str):
-    config = load_strategy(strategy_file)
-    asyncio.run(signals_mod.generate_signals(config))
-
-
-@main.command(
-    help="FINVIZ like screener — rank and filter stocks using screen modules."
-)
-@click.argument("screen_name", required=False)
-@click.argument("universe", default="universe.yml", required=False)
-@click.option(
-    "-p",
-    "--param",
-    "params",
-    multiple=True,
-    help="Screen parameter as key=value (can be repeated)",
-)
-def screen(
-    screen_name: Optional[str] = None,
-    universe: str = "universe.yml",
-    params: tuple[str, ...] = (),
-):
-    """Screen stocks using a screen module and universe file.
-
-    SCREEN_NAME is the name of a screen module in the screens/ directory
-    (e.g., breakout_screen).
-
-    UNIVERSE is a universe YAML file (default: universe.yml).
-
-    Examples:
-
-        python main.py screen breakout_screen universe.yml
-
-        python main.py screen breakout_screen universe.yml \\
-            --param fast=50 --param slow=200
-    """
-    from src.screen import cli_screen
-
-    try:
-        output = cli_screen(
-            screen_name=screen_name,
-            universe=universe,
-            params=params,
-        )
-    except ValueError as e:
-        raise click.UsageError(str(e))
-
-    click.echo(output)
+main.add_command(data_group)
+main.add_command(kalman_group)
+main.add_command(hmm_group)
+main.add_command(ind_group)
+main.add_command(spread_group)
+main.add_command(mx_group)
+main.add_command(bt_group)
+main.add_command(screen_group)
 
 
 if __name__ == "__main__":

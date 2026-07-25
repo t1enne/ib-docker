@@ -1,5 +1,5 @@
 ---
-name: ibkr-backtest
+name: backtester
 description: Backtest quantitative trading strategies independently — create YAML configs, write custom strategies, run backtests, and interpret results. Use when asked to "backtest a trading strategy", "test a pairs trade", "run a backtest", "create a strategy", or "evaluate a trading idea".
 allowed-tools: Bash(uv:*), Bash(cd:*), Bash(find:*), Bash(cat:*), Bash(ls:*), Bash(grep:*), Read, Write, Edit
 ---
@@ -19,55 +19,6 @@ cd /home/nasrt/Documents/code/dev/ibkr/py
 - Python 3.14+
 - `uv` package manager
 - Project dependencies: `uv sync`
-
-## CLI Composability
-
-The toolkit is built around piped JSON lines composition. Every command reads/writes JSON lines to stdout/stdin. Use pipes to chain data → indicator → model → backtest workflows.
-
-```bash
-# Fetch data
-py data query AAPL --from 2026-01-01 --to 2026-01-15
-
-# Download fresh data
-py data dl AAPL MSFT --from 2026-01-01
-
-# Pipe: data → indicator
-py data query AAPL --from 2026-01-01 | py ind rsi --window 14
-
-# Pipe: data → Kalman filter
-py data query AAPL --from 2026-01-01 | py kalman run --stdin
-
-# Pairs spread analysis
-py spread analyze AAPL MSFT --from 2024-01-01
-
-# HMM regime detection
-py hmm fit AAPL --from 2024-01-01 --n-regimes 3
-
-# Correlation matrix
-py mx matrix --from 2024-01-01
-
-# Run backtest
-py bt run strats/trend.yaml
-
-# Screen symbols against a strategy
-py screen run breakout_screen universe.yml --param fast=50
-```
-
-### Pipe Format (JSON Lines)
-
-Stdout is machine-readable JSON lines; stderr is human-readable progress. With `--stdin`, commands read from pipe instead of DB.
-
-| Module         | Output shape                                                                    |
-| -------------- | ------------------------------------------------------------------------------- |
-| `data`         | `{t, o, h, l, c, v}`                                                            |
-| `ind`          | `{t, ema_20}` or `{t, rsi}` or `{t, upper, middle, lower}` etc.                 |
-| `kalman`       | `{t, filtered, predicted, upper_ci, lower_ci, residual, kalman_gain, velocity}` |
-| `kalman pairs` | `{t, alpha, beta, spread, t_stat, innovation_S}`                                |
-| `hmm`          | `{t, regime, regime_0, regime_1, ...}`                                          |
-| `spread`       | `{t, t_stat, beta, alpha, spread, innovation_S}`                                |
-| `mx`           | `{symbols, correlation, cointegration_pvalues}`                                 |
-| `bt`           | text summary or JSON metrics+trades                                             |
-| `screen`       | text table or JSON results                                                      |
 
 ## Backtest a Strategy in 3 Steps
 
@@ -180,7 +131,7 @@ symbols:
 
 ```bash
 cd /home/nasrt/Documents/code/dev/ibkr/py
-uv run py bt run strats/<name>.yaml
+uv run main.py bt run strats/<name>.yaml
 ```
 
 **For programmatic use** (if you need structured output):
@@ -264,13 +215,9 @@ uv run pytest src/bt/risk/tests/ -v
 
 All CLI groups under the `py` root command:
 
-| Group    | Commands                                            | Description                                   |
-| -------- | --------------------------------------------------- | --------------------------------------------- |
-| `data`   | `dl`, `query`, `preview`                            | Sync/download OHLCV from IBKR, query local DB |
-| `ind`    | `ema`, `rsi`, `atr`, `macd`, `bbands`, `adx`, `vol` | Technical indicators, pipe I/O                |
-| `kalman` | `run`, `pairs`                                      | Kalman filter, pairs cointegration            |
-| `hmm`    | `fit`, `predict`                                    | Hidden Markov Model regime detection          |
-| `spread` | `analyze`                                           | Cointegration spread analysis                 |
-| `mx`     | `matrix`                                            | Correlation + cointegration matrix            |
-| `bt`     | `run`, `analyze`                                    | Backtesting engine                            |
-| `screen` | `run`                                               | Screen universe for strategy signals          |
+| Group    | Commands                 | Description                                   |
+| -------- | ------------------------ | --------------------------------------------- |
+| `data`   | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
+| `kalman` | `run`, `pairs`           | Kalman filter, pairs cointegration            |
+| `hmm`    | `fit`, `predict`         | Hidden Markov Model regime detection          |
+| `bt`     | `run`, `analyze`         | Backtesting engine                            |

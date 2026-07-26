@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock
 
-from src.syncm.ibkr_layer.rate_limiter import (
+from src.data.ibkr.rate_limiter import (
     RateLimitConfig,
     with_retry,
     _set_monotonic_sleep,

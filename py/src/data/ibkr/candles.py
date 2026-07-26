@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, date, timezone
-from typing import TYPE_CHECKING, Optional, cast
+from typing import Optional, cast
 
 from peewee import fn
 from src.data.types import CandleSchema, db
@@ -459,7 +459,7 @@ async def candles_batch(
     conids: list[int],
     from_datetime: datetime,
     to_datetime: Optional[datetime] = None,
-    max_concurrent: int = 2,
+    max_concurrent: int = 1,
     bar: str = "1h",
 ) -> list[int]:
     """Fetch candles for multiple conids with rate limiting and batching.

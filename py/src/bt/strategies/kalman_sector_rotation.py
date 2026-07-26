@@ -11,13 +11,13 @@ Exits: rank drop, velocity collapse (asymmetric threshold), trailing stop.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
 import pandas as pd
 
-from src.bt.state import ActionType, BacktestState, Candle, Position, TradeSignal
+from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 
 STRATEGY_TYPE = "kalman_sector_rotation"
@@ -37,8 +37,12 @@ class Params(StrategyParams):
     warmup_bars: int = 50  # minimum bars before trading
     cooldown_bars: int = 3  # bars to wait after rank-based exit before re-entry
     cooldown_vel_exit_bars: int = 24  # bars to wait after velocity-based exit
-    exit_velocity_threshold: float = -2.0  # exit if velocity below this (negative = strong momentum collapse)
-    exit_rank_threshold: int = 5  # exit if position rank > this (default: same as drop_rank)
+    exit_velocity_threshold: float = (
+        -2.0
+    )  # exit if velocity below this (negative = strong momentum collapse)
+    exit_rank_threshold: int = (
+        5  # exit if position rank > this (default: same as drop_rank)
+    )
     max_positions: int = 3  # hard cap on concurrent positions (bull regime)
     max_positions_bear: int = 1  # hard cap during bear regime
     regime_filter: str = ""  # symbol for regime detection (e.g., "SPY")
@@ -169,9 +173,13 @@ def _load_regime_candles(
         from src.bt.data_feed import load_candles
 
         now = pd.Timestamp.now()
-        end = cast(pd.Timestamp, now if now is not pd.NaT else pd.Timestamp("2099-01-01"))
+        end = cast(
+            pd.Timestamp, now if now is not pd.NaT else pd.Timestamp("2099-01-01")
+        )
         # Load all available data for this symbol (wide range)
-        df = load_candles([symbol], cast(pd.Timestamp, pd.Timestamp("2010-01-01")), end, bar)
+        df = load_candles(
+            [symbol], cast(pd.Timestamp, pd.Timestamp("2010-01-01")), end, bar
+        )
         if df.empty:
             _REGIME_CANDLES_CACHE[cache_key] = None
             return None
@@ -246,7 +254,7 @@ def _rank_symbols(
 
 
 def _rank_of(symbol: str, rankings: dict[str, float]) -> int:
-    sorted_syms = sorted(rankings, key=rankings.get, reverse=True)
+    sorted_syms = sorted(rankings, key=lambda s: rankings[s], reverse=True)
     try:
         return sorted_syms.index(symbol) + 1
     except ValueError:
@@ -268,7 +276,7 @@ def on_candle(
         return []
 
     signals: list[TradeSignal] = []
-    sorted_ranked = sorted(rankings, key=rankings.get, reverse=True)
+    sorted_ranked = sorted(rankings, key=lambda s: rankings[s], reverse=True)
     exiting: set[str] = set()
 
     # --- Exit checks for open positions ---
@@ -325,7 +333,11 @@ def on_candle(
         max_pos = params.max_positions
 
     for sym in sorted_ranked:
-        if effective_positions + len([s for s in signals if s.action == ActionType.long]) >= max_pos:
+        if (
+            effective_positions
+            + len([s for s in signals if s.action == ActionType.long])
+            >= max_pos
+        ):
             break
 
         if sym in state.portfolio.positions and sym not in exiting:

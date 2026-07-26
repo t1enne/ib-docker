@@ -60,7 +60,7 @@ async def resolve_symbols(tickers: list[str]) -> list[ISymbol]:
     Returns only successfully resolved symbols. Failed resolutions are
     logged and skipped.
     """
-    semaphore = asyncio.Semaphore(2)
+    semaphore = asyncio.Semaphore(1)
 
     async def bounded(ticker: str) -> Optional[ISymbol]:
         async with semaphore:

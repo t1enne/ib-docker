@@ -48,7 +48,7 @@ py/
 │   ├── shared/              # NEW: DB helpers (extracted from utils.py)
 │   │   ├── __init__.py
 │   │   └── db.py            # query_candles — pure sqlite3, no ORM
-│   ├── data/                # NEW: market data module (wraps syncm)
+│   ├── data/                # NEW: market data module
 │   │   ├── __init__.py
 │   │   └── cli.py           # py data {dl,query,preview}
 │   ├── indicators/          # NEW: technical indicators with CLI
@@ -82,7 +82,14 @@ py/
 Every command reads/writes JSON lines to stdout/stdin:
 
 ```jsonl
-{"t":"2026-01-05T14:00:00Z","o":100.5,"h":101.2,"l":100.1,"c":100.9,"v":12345}
+{
+  "t": "2026-01-05T14:00:00Z",
+  "o": 100.5,
+  "h": 101.2,
+  "l": 100.1,
+  "c": 100.9,
+  "v": 12345
+}
 ```
 
 - **data** outputs: `{t, o, h, l, c, v}`
@@ -114,15 +121,15 @@ Every command reads/writes JSON lines to stdout/stdin:
 
 These old root commands are superseded by subgroups:
 
-| Old command | New equivalent |
-|---|---|
-| `python main.py mx ...` | `py mx matrix ...` |
-| `python main.py spread ...` | `py spread analyze ...` |
-| `python main.py nd ...` | Not ported (visualization) |
-| `python main.py pnd ...` | Not ported (visualization) |
-| `python main.py hmm ...` | `py hmm fit/predict ...` |
-| `python main.py kalman ...` | `py kalman run ...` |
-| `python main.py bt ...` | `py bt run ...` |
-| `python main.py sync ...` | `py data dl ...` |
+| Old command                 | New equivalent                         |
+| --------------------------- | -------------------------------------- |
+| `python main.py mx ...`     | `py mx matrix ...`                     |
+| `python main.py spread ...` | `py spread analyze ...`                |
+| `python main.py nd ...`     | Not ported (visualization)             |
+| `python main.py pnd ...`    | Not ported (visualization)             |
+| `python main.py hmm ...`    | `py hmm fit/predict ...`               |
+| `python main.py kalman ...` | `py kalman run ...`                    |
+| `python main.py bt ...`     | `py bt run ...`                        |
+| `python main.py sync ...`   | `py data dl ...`                       |
 | `python main.py signal ...` | Not ported (live trading out of scope) |
-| `python main.py screen ...` | `py screen run ...` |
+| `python main.py screen ...` | `py screen run ...`                    |

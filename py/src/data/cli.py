@@ -15,7 +15,7 @@ import json
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import click
 import pandas as pd
@@ -280,16 +280,11 @@ def dl_cmd(
     f_date = date.fromisoformat(from_date)
     t_date = date.fromisoformat(to_date) if to_date else None
 
-    async def _sync():
-        return await sync_data(symbols_list, from_date=f_date, to_date=t_date, bar=bar)
-
-    sync_result = asyncio.run(_sync())
-
-    # After download, show remaining gaps (same format as preview)
-    async def _check():
+    async def _sync_and_check():
+        await sync_data(symbols_list, from_date=f_date, to_date=t_date, bar=bar)
         return await preview_sync(symbols_list, from_date=f_date, to_date=t_date)
 
-    remaining = asyncio.run(_check())
+    remaining = asyncio.run(_sync_and_check())
     _display_preview(remaining, from_date, to_date)
 
 

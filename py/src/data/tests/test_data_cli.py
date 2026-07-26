@@ -5,9 +5,8 @@ Focus: gap-detection logic that runs without API calls.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import pytest

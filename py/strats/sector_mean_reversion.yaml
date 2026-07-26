@@ -1,0 +1,34 @@
+name: sector-mean-reversion
+training_start: 2020-01-01
+training_end: 2024-08-31
+trading_start: 2024-09-01
+trading_end: 2025-01-14
+commission: 0.1
+initial_capital: 50000
+position_size: 0.45
+strategy_type: sector_mean_reversion
+stop_loss: 0.15
+take_profit: 0.30
+bar: 1d
+model_params: {}
+strategy_params:
+  momentum_lookback: 126
+  skip_recent: 21
+  top_n: 2
+  max_positions: 2
+  max_positions_bear: 1
+  warmup_bars: 150
+  cooldown_bars: 3
+  exit_rank_threshold: 6
+  regime_filter: SPY
+  regime_sma: 200
+symbols:
+  - XLE
+  - XLV
+  - XLF
+  - XLB
+  - XLU
+  - XLP
+  - XLY
+  - XBI
+  - XLK

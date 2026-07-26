@@ -51,20 +51,6 @@ class Params(StrategyParams):
     bar: str = "1d"
     regime_sma: int = 200
 
-    # obsolete / kept for YAML compat — ignored
-    process_noise: float = 1e-4
-    measurement_noise: float = 1e-3
-    velocity_smooth: int = 8
-    drop_rank: int = 5
-    cooldown_vel_exit_bars: int = 24
-    exit_velocity_threshold: float = -2.0
-    vol_filter_window: int = 20
-    vol_spike_mult: float = 2.5
-    trend_sma: int = 50
-    require_above_trend: bool = False
-    momentum_lookbacks: tuple = ()
-    momentum_weights: tuple = ()
-
     @classmethod
     def from_dict(cls, d: dict) -> Params:
         d = dict(d)
@@ -81,13 +67,6 @@ _COOLDOWNS: dict[str, int] = {}
 _REGIME_CACHE: dict[str, bool] = {}
 _REGIME_TS: pd.Timestamp | None = None
 _REGIME_CANDLES_CACHE: dict[str, pd.DataFrame | None] = {}
-
-
-def _reset_state() -> None:
-    global _COOLDOWNS, _REGIME_CACHE, _REGIME_TS
-    _COOLDOWNS = {}
-    _REGIME_CACHE = {}
-    _REGIME_TS = None
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +133,13 @@ def _is_bear_regime(
     candles = state.candles.get(regime_symbol)
     if candles is None:
         candles = _load_regime_candles(regime_symbol, bar)
+
+    # Slice to current timestamp to avoid lookahead.
+    # _load_regime_candles loads the entire dataset (2010..now).
+    # Must only use data known at state.timestamp.
+    if candles is not None and ts is not None:
+        candles = candles.loc[:ts]
+
     if candles is None or len(candles) < sma_window:
         _REGIME_CACHE[regime_symbol] = False
         _REGIME_TS = ts

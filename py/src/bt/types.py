@@ -73,6 +73,7 @@ class StrategyConfig:
     rolling_window_size: Optional[int] = None
     hmm_floating_window: Optional[int] = None
     hmm_retrain_interval: Optional[int] = None
+    benchmark_symbols: list[str] = field(default_factory=lambda: ["SPY"])
 
 
 class StrategyType(Enum):

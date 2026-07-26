@@ -240,3 +240,4 @@ class BacktestResults:
     z_scores: Optional[pd.DataFrame] = None
     regimes: Optional[pd.DataFrame] = None
     plot_config: Optional["PlotConfig"] = None
+    benchmark_curves: dict[str, "pd.Series"] = field(default_factory=dict)

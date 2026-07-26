@@ -216,26 +216,34 @@ def stability(equity_curve: pd.Series) -> float:
     return float(r_value) ** 2
 
 
-def alpha_beta(equity_curve: pd.Series) -> tuple[float, float]:
+def alpha_beta(
+    equity_curve: pd.Series,
+    benchmark_curve: pd.Series | None = None,
+) -> tuple[float, float]:
     returns = _get_returns(equity_curve)
     if len(returns) < 2:
         return 0.0, 1.0
 
-    market_return = returns
+    if benchmark_curve is not None:
+        market_returns = _get_returns(benchmark_curve)
+        # Align indices
+        common = returns.index.intersection(market_returns.index)
+        if len(common) < 2:
+            return 0.0, 1.0
+        returns = returns.loc[common]
+        market_returns = market_returns.loc[common]
+    else:
+        # Fallback: use own returns as market proxy — weak, but backward-compat
+        market_returns = returns
 
-    if len(returns) != len(market_return):
-        min_len = min(len(returns), len(market_return))
-        returns = returns.iloc[:min_len]
-        market_return = market_return.iloc[:min_len]
-
-    covariance = np.cov(returns, market_return)[0][1]
-    market_variance = np.var(market_return)
+    covariance = np.cov(returns, market_returns)[0][1]
+    market_variance = np.var(market_returns)
 
     if market_variance == 0:
         return 0.0, 1.0
 
     beta = covariance / market_variance
-    period_alpha = float(returns.mean() - beta * market_return.mean())
+    period_alpha = float(returns.mean() - beta * market_returns.mean())
     ppy = periods_per_year(equity_curve)
     if ppy <= 0:
         return 0.0, float(beta)
@@ -272,7 +280,10 @@ def analyze_portfolio(result: PortfolioResult) -> PerformanceMetrics:
 
 
 def calculate_portfolio_result(
-    equity_curve: pd.Series, trades, initial_capital: float
+    equity_curve: pd.Series,
+    trades,
+    initial_capital: float,
+    benchmark_curve: pd.Series | None = None,
 ) -> PortfolioResult:
     """Calculate portfolio result from equity curve and trades.
 
@@ -280,6 +291,7 @@ def calculate_portfolio_result(
         equity_curve: Equity curve as pandas Series
         trades: Iterable of Trade objects
         initial_capital: Starting capital
+        benchmark_curve: Optional benchmark equity curve for alpha/beta
 
     Returns:
         PortfolioResult with all calculated metrics
@@ -293,7 +305,7 @@ def calculate_portfolio_result(
     if len(returns) > 0 and returns.std() != 0 and ppy > 0:
         sharpe = returns.mean() / returns.std() * np.sqrt(ppy)
 
-    alpha, beta = alpha_beta(equity_curve)
+    alpha, beta = alpha_beta(equity_curve, benchmark_curve)
 
     return PortfolioResult(
         total_return=total_return,
@@ -326,6 +338,7 @@ def get_backtest_results_analysis(
     result: PortfolioResult,
     metrics: Optional[PerformanceMetrics] = None,
     title: str = "Backtest Results",
+    benchmark_curves: dict[str, pd.Series] | None = None,
 ) -> str:
     if metrics is None:
         metrics = analyze_portfolio(result)
@@ -341,6 +354,48 @@ def get_backtest_results_analysis(
 
     lines.append(f"\n{title}")
     lines.append("=" * 80)
+
+    # --- Benchmark Comparison ---
+    if benchmark_curves:
+        lines.append(f"\n{'Benchmark Comparison':<60}")
+        sep = "-" * 72
+        header = f"{'Benchmark':<12} {'Ann Ret':>10} {'Vol':>8} {'Sharpe':>8} {'Max DD':>8} {'Total Ret':>10}"
+        lines.append(header)
+        lines.append(sep)
+
+        # Strategy row
+        lines.append(
+            f"{'Strategy':<12} {metrics.annual_return:>9.2%} "
+            f"{metrics.annual_volatility:>7.2%} {metrics.sharpe_ratio:>7.2f} "
+            f"{metrics.max_drawdown:>7.2%} {result.total_return:>9.2%}"
+        )
+
+        for bm_sym, bm_eq in benchmark_curves.items():
+            bm_total = (bm_eq.iloc[-1] - bm_eq.iloc[0]) / bm_eq.iloc[0]
+            bm_ann = annual_return(bm_eq)
+            bm_vol = annual_volatility(bm_eq)
+            bm_sharpe = 0.0
+            if bm_vol > 0:
+                bm_sharpe = bm_ann / bm_vol
+            bm_dd = max_drawdown(bm_eq)
+
+            lines.append(
+                f"{bm_sym:<12} {bm_ann:>9.2%} "
+                f"{bm_vol:>7.2%} {bm_sharpe:>7.2f} "
+                f"{bm_dd:>7.2%} {bm_total:>9.2%}"
+            )
+
+        # Relative outperformance
+        for bm_sym, bm_eq in benchmark_curves.items():
+            bm_ann = annual_return(bm_eq)
+            bm_dd = max_drawdown(bm_eq)
+            excess_ret = metrics.annual_return - bm_ann
+            lines.append(
+                f"\n  vs {bm_sym}: alpha={metrics.alpha:+.2%}  "
+                f"beta={metrics.beta:.2f}  "
+                f"excess_ann_ret={excess_ret:+.2%}  "
+                f"DD_improvement={abs(bm_dd) - abs(metrics.max_drawdown):+.2%}"
+            )
 
     # --- Drawdowns ---
     dds = drawdown_periods(equity_curve)

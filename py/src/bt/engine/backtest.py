@@ -191,13 +191,26 @@ def run_backtest(
     state = _flush_candle_batches(rows, state)
     state = _finalize(state, bt.execution_params)
 
-    equity_series = pd.Series(
-        [p.equity for p in state.portfolio.equity_curve],
-        index=[p.timestamp for p in state.portfolio.equity_curve],
+    # Build equity series, deduplicating by timestamp (equity curve
+    # accumulates one point per candle = N points per timestamp).
+    # Take the last equity value per unique timestamp.
+    raw_equity = pd.DataFrame(
+        [(p.timestamp, p.equity) for p in state.portfolio.equity_curve],
+        columns=["ts", "equity"],
     )
+    equity_series = raw_equity.groupby("ts")["equity"].last()
+    # Slice to trading window for metrics
+    equity_series = equity_series[
+        (equity_series.index >= bt.window.test_start)
+        & (equity_series.index <= bt.window.test_end)
+    ]
 
+    bm_curves: dict[str, pd.Series] = _get_bench_curves(config, bt)
     pf_result = calculate_portfolio_result(
-        equity_series, state.portfolio.trades, state.portfolio.initial_capital
+        equity_series,
+        state.portfolio.trades,
+        state.portfolio.initial_capital,
+        benchmark_curve=bm_curves.get("SPY"),
     )
 
     return (
@@ -206,9 +219,46 @@ def run_backtest(
             data=state.candles,
             final_state=state,
             plot_config=PlotConfig(),
+            benchmark_curves=bm_curves,
         ),
         state,
     )
+
+
+def _get_bench_curves(config: StrategyConfig, bt: Backtest):
+    from src.bt.data_feed import load_candles
+
+    if not config.benchmark_symbols:
+        return {}
+
+    bm_curves: dict[str, pd.Series] = {}
+
+    try:
+        bm_df = load_candles(
+            config.benchmark_symbols,
+            bt.window.train_start,
+            bt.window.test_end,
+            config.bar,
+        )
+        for bm_sym in config.benchmark_symbols:
+            try:
+                bm_close = bm_df.xs(bm_sym, axis=1, level=0)["close"]
+                # Slice to trading window for comparison
+                bm_close = bm_close[
+                    (bm_close.index >= bt.window.test_start)
+                    & (bm_close.index <= bt.window.test_end)
+                ]
+                if len(bm_close) < 2:
+                    continue
+                # Normalize to same initial capital as strategy
+                bm_eq = bm_close / bm_close.iloc[0] * config.initial_capital
+                bm_curves[bm_sym] = bm_eq
+            except KeyError:
+                pass
+    except Exception:
+        pass
+
+    return bm_curves
 
 
 def _execute_pending(

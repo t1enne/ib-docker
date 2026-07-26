@@ -427,6 +427,7 @@ async def candles(
         )
         return
 
+    logger.debug("dl %s/%s from=%s to=%s", ticker, conid, gaps[0][0], gaps[-1][1])
     logger.info("Fetching %s gap(s) for %s/%s: %s", len(gaps), ticker, conid, gaps)
 
     for gap_start, gap_end in gaps:

@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional, Any, cast
+from typing import List, Optional, Any, cast
 from scipy import stats
-from io import StringIO
-import sys
 
 from src.bt.types import PortfolioResult, ActionType
 
@@ -333,111 +331,148 @@ def get_backtest_results_analysis(
         metrics = analyze_portfolio(result)
 
     equity_curve = result.equity_curve
-
-    # Capture output
-    output = StringIO()
-    original_stdout = sys.stdout
-    sys.stdout = output
-
-    print(f"\n{title}")
-    print("=" * 80)
-
     trades = result.trades
-
-    dds = drawdown_periods(equity_curve)
-    if drawdown_periods:
-        print(f"\n{'Worst Drawdown Periods':<75}")
-        print(
-            f"{'Net DD %':<15} {'Peak Date':<15} {'Valley Date':<15} {'Recovery':<15} {'Duration':<10}"
-        )
-        print("-" * 75)
-        for dd in dds[:5]:
-            print(
-                f"{dd.net_drawdown_pct:<14.2f} {_safe_date_str(dd.peak_date):<15} {_safe_date_str(dd.valley_date):<15} {_safe_date_str(dd.recovery_date):<15} {dd.duration:<10}"
-            )
-
-    print(f"\n{'Trades':<75}")
-    print("-" * 120)
-    # Table header
-    print(
-        f"{'Entry Time':<20} {'Exit Time':<20} {'Entry':<10} {'Exit':<10} {'PnL':<10} {'Pos':<8} {'Reason':<15} {'SL/TP':<15}"
-    )
-    print("-" * 120)
-
-    # Table rows
-    for i, t in enumerate(trades, 1):
-        # Format SL/TP column
-        sl_tp_str = f"{t.stop_loss:.2f}/{t.take_profit:.2f}"
-        exit_price_str = f"{t.exit_price:.2f}" if t.exit_price is not None else "N/A"
-        print(
-            f"{t.symbol:<5} "
-            f"{_safe_date_str(t.entry_time):<20} "
-            f"{_safe_date_str(t.exit_time):<20} "
-            f"{t.entry_price:<10.2f} "
-            f"{exit_price_str:<10} "
-            f"{t.pnl:<10.2f} "
-            f"{t.position == ActionType.long and 'L' or 'S':<8} "
-            f"{str(t.close_reason):<25} "
-            f"{sl_tp_str:<15}"
-        )
-
     closed_trades = [t for t in trades if t.status.value == "closed"]
     profitable = [t for t in closed_trades if t.pnl > 0] if closed_trades else []
     win_rate = len(profitable) / len(closed_trades) if closed_trades else 0.0
 
-    print(f"\n{'Trading Statistics':<25}")
-    print("-" * 42)
-    print(f"{'Starting Capital':<25} {equity_curve.iloc[0]:>15}")
-    print(f"{'Total Trades':<25} {len(trades):>15}")
-    print(f"{'Closed Trades':<25} {len(closed_trades):>15}")
-    print(f"{'Win Rate':<25} {win_rate:>14.2%}")
-    print(f"{'Total P&L':<25} {equity_curve.iloc[-1] - equity_curve.iloc[0]:>15.2f}")
+    # -- Build lines --
+    lines: list[str] = []
 
-    first_date = equity_curve.index[0]
-    last_date = equity_curve.index[-1]
-    first_str = _safe_date_str(first_date)
-    last_str = _safe_date_str(last_date)
+    lines.append(f"\n{title}")
+    lines.append("=" * 80)
 
-    print(f"\nData Start Date: {first_str}")
-    print(f"Data End Date: {last_str}")
+    # --- Drawdowns ---
+    dds = drawdown_periods(equity_curve)
+    if dds:
+        lines.append(f"\n{'Worst Drawdown Periods':<60}")
+        header = f"{'Net DD %':>8}  {'Peak Date':>12}  {'Valley Date':>12}  {'Recovery':>12}  {'Days':>6}"
+        lines.append(header)
+        lines.append("-" * 62)
+        for dd in dds[:5]:
+            rec_str = (
+                _safe_date_str(dd.recovery_date)
+                if dd.recovery_date is not None
+                else "  —"
+            )
+            lines.append(
+                f"{dd.net_drawdown_pct:>7.2f}%  "
+                f"{_safe_date_str(dd.peak_date):>12}  "
+                f"{_safe_date_str(dd.valley_date):>12}  "
+                f"{rec_str:>12}  "
+                f"{dd.duration:>6}"
+            )
+        if not any(dds):
+            lines.append("  (none)")
+    else:
+        lines.append("\nWorst Drawdown Periods")
+        lines.append("  (none)")
 
+    # --- Trades ---
+    if trades:
+        lines.append(f"\n{'Trades':<60}")
+        # Columns: Sym  Entry         Exit          Entry$   Exit$    PnL$     Pos  Exit Reason
+        sep = "-" * 114
+        header = (
+            f"{'Sym':<5} "
+            f"{'Entry':>10}  "
+            f"{'Exit':>10}  "
+            f"{'Entry$':>8}  "
+            f"{'Exit$':>8}  "
+            f"{'PnL$':>9}  "
+            f"{'Pos':>3}  "
+            f"{'Exit Reason':<30}  "
+            f"{'SL/TP':<12}"
+        )
+        lines.append(header)
+        lines.append(sep)
+
+        for t in trades:
+            exit_price_str = (
+                f"{t.exit_price:.2f}" if t.exit_price is not None else "     —"
+            )
+            pos_str = "L" if t.position == ActionType.long else "S"
+            reason = str(t.close_reason)
+            # Truncate long reasons
+            if len(reason) > 30:
+                reason = reason[:27] + "..."
+            sl_tp = (
+                f"{t.stop_loss:.2f}/{t.take_profit:.2f}"
+                if t.stop_loss and t.take_profit
+                else "—"
+            )
+
+            lines.append(
+                f"{t.symbol:<5} "
+                f"{_safe_date_str(t.entry_time):>10}  "
+                f"{_safe_date_str(t.exit_time):>10}  "
+                f"{t.entry_price:>7.2f}  "
+                f"{exit_price_str:>8}  "
+                f"{t.pnl:>8.2f}  "
+                f"{pos_str:>3}  "
+                f"{reason:<30}  "
+                f"{sl_tp:<12}"
+            )
+    else:
+        lines.append("\nTrades")
+        lines.append("  (none)")
+
+    # --- Trading Statistics ---
+    lines.append(f"\n{'Trading Statistics':<25}")
+    lines.append("-" * 42)
+    lines.append(f"{'Starting Capital':<25} {equity_curve.iloc[0]:>15,.2f}")
+    lines.append(f"{'Total Trades':<25} {len(trades):>15}")
+    lines.append(f"{'Closed Trades':<25} {len(closed_trades):>15}")
+    lines.append(f"{'Win Rate':<25} {win_rate:>14.2%}")
+    lines.append(
+        f"{'Total P&L':<25} {equity_curve.iloc[-1] - equity_curve.iloc[0]:>15,.2f}"
+    )
+
+    # --- Date Range ---
+    first_str = _safe_date_str(equity_curve.index[0])
+    last_str = _safe_date_str(equity_curve.index[-1])
+    lines.append(f"\nData: {first_str} → {last_str}")
+
+    # --- Duration ---
     n_periods = len(equity_curve)
-    duration_desc = f"{n_periods} periods"
+    duration_parts = [f"{n_periods} periods"]
     if isinstance(equity_curve.index, pd.DatetimeIndex) and n_periods > 1:
-        start = equity_curve.index[0]
-        end = equity_curve.index[-1]
         try:
-            elapsed_days = (end - start).total_seconds() / (24 * 60 * 60)
+            elapsed_days = (
+                equity_curve.index[-1] - equity_curve.index[0]
+            ).total_seconds() / 86400
         except AttributeError:
             elapsed_days = 0.0
         if elapsed_days > 0:
             months = elapsed_days / 30.44
-            duration_desc = f"{n_periods} periods ({months:.1f} months)"
-    print(f"\nBacktest Duration: {duration_desc}")
+            if months >= 12:
+                duration_parts.append(f"{months / 12:.1f} years")
+            else:
+                duration_parts.append(f"{months:.1f} months")
+    lines.append(f"Duration: {' · '.join(duration_parts)}")
 
-    print(f"\n{'Metric':<25} {'Value':>15}")
-    print("-" * 42)
-    print(f"{'Annual Return':<25} {metrics.annual_return:>14.2%}")
-    print(f"{'Annual Volatility':<25} {metrics.annual_volatility:>14.2%}")
-    print(f"{'Sharpe Ratio':<25} {metrics.sharpe_ratio:>15.2f}")
-    print(f"{'Calmar Ratio':<25} {metrics.calmar_ratio:>15.2f}")
-    print(f"{'Sortino Ratio':<25} {metrics.sortino_ratio:>15.2f}")
-    print(f"{'Omega Ratio':<25} {metrics.omega_ratio:>15.2f}")
-    print(f"{'Max Drawdown':<25} {metrics.max_drawdown:>14.2%}")
-    print(f"{'Stability':<25} {metrics.stability:>15.2f}")
-    print(f"{'Skewness':<25} {metrics.skewness:>15.2f}")
-    print(f"{'Kurtosis':<25} {metrics.kurtosis:>15.2f}")
-    print(f"{'Alpha':<25} {metrics.alpha:>15.2f}")
-    print(f"{'Beta':<25} {metrics.beta:>15.2f}")
+    # --- Metrics Table ---
+    lines.append(f"\n{'Metric':<22} {'Value':>10}")
+    lines.append("-" * 34)
+    lines.append(f"{'Annual Return':<22} {metrics.annual_return:>9.2%}")
+    lines.append(f"{'Annual Volatility':<22} {metrics.annual_volatility:>9.2%}")
+    lines.append(f"{'Sharpe Ratio':<22} {metrics.sharpe_ratio:>10.2f}")
+    lines.append(f"{'Calmar Ratio':<22} {metrics.calmar_ratio:>10.2f}")
+    lines.append(f"{'Sortino Ratio':<22} {metrics.sortino_ratio:>10.2f}")
+    lines.append(f"{'Omega Ratio':<22} {metrics.omega_ratio:>10.2f}")
+    lines.append(f"{'Max Drawdown':<22} {metrics.max_drawdown:>9.2%}")
+    lines.append(f"{'Stability':<22} {metrics.stability:>10.2f}")
+    lines.append(f"{'Skewness':<22} {metrics.skewness:>10.2f}")
+    lines.append(f"{'Kurtosis':<22} {metrics.kurtosis:>10.2f}")
+    lines.append(f"{'Alpha':<22} {metrics.alpha:>10.2f}")
+    lines.append(f"{'Beta':<22} {metrics.beta:>10.2f}")
 
-    # Restore stdout and return output if requested
-    sys.stdout = original_stdout
-    return output.getvalue()
+    return "\n".join(lines)
 
 
 def exposure_and_turnover(
     result: PortfolioResult,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     trades = result.trades
     closed_trades = [t for t in trades if t.status.value == "closed"]
 

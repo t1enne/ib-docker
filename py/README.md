@@ -23,21 +23,32 @@ Data → model_updater → strategy → execution → portfolio → risk → mar
 - **Immutable state** — `dataclasses.replace()` returns new state, never mutates.
 - **Protocol-based injection** — components implement `StrategyFn`, `ExecutionFn`, `RiskCheckFn` etc., not base classes.
 
-### Architecture
+### Code Organization
 
 ```
-src/bt/
-├── engine/          ← Backtest loop (pure functional)
-│   └── backtest.py  ← run_backtest(), candle_generator, run()
-├── strategies/           ← Strategy implementations (6 built-in)
-├── state/types.py   ← Immutable dataclasses (PortfolioState, BacktestState, Candle...)
-├── types.py         ← Protocols, StrategyConfig, EngineWindow
-├── portfolio/pure.py← Position sizing, fill application, mark-to-market
-├── execution/pure.py← Signal → fill with slippage/spread
-├── risk/pure.py     ← Stop-loss/take-profit checks
-├── indicators.py    ← Technical indicators: EMA, RSI, MACD, ATR, ADX, MFI, LSMA...
-├── metrics.py       ← Sharpe, Sortino, Calmar, drawdowns, trade analysis
-└── data_feed/       ← Load/sync OHLCV candles
+src/
+├── data/             ← IBKR market data sync, DB, resampling
+│   ├── ibkr/         ← IBKR REST API client (candles, lookup, rate limiter)
+│   ├── sync.py       ← sync_data(), preview_sync()
+│   ├── db.py         ← SQLite query helpers
+│   ├── resample.py   ← OHLCV resampling
+│   └── cli.py        ← `data` CLI group
+├── indicators/       ← Signal processing models
+│   ├── ta.py         ← Technical indicators: EMA, RSI, MACD, ATR, ADX, MFI, LSMA...
+│   ├── kalman/       ← Kalman filter (univariate + pairs)
+│   └── hmm/          ← Hidden Markov Model regime detection
+├── bt/               ← Backtesting engine
+│   ├── engine/       ← Backtest loop (pure functional)
+│   ├── strategies/   ← Strategy implementations (6 built-in)
+│   ├── state/        ← Immutable dataclasses
+│   ├── types.py      ← Protocols, StrategyConfig
+│   ├── portfolio/    ← Position sizing, fill application, mark-to-market
+│   ├── execution/    ← Signal → fill with slippage/spread
+│   ├── risk/         ← Stop-loss/take-profit checks
+│   ├── metrics.py    ← Sharpe, Sortino, Calmar, drawdowns
+│   └── data_feed/    ← Load/sync OHLCV candles
+├── utils.py          ← Shared utilities (DB read, z-score, env loader)
+└── main.py           ← CLI entry point
 ```
 
 ## Running a Backtest
@@ -104,7 +115,7 @@ A strategy module needs one function: `on_candle()`.
 
 STRATEGY_TYPE = "my_strat"
 
-import src.bt.indicators as ta
+import src.indicators.ta as ta
 from src.bt.strategies.utils import open, close
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
 
@@ -145,7 +156,7 @@ state.htf_data                 # Dict[str, pd.DataFrame] — higher-timeframe ba
 state.timestamp                # Current timestamp
 ```
 
-### Available Indicators (`src.bt.indicators`)
+### Available Indicators (`src.indicators.ta`) `
 
 `ema`, `sma`, `rsi`, `atr`, `bollinger_bands`, `macd`, `stochastic`, `momentum`, `volatility`, `vwma`, `obv`, `mfi`, `lsma`, `plus_di`, `minus_di`, `adx`
 
@@ -254,7 +265,7 @@ uv run py bt analyze <strategy.yaml>
 uv run py data query AAPL --from 2024-01-01   # Fetch candles
 
 # Pipe workflows
-uv run py data query AAPL --from 2024-01-01 | uv run py ind ema --span 20 | uv run py bt run strategy.yml
+uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.yml
 ```
 
 ## Toolchain
@@ -277,5 +288,5 @@ Tests use `pytest-asyncio` for async and `respx` for HTTP mocking. Pure function
 ## Resources
 
 - **IBKR REST API Client**: `../ib-rest-api-client` (local dependency, path-configured in `pyproject.toml`)
-- **Data sync**: `src/syncm/` — IBKR candle download + rate limiting
-- **Models**: `src/kalman/`, `src/hmm/`, `src/spread/` — Kalman filters, Hidden Markov Models, spread computation
+- **Data sync**: `src/data/` — IBKR candle download, DB queries, resampling
+- **Indicators**: `src/indicators/` — Technical indicators (`ta.py`), Kalman filters (`kalman/`), Hidden Markov Models (`hmm/`)

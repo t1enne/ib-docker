@@ -44,7 +44,7 @@ def on_candle(
 - `state.htf_data` — dict of higher-timeframe DataFrames keyed by interval string (e.g., `"4h"`)
 - `state.timestamp` — current `pd.Timestamp`
 
-**Available indicators** (`from src.bt.indicators import ...`):
+**Available indicators** (`from src.indicators.ta import ...`) :
 `ema`, `sma`, `rsi`, `atr`, `bollinger_bands`, `macd`, `stochastic`, `momentum`, `volatility`, `vwma`, `obv`, `mfi`, `lsma`, `plus_di`, `minus_di`, `adx`
 
 **Signal helpers** (`from src.bt.strategies.utils import ...`):
@@ -131,7 +131,7 @@ symbols:
 
 ```bash
 cd /home/nasrt/Documents/code/dev/ibkr/py
-uv run main.py bt run strats/<name>.yaml
+uv run py bt run strats/<name>.yaml
 ```
 
 **For programmatic use** (if you need structured output):
@@ -215,9 +215,7 @@ uv run pytest src/bt/risk/tests/ -v
 
 All CLI groups under the `py` root command:
 
-| Group    | Commands                 | Description                                   |
-| -------- | ------------------------ | --------------------------------------------- |
-| `data`   | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
-| `kalman` | `run`, `pairs`           | Kalman filter, pairs cointegration            |
-| `hmm`    | `fit`, `predict`         | Hidden Markov Model regime detection          |
-| `bt`     | `run`, `analyze`         | Backtesting engine                            |
+| Group  | Commands                 | Description                                   |
+| ------ | ------------------------ | --------------------------------------------- |
+| `data` | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
+| `bt`   | `run`, `analyze`         | Backtesting engine                            |

@@ -131,15 +131,56 @@ class MarketRegimeHMM:
             tol=1e-3,
         )
 
-        # Fit model
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.model.fit(features.values)
+        # Fit model (suppress hmmlearn Cython stderr convergence noise)
+        import sys
+        import io
+
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.model.fit(features.values)
+        finally:
+            sys.stderr = old_stderr
+
+        # Train a secondary model to figure out which HMM state = which vol regime.
+        # We remap the raw HMM state numbers (arbitrary component order) into
+        # semantically meaningful labels: 0=lowest vol, 1=med vol, 2=highest vol.
+        self._build_regime_remap(features)
 
         self.fitted = True
         self.last_train_idx = len(features)
 
         return self
+
+    def _build_regime_remap(self, features: pd.DataFrame) -> None:
+        """Build a state→ranked-regime mapping sorted by mean volatility.
+
+        HMM components are numbered arbitrarily. This method runs predict on
+        the training features, sorts states by their mean volatility, and
+        builds a mapping: raw_state → [0=lowest vol, ..., N-1=highest vol].
+        All predict/predict_proba outputs are then run through this remap.
+        """
+        assert self.model is not None
+        raw_states = self.model.predict(features.values)
+
+        vol_by_state: dict[int, float] = {}
+        for s in range(self.n_regimes):
+            mask = raw_states == s
+            vol_by_state[s] = (
+                float(features["volatility"][mask].mean()) if mask.any() else 0.0
+            )
+
+        # Rank: lowest vol → 0, highest vol → N-1
+        sorted_states = sorted(vol_by_state, key=lambda s: vol_by_state[s])
+        self._state_to_regime = {old: new for new, old in enumerate(sorted_states)}
+        self._regime_to_state = {new: old for new, old in enumerate(sorted_states)}
+
+        label_map = {0: "Low Vol", 1: "Medium Vol", 2: "High Vol"}
+        self.regime_labels = {
+            i: label_map.get(i, f"Regime {i}") for i in range(self.n_regimes)
+        }
 
     def predict(
         self, prices: pd.Series, returns: Optional[pd.Series] = None
@@ -167,6 +208,9 @@ class MarketRegimeHMM:
             warnings.simplefilter("ignore")
             assert self.model
             regimes = self.model.predict(features.values)
+
+        # Remap raw HMM states to volatility-ranked regime labels
+        regimes = np.array([self._state_to_regime.get(s, s) for s in regimes])
 
         regimes_series = pd.Series(regimes, index=features.index)
 
@@ -202,9 +246,14 @@ class MarketRegimeHMM:
             assert self.model
             probabilities = self.model.predict_proba(features.values)
 
+        # Reorder probability columns to match volatility-ranked regime order
+        remapped_probs = np.zeros_like(probabilities)
+        for raw_state, ranked_regime in self._state_to_regime.items():
+            remapped_probs[:, ranked_regime] = probabilities[:, raw_state]
+
         columns = pd.Index([f"regime_{i}" for i in range(self.n_regimes)])
         proba_df = pd.DataFrame(
-            probabilities,
+            remapped_probs,
             index=features.index,
             columns=columns,
         )
@@ -286,12 +335,20 @@ class MarketRegimeHMM:
 
         features_reshaped = features.reshape(1, -1)
         assert self.model
-        proba = self.model.predict_proba(features_reshaped)[0]
-        regime = self.model.predict(features_reshaped)[0]
+        raw_proba = self.model.predict_proba(features_reshaped)[0]
+        raw_regime = self.model.predict(features_reshaped)[0]
+        ranked_regime = self._state_to_regime.get(raw_regime, raw_regime)
 
-        # Don't trade in high volatility regime (regime 2)
-        # or if confidence is below threshold
-        return regime != 2 and proba[regime] >= threshold
+        # Remap probabilities to ranked order
+        remapped_proba = np.zeros(self.n_regimes)
+        for raw_s, ranked_r in self._state_to_regime.items():
+            remapped_proba[ranked_r] = raw_proba[raw_s]
+
+        high_vol_regime = self.n_regimes - 1  # highest vol = last regime
+        return (
+            ranked_regime != high_vol_regime
+            and remapped_proba[ranked_regime] >= threshold
+        )
 
     def save(self, filepath: str) -> None:
         """

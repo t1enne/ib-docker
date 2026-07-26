@@ -67,7 +67,8 @@ class StrategyConfig:
     bar: str
     # the strategy_params will be passed to the strategy raw
     strategy_params: dict
-    model_params: dict
+    model_params: dict = field(default_factory=dict)
+    model_updater: dict | bool = False
     htf: list[str] = field(default_factory=list)
     # the rolling_window_size will be used to retrain the models
     rolling_window_size: Optional[int] = None

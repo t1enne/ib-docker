@@ -1,0 +1,27 @@
+name: xle-momentum-regime
+training_start: 2015-01-01
+training_end: 2015-06-01
+trading_start: 2015-06-01
+trading_end: 2025-12-31
+commission: 0.1
+initial_capital: 10000
+position_size: 0.2
+strategy_type: momentum_regime
+stop_loss: 0.15
+take_profit: 0.30
+bar: 1d
+model_params: false
+strategy_params:
+  fast: 20
+  slow: 50
+  momentum_lookback: 20
+  momentum_threshold: 0.02
+  regime_long: true
+  regime_short: true
+  regime_range_flat: true
+  size_bull: 1.0
+  size_bear: 1.0
+  size_high_vol: 0.5
+  warmup_bars: 60
+symbols:
+  - XLE

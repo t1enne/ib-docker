@@ -20,6 +20,10 @@ Usage:
     results, state = run_backtest(bt, gen, exec_handler, risk_handler)
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from src.bt.engine.utils import candle_generator, merge_bt_state
 
 from dataclasses import dataclass, field, replace
@@ -28,6 +32,9 @@ from typing import Generator, Tuple, Optional, Any, List, Callable
 import pandas as pd
 
 from src.bt.metrics import calculate_portfolio_result
+
+if TYPE_CHECKING:
+    from src.bt.types import StrategyConfig
 from src.bt.state import (
     ActionType,
     BacktestState,
@@ -527,19 +534,73 @@ def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestSta
     )
 
 
+def _resolve_model_updater(config: "StrategyConfig") -> Any | None:
+    """Build a model_updater_fn from config.model_updater if present."""
+    mu = config.model_updater
+    if not mu or not isinstance(mu, dict):
+        return None
+
+    mu_type = mu.get("type")
+    if mu_type == "hmm_online":
+        from src.bt.regime.model_updater import create_hmm_online_updater
+
+        hmm_cfg = mu.get("hmm_online", {})
+        return create_hmm_online_updater(
+            n_regimes=hmm_cfg.get("n_regimes", 3),
+            window_size=hmm_cfg.get("window_size", 500),
+            vol_window=hmm_cfg.get("vol_window", 20),
+            momentum_window=hmm_cfg.get("momentum_window", 10),
+            retrain_interval=hmm_cfg.get("retrain_interval", 50),
+            random_state=hmm_cfg.get("random_state", 42),
+        )
+
+    if mu_type == "sma":
+        from src.bt.regime.model_updater import create_regime_model_updater
+        from src.bt.regime.detectors import create_sma_detector
+
+        sma_cfg = mu.get("sma", {})
+        detector = create_sma_detector(
+            fast_window=sma_cfg.get("fast_window", 20),
+            slow_window=sma_cfg.get("slow_window", 50),
+            range_threshold_pct=sma_cfg.get("range_threshold_pct", 0.005),
+        )
+        return create_regime_model_updater(detector)
+
+    if mu_type == "volatility":
+        from src.bt.regime.model_updater import create_regime_model_updater
+        from src.bt.regime.detectors import create_volatility_detector
+
+        vol_cfg = mu.get("volatility", {})
+        detector = create_volatility_detector(
+            vol_window=vol_cfg.get("vol_window", 20),
+            low_vol_pctile=vol_cfg.get("low_vol_pctile", 0.25),
+            high_vol_pctile=vol_cfg.get("high_vol_pctile", 0.75),
+            direction_window=vol_cfg.get("direction_window", 50),
+        )
+        return create_regime_model_updater(detector)
+
+    return None
+
+
 def run(bt: Backtest, data: pd.DataFrame, strat_mod) -> BacktestResults:
     """Convenience function for running backtest with defaults.
 
-    This creates default handlers and runs the backtest.
-    Use run_backtest() for full control over handlers.
+    This creates default handlers, resolves model_updater from config,
+    and runs the backtest.  Use run_backtest() for full control.
     """
     from src.bt.engine.handlers import default_execution_handler, default_risk_handler
 
     gen = candle_generator(data, bt.config)
     exec_handler = default_execution_handler()
     risk_handler = default_risk_handler()
+    model_updater_fn = _resolve_model_updater(bt.config)
 
     results, _ = run_backtest(
-        bt, gen, exec_handler, risk_handler, strategy_mod=strat_mod
+        bt,
+        gen,
+        exec_handler,
+        risk_handler,
+        model_updater_fn=model_updater_fn,
+        strategy_mod=strat_mod,
     )
     return results

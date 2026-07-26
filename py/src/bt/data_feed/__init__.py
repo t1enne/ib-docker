@@ -20,7 +20,7 @@ from typing import List, cast
 
 from src.bt.state import Candle
 from src.utils import get_local_candles
-from src.syncm import sync_data
+from src.data import sync_data
 
 
 def load_candles(

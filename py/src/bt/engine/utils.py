@@ -1,6 +1,6 @@
 from src.bt.state import Candle, BacktestState
 from typing import Generator, cast
-from src.market_data.resample import resample_multiindex
+from src.data.resample import resample_multiindex
 import pandas as pd
 import numpy as np
 

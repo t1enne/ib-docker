@@ -1,4 +1,4 @@
-import src.bt.indicators as ta
+import src.indicators.ta as ta
 from src.bt.strategies.utils import open, close, get_resampled_candles
 from typing import List, Dict, TYPE_CHECKING
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType

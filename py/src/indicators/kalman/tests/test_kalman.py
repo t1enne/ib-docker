@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.kalman.pure import run_filter, compute_stats
-from src.kalman.types import KalmanConfig, FilterResult
+from src.indicators.kalman.pure import run_filter, compute_stats
+from src.indicators.kalman.types import KalmanConfig, FilterResult
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

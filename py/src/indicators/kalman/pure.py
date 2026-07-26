@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from filterpy.kalman import KalmanFilter as _KF
 
-from src.kalman.types import (
+from src.indicators.kalman.types import (
     KalmanConfig,
     FilterResult,
     KalmanStats,

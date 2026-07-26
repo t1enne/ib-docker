@@ -4,13 +4,13 @@ from datetime import datetime, timedelta, date
 from typing import Optional, cast
 
 from peewee import fn
-from src.syncm.types import CandleSchema, db
+from src.data.types import CandleSchema, db
 from ib_rest_api_client.api.trading_market_data import get_iserver_marketdata_history
 from ib_rest_api_client.models import IserverHistoryBidAskResponse
 
 from .shared import get_contract_info, auth_client
 from .rate_limiter import with_retry
-from src.syncm.types import CandleDict
+from src.data.types import CandleDict
 
 logger = logging.getLogger(__name__)
 

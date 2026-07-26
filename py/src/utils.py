@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 import sqlite3
 
-from src.market_data import resample_ohlcv
+from src.data.resample import resample_ohlcv
 
 
 _DEFAULT_START = pd.Timestamp("2020-01-01")

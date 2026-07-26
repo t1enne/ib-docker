@@ -36,8 +36,8 @@ from collections import deque
 
 import numpy as np
 
-from src.kalman.pure import _warm_start_ols
-from src.kalman.types import PairsKalmanConfig
+from src.indicators.kalman.pure import _warm_start_ols
+from src.indicators.kalman.types import PairsKalmanConfig
 
 _EPS = 1e-12
 

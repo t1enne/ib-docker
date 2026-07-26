@@ -1,7 +1,7 @@
 from ib_rest_api_client import Client
 import httpx
 from typing import Dict, Any
-from src.syncm.types import SymbolSchema, ISymbol
+from src.data.types import SymbolSchema, ISymbol
 
 client = httpx.AsyncClient(
     base_url="https://localhost:5000/v1/api/", timeout=10.0, verify=False

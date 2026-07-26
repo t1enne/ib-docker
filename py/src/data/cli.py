@@ -1,8 +1,9 @@
-"""Data module — download and query market data.
+"""Data CLI — download, query, and preview market data.
 
-CLI: py data dl AAPL MSFT --from 2026-01-01
-     py data query AAPL --from 2026-01-01 --to 2026-06-01
-     py data preview AAPL MSFT --from 2026-01-01
+Usage:
+    py data dl AAPL MSFT --from 2026-01-01
+    py data query AAPL --from 2026-01-01 --to 2026-06-01
+    py data preview AAPL MSFT --from 2026-01-01
 """
 
 from __future__ import annotations
@@ -17,8 +18,7 @@ import click
 import pandas as pd
 
 from src.utils import to_optional_ts
-
-from src.shared.db import query_candles
+from src.data.db import query_candles
 
 
 # ── JSON lines output helper ──────────────────────────────────────
@@ -135,7 +135,7 @@ def dl_cmd(
     symbols: tuple[str, ...], from_date: str, to_date: Optional[str], bar: str, fmt: str
 ):
     """Download historical data from IBKR for SYMBOLS."""
-    from src.syncm import sync_data
+    from src.data.sync import sync_data
 
     f_date = date.fromisoformat(from_date)
     t_date = date.fromisoformat(to_date) if to_date else None
@@ -170,7 +170,7 @@ def dl_cmd(
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 def preview_cmd(symbols: tuple[str, ...], from_date: str, to_date: Optional[str]):
     """Preview what gaps exist without downloading."""
-    from src.syncm import preview_sync
+    from src.data.sync import preview_sync
 
     f_date = date.fromisoformat(from_date)
     t_date = date.fromisoformat(to_date) if to_date else None

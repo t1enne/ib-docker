@@ -67,7 +67,7 @@ def query_candles(
     df = df.set_index("Date").drop(columns=["timestamp"])
 
     if bar != "1h":
-        from src.market_data import resample_ohlcv
+        from src.data.resample import resample_ohlcv
 
         return resample_ohlcv(df, bar, completed_only=True)
 

@@ -5,7 +5,7 @@ This module provides HMM-based regime detection for financial time series,
 designed to identify low, medium, and high volatility regimes.
 """
 
-from src.hmm.types import RegimeStats
+from src.indicators.hmm.types import RegimeStats
 
 import pickle
 from pathlib import Path

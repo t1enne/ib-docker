@@ -1,4 +1,4 @@
-"""Sync module — historical candle data synchronization.
+"""Data sync — historical candle data synchronization from IBKR.
 
 Public API:
   sync_data       — Fetch missing candle data for a list of tickers
@@ -18,16 +18,16 @@ from typing import Optional
 
 import yaml
 
-from src.syncm.types import SymbolSchema, ISymbol
-from src.syncm.ibkr_layer.candles import (
+from src.data.types import SymbolSchema, ISymbol
+from src.data.ibkr.candles import (
     candles_batch,
     get_existing_range,
     calculate_gaps,
     find_internal_gaps,
     _merge_and_sort_gaps,
 )
-from src.syncm.ibkr_layer import get_contract_info, lookup
-from src.syncm.types import (
+from src.data.ibkr import get_contract_info, lookup
+from src.data.types import (
     FetchPlan,
     PreviewResult,
     ProgressFn,

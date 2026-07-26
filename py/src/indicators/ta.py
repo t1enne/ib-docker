@@ -1,10 +1,10 @@
 """Indicator helper functions for use inside trading strategies.
 
 Similar to Pine Script functions, these operate on price series/DataFrames
-and can be used from strategies with data from self.model.market_data.
+and can be used from strategies with data from self.model.
 
 Usage from strategy:
-    from src.bt.indicators import ema, rsi, atr
+    from src.indicators.ta import ema, rsi, atr
 
     def on_candle(self, candle, open_trade):
         # Get last 14 bars of close prices for symbol

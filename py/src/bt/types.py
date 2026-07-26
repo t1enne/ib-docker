@@ -99,7 +99,7 @@ class StrategyProtocol(Protocol):
             - self.model.market_data      # Historical OHLCV
 
         Apply indicators to market data:
-            from src.bt.indicators import ema
+            from src.indicators.ta import ema
             ema_9 = ema(self.model.market_data[-14:].close, 9)
         """
         ...

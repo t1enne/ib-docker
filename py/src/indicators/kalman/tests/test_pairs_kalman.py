@@ -9,9 +9,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.kalman.pure import run_pairs_kalman, _warm_start_ols
-from src.kalman.online import PairsKalmanOnline
-from src.kalman.types import PairsKalmanConfig
+from src.indicators.kalman.pure import run_pairs_kalman, _warm_start_ols
+from src.indicators.kalman.online import PairsKalmanOnline
+from src.indicators.kalman.types import PairsKalmanConfig
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional
 import pandas as pd
 
-import src.bt.indicators as ta
+import src.indicators.ta as ta
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType, Position
 from src.bt.strategies.types import StrategyParams
 from src.bt.strategies.utils import open, close

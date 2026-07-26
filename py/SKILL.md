@@ -132,7 +132,10 @@ symbols:
 ```bash
 cd /home/nasrt/Documents/code/dev/ibkr/py
 uv run py bt run strats/<name>.yaml
+make run bt run strats/<name>.yaml   # same, via Make shortcut
 ```
+
+> **Note:** Make intercepts its own flags (`--help`, `--format`). To pass them through to `main.py`, use `-- ` separator: `make run bt run strat.yaml -- --format jsonl`.
 
 **For programmatic use** (if you need structured output):
 
@@ -198,6 +201,8 @@ Don't access `state.htf_data` directly — use `htf_candles(state, freq, tick)` 
 ## Testing a Strategy
 
 ```bash
+make test                                     # all tests
+make test-fast                                # quick tests (no header)
 uv run pytest src/bt/engine/tests/ -v
 uv run pytest src/bt/portfolio/tests/ -v
 uv run pytest src/bt/risk/tests/ -v
@@ -205,7 +210,7 @@ uv run pytest src/bt/risk/tests/ -v
 
 ## Common Gotchas
 
-- **Data availability**: not all symbols in `universe.yml` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run py data query <SYMBOL>`.
+- **Data availability**: not all symbols in `universe.yml` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run py data query <SYMBOL>` (or `make run data query <SYMBOL>`).
 - **Bar size**: strategies expect the bar size in YAML to match available data. Most data is `1h`.
 - **HTF lookahead**: `htf_candles()` is safe. Direct `state.htf_data[freq]` is not — it contains all bars including those after current tick.
 - **Multiple symbols**: the engine iterates all symbols per timestamp. The strategy runs on the last symbol. Entry signals for all symbols work; position management happens per-symbol.
@@ -213,7 +218,7 @@ uv run pytest src/bt/risk/tests/ -v
 
 ## Module Reference
 
-All CLI groups under the `py` root command:
+All CLI groups under the `py` root command — also callable via `make run <subcommand> <args>`:
 
 | Group  | Commands                 | Description                                   |
 | ------ | ------------------------ | --------------------------------------------- |

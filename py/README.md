@@ -7,6 +7,7 @@ A modular CLI toolkit for quantitative trading: data synchronization, indicator 
 ```bash
 uv sync
 uv run py bt run strats/trend.yaml
+make run bt run strats/trend.yaml   # same, via Make shortcut
 ```
 
 ## Core Concepts
@@ -83,6 +84,8 @@ symbols:
 
 ```bash
 uv run py bt run strats/my_strat.yaml
+# or via Make shortcut:
+make run bt run strats/my_strat.yaml
 ```
 
 Output: equity curve summary, trade log, metrics table (Sharpe, Sortino, Calmar, max drawdown, win rate, etc.).
@@ -91,6 +94,7 @@ For JSON output:
 
 ```bash
 uv run py bt run strats/my_strat.yaml --format jsonl
+make run bt run strats/my_strat.yaml --format jsonl
 ```
 
 ## Built-in Strategies
@@ -257,16 +261,21 @@ print(get_backtest_results_analysis(results.pf))
 ```bash
 # Run a backtest
 uv run py bt run <strategy.yaml> [--format jsonl]
+make run bt run <strategy.yaml>          # same, via Make shortcut
 
 # Analyze a strategy (detailed JSON metrics)
 uv run py bt analyze <strategy.yaml>
+make run bt analyze <strategy.yaml>      # same
 
 # Data commands
 uv run py data query AAPL --from 2024-01-01   # Fetch candles
+make run data query AAPL --from 2024-01-01     # same
 
 # Pipe workflows
 uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.yml
 ```
+
+> **Note:** `make run` passes everything after `run` as args to `main.py`. Make intercepts its own flags (`--help`, `--format`, etc.) — separate them with `-- ` when needed, e.g. `make run bt run strat.yaml -- --format jsonl`.
 
 ## Toolchain
 
@@ -279,8 +288,10 @@ uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.yml
 ## Testing
 
 ```bash
-uv run pytest                                  # All tests
-uv run pytest src/bt/engine/tests/ -v          # Specific module
+make check                                    # lint + format + typecheck + tests
+make test                                     # all tests
+make test-fast                                # quick tests (no header noise)
+uv run pytest src/bt/engine/tests/ -v          # specific module
 ```
 
 Tests use `pytest-asyncio` for async and `respx` for HTTP mocking. Pure function tests are the norm — given fixed inputs, backtest results are deterministic.

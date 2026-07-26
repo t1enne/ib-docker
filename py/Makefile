@@ -22,3 +22,6 @@ test-fast:
 	uv run pytest $(SRC_DIRS) tests --no-header -q
 
 check: lint format typecheck test-fast
+
+run:
+	uv run main.py $(filter-out run,$(MAKECMDGOALS))

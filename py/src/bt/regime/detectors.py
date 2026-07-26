@@ -1,5 +1,14 @@
 """Built-in regime detectors.
 
+Two families:
+
+  Trend detectors  — classify market direction (BULL/BEAR/RANGE)
+    create_sma_detector           price vs SMA cross
+    create_volatility_detector    rolling vol percentile + trend
+
+  Vol detectors    — classify volatility level (LOW_VOL/MED_VOL/HIGH_VOL)
+    create_hmm_detector           HMM on returns/vol/momentum (vol-ranked)
+
 Each factory returns a RegimeDetector callable.
 """
 
@@ -11,68 +20,19 @@ import numpy as np
 import pandas as pd
 
 from src.bt.regime.types import (
-    REGIME_INT_TO_LABEL,
-    REGIME_LABEL_TO_INT,
     RegimeDetector,
-    RegimeLabel,
+    TREND_INT_TO_LABEL,
+    TREND_LABEL_TO_INT,
+    VOL_INT_TO_LABEL,
+    VOL_LABEL_TO_INT,
+    TrendRegime,
+    VolRegime,
 )
 
 
-# ---------------------------------------------------------------------------
-# HMM-based detector (wraps existing MarketRegimeHMM)
-# ---------------------------------------------------------------------------
-
-
-def create_hmm_detector(
-    price_col: str = "close",
-    n_regimes: int = 3,
-    vol_window: int = 20,
-    momentum_window: int = 10,
-    min_train_size: int = 252,
-    retrain_interval: int = 50,
-) -> RegimeDetector:
-    """Create an HMM-based regime detector.
-
-    Uses src.indicators.hmm.MarketRegimeHMM under the hood.
-    Caches the fitted model and only refits every retrain_interval bars
-    to avoid expensive HMM fitting on every tick.
-
-    HMM states are reordered by volatility: 0=lowest vol, N-1=highest vol.
-    These map to the canonical convention: 0=RANGE, 1=BULL, 2=BEAR.
-    """
-    from src.indicators.hmm import MarketRegimeHMM
-
-    _model: MarketRegimeHMM | None = None
-    _last_len: int = 0
-
-    def detect(prices: pd.DataFrame) -> pd.Series:
-        nonlocal _model, _last_len
-
-        if price_col not in prices.columns or len(prices) < min_train_size:
-            return pd.Series(np.full(len(prices), -1), index=prices.index)
-
-        n = len(prices)
-        # Only refit every retrain_interval bars or on first call
-        if _model is None or n - _last_len >= retrain_interval:
-            _model = MarketRegimeHMM(
-                n_regimes=n_regimes,
-                vol_window=vol_window,
-                momentum_window=momentum_window,
-                min_train_size=min_train_size,
-                random_state=42,
-            )
-            _model.fit(prices[price_col])
-            _last_len = n
-
-        regimes = _model.predict(prices[price_col])
-        return regimes.fillna(-1).astype(int).rename("regime")
-
-    return detect
-
-
-# ---------------------------------------------------------------------------
-# SMA-based directional detector
-# ---------------------------------------------------------------------------
+# ============================================================================
+# Trend detectors — classify market direction
+# ============================================================================
 
 
 def create_sma_detector(
@@ -81,7 +41,7 @@ def create_sma_detector(
     slow_window: int = 200,
     range_threshold_pct: float = 0.005,
 ) -> RegimeDetector:
-    """Detect regime via SMA cross + flatness check.
+    """Detect trend via SMA cross + flatness check.
 
     - BULL: fast SMA > slow SMA and spread > threshold
     - BEAR: fast SMA < slow SMA and spread > threshold
@@ -102,20 +62,15 @@ def create_sma_detector(
             if pd.isna(spread_pct.iloc[i]):
                 continue
             if spread_pct.iloc[i] <= range_threshold_pct:
-                regime_int[i] = REGIME_LABEL_TO_INT["RANGE"]
+                regime_int[i] = TREND_LABEL_TO_INT["RANGE"]
             elif fast_sma.iloc[i] > slow_sma.iloc[i]:
-                regime_int[i] = REGIME_LABEL_TO_INT["BULL"]
+                regime_int[i] = TREND_LABEL_TO_INT["BULL"]
             else:
-                regime_int[i] = REGIME_LABEL_TO_INT["BEAR"]
+                regime_int[i] = TREND_LABEL_TO_INT["BEAR"]
 
         return pd.Series(regime_int, index=closes.index, name="regime")
 
     return detect
-
-
-# ---------------------------------------------------------------------------
-# Volatility-band detector
-# ---------------------------------------------------------------------------
 
 
 def create_volatility_detector(
@@ -125,7 +80,7 @@ def create_volatility_detector(
     high_vol_pctile: float = 0.75,
     direction_window: int = 50,
 ) -> RegimeDetector:
-    """Detect regime via rolling volatility percentiles + trend.
+    """Detect trend via rolling volatility percentiles + direction.
 
     - RANGE: volatility in bottom 25% of historical range
     - BULL: rising trend (price > SMA) with moderate vol
@@ -140,7 +95,6 @@ def create_volatility_detector(
         returns = closes.pct_change()
         rolling_vol = returns.rolling(vol_window).std()
 
-        # Expanding percentiles to avoid lookahead
         vol_low = rolling_vol.expanding().quantile(low_vol_pctile)
         vol_high = rolling_vol.expanding().quantile(high_vol_pctile)
 
@@ -156,37 +110,89 @@ def create_volatility_detector(
                 continue
 
             if v <= vl:
-                regime_int[i] = REGIME_LABEL_TO_INT["RANGE"]
+                regime_int[i] = TREND_LABEL_TO_INT["RANGE"]
             elif v > vh and not trend_up.iloc[i]:
-                regime_int[i] = REGIME_LABEL_TO_INT["BEAR"]
+                regime_int[i] = TREND_LABEL_TO_INT["BEAR"]
             else:
-                regime_int[i] = REGIME_LABEL_TO_INT["BULL"]
+                regime_int[i] = TREND_LABEL_TO_INT["BULL"]
 
         return pd.Series(regime_int, index=closes.index, name="regime")
 
     return detect
 
 
-# ---------------------------------------------------------------------------
-# Utility: get current regime for a single point
-# ---------------------------------------------------------------------------
+# ============================================================================
+# Vol detectors — classify volatility level (HMM-based)
+# ============================================================================
 
 
-def current_regime_label(
-    regime_series: pd.Series, idx: int = -1
-) -> Optional[RegimeLabel]:
-    """Extract the current regime label from a regime series.
+def create_hmm_vol_detector(
+    price_col: str = "close",
+    n_regimes: int = 3,
+    vol_window: int = 20,
+    momentum_window: int = 10,
+    min_train_size: int = 252,
+    retrain_interval: int = 50,
+) -> RegimeDetector:
+    """Create an HMM-based volatility regime detector.
 
-    Args:
-        regime_series: Output of a RegimeDetector
-        idx: Index position to query (default: -1, last)
+    Output labels: 0=LOW_VOL, 1=MED_VOL, 2=HIGH_VOL (vol-ranked).
+    Uses src.indicators.hmm.MarketRegimeHMM under the hood.
 
-    Returns:
-        "BULL", "BEAR", "RANGE", or None if unknown
+    Caches the fitted model and only refits every retrain_interval bars.
     """
+
+    from src.indicators.hmm import MarketRegimeHMM
+
+    _model: MarketRegimeHMM | None = None
+    _last_len: int = 0
+
+    def detect(prices: pd.DataFrame) -> pd.Series:
+        nonlocal _model, _last_len
+
+        if price_col not in prices.columns or len(prices) < min_train_size:
+            return pd.Series(np.full(len(prices), -1), index=prices.index)
+
+        n = len(prices)
+        if _model is None or n - _last_len >= retrain_interval:
+            _model = MarketRegimeHMM(
+                n_regimes=n_regimes,
+                vol_window=vol_window,
+                momentum_window=momentum_window,
+                min_train_size=min_train_size,
+                random_state=42,
+            )
+            _model.fit(prices[price_col])
+            _last_len = n
+
+        regimes = _model.predict(prices[price_col])
+        return regimes.fillna(-1).astype(int).rename("vol_regime")
+
+    return detect
+
+
+# ---------------------------------------------------------------------------
+# Utility: get current label from a series
+# ---------------------------------------------------------------------------
+
+
+def current_trend_label(
+    regime_series: pd.Series, idx: int = -1
+) -> Optional[TrendRegime]:
+    """Extract the current trend label from a trend regime series."""
     if len(regime_series) == 0:
         return None
     val = regime_series.iloc[idx]
     if pd.isna(val) or val == -1:
         return None
-    return REGIME_INT_TO_LABEL.get(int(val))
+    return TREND_INT_TO_LABEL.get(int(val))
+
+
+def current_vol_label(regime_series: pd.Series, idx: int = -1) -> Optional[VolRegime]:
+    """Extract the current vol label from a vol regime series."""
+    if len(regime_series) == 0:
+        return None
+    val = regime_series.iloc[idx]
+    if pd.isna(val) or val == -1:
+        return None
+    return VOL_INT_TO_LABEL.get(int(val))

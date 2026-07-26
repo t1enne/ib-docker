@@ -11,12 +11,12 @@ import pandas as pd
 import pytest
 
 from src.bt.regime.detectors import (
-    create_hmm_detector,
+    create_hmm_vol_detector,
     create_sma_detector,
     create_volatility_detector,
-    current_regime_label,
+    current_trend_label,
 )
-from src.bt.regime.types import REGIME_INT_TO_LABEL
+from src.bt.regime.types import TREND_INT_TO_LABEL
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +181,10 @@ class TestSMADetector:
         range_pct = (third == 0).mean()
         assert range_pct > 0.15, f"Phase 3 range: {range_pct:.1%} RANGE"
 
-    def test_current_regime_label_returns_string(self, bull_data: pd.DataFrame) -> None:
+    def test_current_trend_label_returns_string(self, bull_data: pd.DataFrame) -> None:
         detect = create_sma_detector(fast_window=20, slow_window=50)
         regimes = detect(bull_data)
-        label = current_regime_label(regimes)
+        label = current_trend_label(regimes)
         assert label in ("BULL", "BEAR", "RANGE")
         # Bull market → BULL at the end
         assert label == "BULL", f"Expected BULL, got {label}"
@@ -267,7 +267,7 @@ class TestVolatilityDetector:
 
 class TestHMMDetector:
     def test_hmm_detects_three_regimes(self, multi_phase_data: pd.DataFrame) -> None:
-        detect = create_hmm_detector(min_train_size=250)
+        detect = create_hmm_vol_detector(min_train_size=250)
         regimes = detect(multi_phase_data)
         valid = regimes[regimes >= 0]
         unique = set(valid.unique())
@@ -279,7 +279,7 @@ class TestHMMDetector:
 
     def test_hmm_too_short_data(self) -> None:
         short = pd.DataFrame({"close": [100.0] * 50})
-        detect = create_hmm_detector(min_train_size=252)
+        detect = create_hmm_vol_detector(min_train_size=252)
         regimes = detect(short)
         assert (regimes == -1).all()
 
@@ -291,13 +291,13 @@ class TestHMMDetector:
 
 class TestRegimeMapping:
     def test_all_labels_have_both_directions(self) -> None:
-        from src.bt.regime.types import REGIME_LABEL_TO_INT
+        from src.bt.regime.types import TREND_LABEL_TO_INT
 
-        assert set(REGIME_INT_TO_LABEL.keys()) == {0, 1, 2}
-        assert set(REGIME_LABEL_TO_INT.keys()) == {"BULL", "BEAR", "RANGE"}
+        assert set(TREND_INT_TO_LABEL.keys()) == {0, 1, 2}
+        assert set(TREND_LABEL_TO_INT.keys()) == {"BULL", "BEAR", "RANGE"}
         # Bidirectional consistency
-        for i, label in REGIME_INT_TO_LABEL.items():
-            assert REGIME_LABEL_TO_INT[label] == i
+        for i, label in TREND_INT_TO_LABEL.items():
+            assert TREND_LABEL_TO_INT[label] == i
 
-    def test_current_regime_label_none_on_empty(self) -> None:
-        assert current_regime_label(pd.Series([], dtype=float)) is None
+    def test_current_trend_label_none_on_empty(self) -> None:
+        assert current_trend_label(pd.Series([], dtype=float)) is None

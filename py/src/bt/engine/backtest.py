@@ -468,34 +468,46 @@ def _flush_candle_batches(rows: CandleRows, state: BacktestState) -> BacktestSta
 
 
 def _append_htf_bar(state: BacktestState, candle: Candle) -> BacktestState:
-    """Append an HTF bar to the htf_data DataFrame."""
+    """Append an HTF bar to a per-interval list (lazy DataFrame build).
+
+    Lists are stored in state.htf_data as list[dict] keyed by interval.
+    The model updater calls _htf_as_dataframe() to materialize on-demand.
+    This avoids O(n²) pd.concat on every HTF tick.
+    """
     freq = candle.interval
     if freq is None:
         return state
 
-    new_row = pd.DataFrame(
-        {
-            "open": [candle.open],
-            "high": [candle.high],
-            "low": [candle.low],
-            "close": [candle.close],
-            "volume": [candle.volume],
-        },
-        index=pd.MultiIndex.from_tuples(
-            [(candle.symbol, candle.timestamp)], names=["symbol", "timestamp"]
-        ),
-    )
-
-    current_htf = state.htf_data.get(freq)
-    if current_htf is None or current_htf.empty:
-        htf_data = new_row
-    else:
-        htf_data = pd.concat([current_htf, new_row])
+    row = {
+        "symbol": candle.symbol,
+        "timestamp": candle.timestamp,
+        "open": candle.open,
+        "high": candle.high,
+        "low": candle.low,
+        "close": candle.close,
+        "volume": candle.volume,
+    }
 
     new_htf_data = dict(state.htf_data)
-    new_htf_data[freq] = htf_data
+    if freq not in new_htf_data:
+        new_htf_data[freq] = []
+    rows = new_htf_data[freq]
+    rows.append(row)
 
     return merge_bt_state(state, dict(htf_data=new_htf_data))
+
+
+def _htf_as_dataframe(htf_data: dict, freq: str) -> pd.DataFrame | None:
+    """Materialize HTF list-of-dicts into a MultiIndex DataFrame on-demand."""
+    rows = htf_data.get(freq)
+    if rows is None or (isinstance(rows, list) and len(rows) == 0):
+        return None
+    # Already materialized? (legacy path)
+    if isinstance(rows, pd.DataFrame):
+        return rows if not rows.empty else None
+    df = pd.DataFrame(rows)
+    df = df.set_index(["symbol", "timestamp"])
+    return df
 
 
 def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestState:
@@ -541,6 +553,24 @@ def _resolve_model_updater(config: "StrategyConfig") -> Any | None:
         return None
 
     mu_type = mu.get("type")
+    if mu_type == "dual_online":
+        from src.bt.regime.model_updater import create_dual_online_updater
+
+        cfg_d = mu.get("dual_online", {})
+        return create_dual_online_updater(
+            n_regimes=cfg_d.get("n_regimes", 3),
+            window_size=cfg_d.get("window_size", 252),
+            vol_window=cfg_d.get("vol_window", 20),
+            momentum_window=cfg_d.get("momentum_window", 10),
+            retrain_interval=cfg_d.get("retrain_interval", 50),
+            random_state=cfg_d.get("random_state", 42),
+            trend_fast=cfg_d.get("trend_fast", 50),
+            trend_slow=cfg_d.get("trend_slow", 200),
+            range_threshold_pct=cfg_d.get("range_threshold_pct", 0.005),
+            trend_bar=cfg_d.get("trend_bar"),
+            vol_bar=cfg_d.get("vol_bar"),
+        )
+
     if mu_type == "hmm_online":
         from src.bt.regime.model_updater import create_hmm_online_updater
 

@@ -186,7 +186,7 @@ class ModelState:
     """Strategy model computations."""
 
     z_score: Optional[float]
-    current_regime: Optional[int]
+    current_regime: Optional[int]  # legacy — prefer current_trend
     price_buffers: Tuple[Dict[str, float], ...]
     market_data: MarketDataState
     hedge_beta: float = 1.0
@@ -194,6 +194,8 @@ class ModelState:
     resample_cache: Dict[str, pd.DataFrame] = field(default_factory=dict)
     resample_anchor: Dict[str, pd.Timestamp] = field(default_factory=dict)
     resample_partial: Dict[str, Dict[str, dict]] = field(default_factory=dict)
+    current_trend: Optional[int] = None  # 0=RANGE, 1=BULL, 2=BEAR
+    current_vol: Optional[int] = None  # 0=LOW_VOL, 1=MED_VOL, 2=HIGH_VOL
 
 
 @dataclass(frozen=True)
@@ -206,7 +208,7 @@ class BacktestState:
     model_state: ModelState
     risk_events: Tuple[Any, ...]  # RiskEvent tuple
     candles: dict[str, pd.DataFrame]
-    htf_data: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    htf_data: Dict[str, Any] = field(default_factory=dict)  # list[dict] or pd.DataFrame
 
 
 @dataclass(frozen=True)

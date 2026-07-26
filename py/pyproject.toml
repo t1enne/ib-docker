@@ -16,6 +16,7 @@ dependencies = [
     "ib-rest-api-client",
     "playwright>=1.60.0",
     "numpy>=2.3.3",
+    "exchange-calendars>=4.13.2",
 ]
 
 [project.scripts]

@@ -8,6 +8,14 @@ A modular CLI toolkit for quantitative trading: data synchronization, indicator 
 uv sync
 uv run py bt run strats/trend.yaml
 make run bt run strats/trend.yaml   # same, via Make shortcut
+make exec bt run strats/trend.yaml  # alias for the same
+```
+
+`make run` (or `make exec`) passes all args straight to the CLI. With no args, it shows available commands:
+
+```bash
+make run                           # → prints make help
+make run bt --help                 # → prints Click help for bt subcommand
 ```
 
 ## Core Concepts
@@ -262,6 +270,7 @@ print(get_backtest_results_analysis(results.pf))
 # Run a backtest
 uv run py bt run <strategy.yaml> [--format jsonl]
 make run bt run <strategy.yaml>          # same, via Make shortcut
+make exec bt run <strategy.yaml>         # alias for make run
 
 # Analyze a strategy (detailed JSON metrics)
 uv run py bt analyze <strategy.yaml>
@@ -275,7 +284,7 @@ make run data query AAPL --from 2024-01-01     # same
 uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.yml
 ```
 
-> **Note:** `make run` passes everything after `run` as args to `main.py`. Make intercepts its own flags (`--help`, `--format`, etc.) — separate them with `-- ` when needed, e.g. `make run bt run strat.yaml -- --format jsonl`.
+> **Tip:** `make run` / `make exec` passes all extra words as args to the CLI. No `--` separator needed for most flags. If Make itself intercepts a flag (e.g. `-B`, `--debug`), use `make run help` to get Click's help instead. With no args, prints available commands.
 
 ## Toolchain
 

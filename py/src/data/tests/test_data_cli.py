@@ -68,11 +68,19 @@ class TestFindGaps48h:
         assert len(gaps) == 1
         assert gaps[0] == (ts[0], ts[1])
 
-    def test_gap_over_weekend(self):
-        """Fri 21:00 → Mon 15:30 = ~66.5h — should flag."""
+    def test_weekend_gap_filtered(self):
+        """Fri 21:00 → Mon 15:30 = pure weekend — should NOT flag."""
         ts = [
             datetime(2026, 1, 9, 21, 0),  # Friday
             datetime(2026, 1, 12, 15, 30),  # Monday
+        ]
+        assert _find_gaps_48h(_make_df(ts)) == []
+
+    def test_real_gap_with_trading_days(self):
+        """Fri → next Fri = includes Mon-Thu trading days — should flag."""
+        ts = [
+            datetime(2026, 1, 9, 21, 0),  # Friday
+            datetime(2026, 1, 16, 15, 30),  # Next Friday
         ]
         gaps = _find_gaps_48h(_make_df(ts))
         assert len(gaps) == 1

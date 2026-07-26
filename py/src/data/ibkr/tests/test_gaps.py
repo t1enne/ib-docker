@@ -69,9 +69,42 @@ class TestCalculateGaps:
             _JAN1,
             _JUN1,
         )
+        # Jun 1 → Jul 1 spans trading days → gap preserved
         assert len(gap) == 1
         assert gap[0][0] == datetime(2026, 6, 1)
         assert gap[0][1] == datetime(2026, 7, 1)
+
+    def test_forward_gap_weekend_filtered(self):
+        """Forward gap that is purely weekend → filtered out.
+
+        Jun 5 2026 is a Friday. Jun 7 is Sunday.
+        Gap from Fri evening to Sun morning = only non-trading days.
+        """
+        jun5_fri_19 = datetime(2026, 6, 5, 19, 0)
+        jun7_sun_10 = datetime(2026, 6, 7, 10, 0)
+        # Newest existing = Jun 5 19:00 (Fri after market)
+        newest_ts = int(jun5_fri_19.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        gaps = calculate_gaps(
+            datetime(2026, 1, 1),
+            jun7_sun_10,
+            _JAN1,
+            newest_ts,
+        )
+        # The forward gap is Fri 19:00 → Sun 10:23 — all non-trading
+        assert len(gaps) == 0
+
+    def test_forward_gap_during_trading_day(self):
+        """Forward gap starting during market hours → preserved."""
+        jun5_fri_10 = datetime(2026, 6, 5, 10, 0)
+        newest_ts = int(jun5_fri_10.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        gaps = calculate_gaps(
+            datetime(2026, 1, 1),
+            datetime(2026, 6, 7, 10, 0),
+            _JAN1,
+            newest_ts,
+        )
+        # Gap starts Fri 10:00 during market → real gap
+        assert len(gaps) == 1
 
     def test_both_gaps(self):
         """Range extends both before oldest and after newest."""

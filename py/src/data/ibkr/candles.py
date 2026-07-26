@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, date, timezone
-from typing import Optional, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from peewee import fn
 from src.data.types import CandleSchema, db
@@ -11,6 +11,7 @@ from ib_rest_api_client.models import IserverHistoryBidAskResponse
 from .shared import get_contract_info, auth_client
 from .rate_limiter import with_retry
 from src.data.types import CandleDict
+from src.data.xcal import is_non_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,14 @@ MAX_CANDLES_PER_REQUEST = 1000
 MAX_PERIOD_DAYS = 365
 
 
+def _chunked_insert(insert_data: list[CandleDict], batch_size: int = 500) -> None:
+    """Insert candles in batches to avoid SQLite's variable limit."""
+    for i in range(0, len(insert_data), batch_size):
+        batch = insert_data[i : i + batch_size]
+        with db.atomic():
+            CandleSchema.insert_many(batch).on_conflict_ignore().execute()
+
+
 def date_to_timestamp(d: date) -> int:
     return int(datetime.combine(d, datetime.min.time()).timestamp() * 1000)
 
@@ -32,6 +41,36 @@ def date_to_timestamp(d: date) -> int:
 def timestamp_to_datetime(ts: int) -> datetime:
     """Convert ms epoch timestamp (UTC) to naive UTC datetime."""
     return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).replace(tzinfo=None)
+
+
+def _is_all_non_trading(gap_start: datetime, gap_end: datetime) -> bool:
+    """Check if every date in [gap_start, gap_end) is a non-trading day.
+
+    For partial days at the boundaries:
+    - Start day: ignored if gap starts after 18:00 (market already closed)
+    - End day: ignored if gap ends before 09:30 (market hasn't opened yet)
+
+    Examples:
+      Fri 19:00 → Sun 10:23:  Sat+Sun are non-trading → True
+      Fri 10:00 → Sun 10:23:  Fri is a trading day, gap starts during market → False
+      Fri 19:00 → Mon 10:23:  Mon is a trading day → False
+    """
+    d = gap_start.date()
+    end = gap_end.date()
+    while d <= end:
+        dt = datetime.combine(d, datetime.min.time())
+        # Skip start day if gap begins after market close
+        if d == gap_start.date() and gap_start.hour >= 18:
+            d += timedelta(days=1)
+            continue
+        # Skip end day if gap ends before market open
+        if d == gap_end.date() and gap_end.hour < 9:
+            d += timedelta(days=1)
+            continue
+        if not is_non_trading_day(dt):
+            return False
+        d += timedelta(days=1)
+    return True
 
 
 def calculate_gaps(
@@ -45,14 +84,16 @@ def calculate_gaps(
     Pure function that returns a list of (start, end) tuples representing
     missing date ranges that need to be fetched.
 
-    Detects THREE kinds of gaps:
+    Detects TWO kinds of gaps:
     1. Backward gap: before the oldest existing candle
     2. Forward gap: after the newest existing candle
-    3. Internal gaps: missing days BETWEEN existing candles
 
-    All gaps use EXACT timestamp precision — no day-boundary truncation.
-    This prevents intra-day gaps (e.g. missing candles at 14:00-23:59)
-    from being silently skipped.
+    Gaps that consist entirely of non-trading days (weekends + holidays)
+    are filtered out.
+
+    Internal gaps (missing days BETWEEN existing candles) are detected
+    separately by find_internal_gaps() — that function operates at day
+    granularity, while this function uses exact timestamp precision.
 
     Args:
         requested_from: Start of the requested datetime range
@@ -82,57 +123,15 @@ def calculate_gaps(
 
     # 1. Backward gap: strictly before the oldest existing candle
     if requested_from < existing_from:
-        gaps.append((requested_from, existing_from))
+        if not _is_all_non_trading(requested_from, existing_from):
+            gaps.append((requested_from, existing_from))
 
     # 2. Forward gap: strictly after the newest existing candle
     if existing_to < requested_to:
-        gaps.append((existing_to, requested_to))
+        if not _is_all_non_trading(existing_to, requested_to):
+            gaps.append((existing_to, requested_to))
 
     return gaps
-
-
-# Known US market holidays (static list for 2025-2027)
-# These are days the NYSE/NASDAQ are closed — no data expected.
-_US_MARKET_HOLIDAYS: set[tuple[int, int, int]] = {
-    # 2025
-    (2025, 1, 1),  # New Year
-    (2025, 1, 20),  # MLK Day
-    (2025, 2, 17),  # Presidents Day
-    (2025, 4, 18),  # Good Friday
-    (2025, 5, 26),  # Memorial Day
-    (2025, 6, 19),  # Juneteenth
-    (2025, 7, 4),  # Independence Day
-    (2025, 9, 1),  # Labor Day
-    (2025, 11, 27),  # Thanksgiving
-    (2025, 12, 25),  # Christmas
-    # 2026
-    (2026, 1, 1),  # New Year
-    (2026, 1, 19),  # MLK Day
-    (2026, 2, 16),  # Presidents Day
-    (2026, 4, 3),  # Good Friday
-    (2026, 5, 25),  # Memorial Day
-    (2026, 6, 19),  # Juneteenth
-    (2026, 7, 3),  # Independence Day (observed)
-    (2026, 9, 7),  # Labor Day
-    (2026, 11, 26),  # Thanksgiving
-    (2026, 12, 25),  # Christmas
-    # 2027
-    (2027, 1, 1),  # New Year
-    (2027, 1, 18),  # MLK Day
-    (2027, 2, 15),  # Presidents Day
-    (2027, 3, 26),  # Good Friday
-    (2027, 5, 31),  # Memorial Day
-    (2027, 6, 18),  # Juneteenth (observed)
-    (2027, 7, 5),  # Independence Day (observed)
-    (2027, 9, 6),  # Labor Day
-    (2027, 11, 25),  # Thanksgiving
-    (2027, 12, 24),  # Christmas (observed)
-}
-
-
-def _is_us_market_holiday(d: datetime) -> bool:
-    """Check if a date is a known US market holiday."""
-    return (d.year, d.month, d.day) in _US_MARKET_HOLIDAYS
 
 
 def find_internal_gaps(
@@ -200,8 +199,7 @@ def find_internal_gaps(
 
         for offset in range(1, gap_days):
             missing_day = curr + timedelta(days=offset)
-            # Skip weekends and known US market holidays
-            if missing_day.weekday() >= 5 or _is_us_market_holiday(missing_day):
+            if is_non_trading_day(missing_day):
                 # If we were tracking a gap range, close it before the holiday
                 if missing_start is not None:
                     if missing_end is not None:
@@ -438,8 +436,7 @@ async def candles(
 
         if insert_data:
             try:
-                with db.atomic():
-                    CandleSchema.insert_many(insert_data).on_conflict_ignore().execute()
+                _chunked_insert(insert_data, batch_size=500)
             except Exception:
                 logger.exception("Bulk insert failed for %s", ticker)
                 raise

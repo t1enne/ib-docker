@@ -23,7 +23,7 @@ Usage:
 from src.bt.engine.utils import candle_generator, merge_bt_state
 
 from dataclasses import dataclass, field, replace
-from typing import Generator, Tuple, Optional, Any, List, Callable, cast
+from typing import Generator, Tuple, Optional, Any, List, Callable
 
 import pandas as pd
 
@@ -45,8 +45,11 @@ from src.bt.types import StrategyConfig, EngineWindow, BacktestResults, PlotConf
 from src.bt.engine.handlers import ExecutionHandler, RiskHandler
 from src.utils import parse_timestamp
 
-# Per-candle row accumulator type — list of {timestamp,open,high,low,close,volume}
-CandleRows = dict[str, list[dict[str, object]]]
+import numpy as np
+
+# Per-candle row accumulator — column-major numpy arrays keyed by symbol.
+# Each symbol maps to {timestamp: ndarray, open: ndarray, ...} for zero-copy DataFrame build at flush.
+CandleRows = dict[str, dict[str, np.ndarray]]
 
 
 @dataclass
@@ -157,6 +160,7 @@ def run_backtest(
             strategy_fn,
             last_symbol,
             can_trade,
+            rows,
         )
 
         # Stage 7: execute signals generated this tick
@@ -238,10 +242,14 @@ def _generate_signals(
     strategy_fn: Optional[Callable],
     last_symbol: Optional[str],
     can_trade: bool,
+    rows: CandleRows,
 ) -> BacktestState:
     """Stage 6: Run strategy on last symbol per timestamp only."""
     if not (can_trade and strategy_fn and candle.symbol == last_symbol):
         return state
+
+    # Build state.candles on-demand from numpy arrays (only for this tick)
+    state = merge_bt_state(state, dict(candles=_build_candles(rows)))
 
     new_signals = strategy_fn(state, candle, resolved_params)
     if not new_signals:
@@ -290,21 +298,23 @@ def _update_price_buffers(
     if candle.symbol != (symbols[-1] if symbols else None):
         return state
 
+    candle_ts_ns = np.datetime64(candle.timestamp.to_datetime64())
+
     # Verify all symbols have this timestamp
     for sym in symbols:
         sym_rows = rows.get(sym)
-        if not sym_rows:
+        if sym_rows is None:
             return state
-        last_ts = sym_rows[-1]["timestamp"]
-        assert isinstance(last_ts, pd.Timestamp), (
-            f"Expected Timestamp, got {type(last_ts)}"
-        )
-        if last_ts != candle.timestamp:
+        n = int(sym_rows["_len"][0])
+        if n == 0:
+            return state
+        if sym_rows["timestamp"][n - 1] != candle_ts_ns:
             return state
 
-    pair: dict[str, float] = {
-        sym: float(cast(float, rows[sym][-1]["close"])) for sym in symbols
-    }
+    pair: dict[str, float] = {}
+    for sym in symbols:
+        n = int(rows[sym]["_len"][0])
+        pair[sym] = float(rows[sym]["close"][n - 1])
 
     new_ms = replace(
         state.model_state,
@@ -316,44 +326,73 @@ def _update_price_buffers(
 def _append_candle(
     rows: CandleRows, state: BacktestState, candle: Candle
 ) -> Tuple[CandleRows, BacktestState]:
-    """Stage 3: Stash candle row; rebuild DataFrame every candle."""
+    """Stage 3: Stash candle row into numpy column arrays (fast append).
+
+    DataFrames are built once at flush. Strategies access state.candles
+    which is populated on-demand from the column arrays in _build_candles.
+    """
     sym = candle.symbol
     if sym not in rows:
-        rows[sym] = []
-    rows[sym].append(
-        {
-            "timestamp": candle.timestamp,
-            "open": candle.open,
-            "high": candle.high,
-            "low": candle.low,
-            "close": candle.close,
-            "volume": candle.volume,
+        # Pre-allocate column arrays with room to grow
+        rows[sym] = {
+            "timestamp": np.empty(256, dtype="datetime64[ms]"),
+            "open": np.empty(256, dtype=np.float64),
+            "high": np.empty(256, dtype=np.float64),
+            "low": np.empty(256, dtype=np.float64),
+            "close": np.empty(256, dtype=np.float64),
+            "volume": np.empty(256, dtype=np.float64),
+            "_len": np.array([0], dtype=np.int64),
         }
-    )
 
-    candles = dict(state.candles)
-    new_df = pd.DataFrame(rows[sym]).set_index("timestamp")
-    for col in ["open", "high", "low", "close", "volume"]:
-        new_df.loc[:, col] = pd.to_numeric(new_df[col])
-    candles[sym] = new_df
+    cols = rows[sym]
+    n = int(cols["_len"][0])
 
-    return rows, merge_bt_state(state, dict(candles=candles))
+    # Grow by 2x if full
+    if n >= len(cols["timestamp"]):
+        new_cap = n * 2
+        for key in ("timestamp", "open", "high", "low", "close", "volume"):
+            new_arr = np.empty(new_cap, dtype=cols[key].dtype)
+            new_arr[:n] = cols[key]
+            cols[key] = new_arr
+
+    cols["timestamp"][n] = np.datetime64(candle.timestamp.to_datetime64())
+    cols["open"][n] = candle.open
+    cols["high"][n] = candle.high
+    cols["low"][n] = candle.low
+    cols["close"][n] = candle.close
+    cols["volume"][n] = candle.volume
+    cols["_len"][0] = n + 1
+
+    return rows, state
+
+
+def _build_candles(rows: CandleRows) -> dict[str, pd.DataFrame]:
+    """Build DataFrames from numpy column arrays (called on-demand)."""
+    candles: dict[str, pd.DataFrame] = {}
+    for sym, cols in rows.items():
+        n = int(cols["_len"][0])
+        if n == 0:
+            continue
+        ts_arr = cols["timestamp"][:n]
+        df = pd.DataFrame(
+            {
+                "open": cols["open"][:n],
+                "high": cols["high"][:n],
+                "low": cols["low"][:n],
+                "close": cols["close"][:n],
+                "volume": cols["volume"][:n],
+            },
+            index=pd.DatetimeIndex(ts_arr),
+        )
+        candles[sym] = df
+    return candles
 
 
 def _flush_candle_batches(rows: CandleRows, state: BacktestState) -> BacktestState:
-    """Build final DataFrames from all accumulated rows at end of backtest."""
+    """Build final DataFrames from numpy arrays at end of backtest."""
     if not rows:
         return state
-
-    candles = dict(state.candles)
-    for sym, sym_rows in rows.items():
-        if not sym_rows:
-            continue
-        new_df = pd.DataFrame(sym_rows).set_index("timestamp")
-        for col in ["open", "high", "low", "close", "volume"]:
-            new_df.loc[:, col] = pd.to_numeric(new_df[col])
-        candles[sym] = new_df
-
+    candles = _build_candles(rows)
     return merge_bt_state(state, dict(candles=candles))
 
 

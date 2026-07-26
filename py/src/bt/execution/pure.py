@@ -15,25 +15,29 @@ def execute_signal(
     """Convert signal to fill with slippage/spread.
 
     Pure function - no side effects.
+
+    When signal.fill_at_next_open is True, uses tick.open as the base price
+    (realistic: signals generated at close fill at next bar's open).
+    Otherwise uses signal.price (same-bar fill at signal generation price).
     """
-    signal_price = signal.price
+    base_price = tick.open if signal.fill_at_next_open else signal.price
     spread_bps = params.spread_bps or 0.01
-    base_spread = signal_price * (spread_bps / 10000)
+    base_spread = base_price * (spread_bps / 10000)
 
     # Calculate base price with spread
     if signal.action == ActionType.long:
-        base_price = signal_price + base_spread
+        fill_base = base_price + base_spread
     elif signal.action == ActionType.short:
-        base_price = signal_price - base_spread
+        fill_base = base_price - base_spread
     else:
-        base_price = signal_price
+        fill_base = base_price
 
     # Calculate slippage
     adverse = calculate_adverse_selection(signal, tick)
     slippage_bps = params.slippage_bps * (1.5 if adverse else 1.0)
-    slippage = signal_price * (slippage_bps / 10000)
+    slippage = base_price * (slippage_bps / 10000)
 
-    executed_price = base_price + slippage
+    executed_price = fill_base + slippage
     commission = params.fixed_commission
 
     return FillEvent(

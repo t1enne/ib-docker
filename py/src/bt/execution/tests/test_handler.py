@@ -68,22 +68,24 @@ def candle_bearish():
 
 
 def test_long_entry_pays_spread(execution_params, long_signal, candle_bullish):
-    """Long entry should pay the spread (buy at higher price)."""
+    """Long entry should pay the spread (buy at higher price than base)."""
     fill = execute_signal(long_signal, candle_bullish, execution_params)
 
-    # Spread = 100 * 10/10000 = 0.10
-    # Expected executed price = 100 + 0.10 + slippage
-    assert fill.executed_price > long_signal.price
+    # fill_at_next_open defaults True → base = tick.open (99.0)
+    # Spread = 99.0 * 10/10000 = 0.099
+    # Price should be above tick.open (base + spread + slippage)
+    assert fill.executed_price > candle_bullish.open
     assert fill.commission == 0.5
 
 
 def test_short_entry_receives_spread(execution_params, short_signal, candle_bearish):
-    """Short entry should receive the spread (sell at lower price)."""
+    """Short entry should receive the spread (sell at lower price than base)."""
     fill = execute_signal(short_signal, candle_bearish, execution_params)
 
-    # Spread = 100 * 10/10000 = 0.10
-    # Expected executed price = 100 - 0.10 - slippage
-    assert fill.executed_price < short_signal.price
+    # fill_at_next_open defaults True → base = tick.open (101.0)
+    # Spread = 101.0 * 10/10000 = 0.101
+    # Price should be below tick.open (base - spread - slippage)
+    assert fill.executed_price < candle_bearish.open
 
 
 def test_adverse_selection_long(execution_params, long_signal, candle_bearish):
@@ -91,9 +93,9 @@ def test_adverse_selection_long(execution_params, long_signal, candle_bearish):
     fill = execute_signal(long_signal, candle_bearish, execution_params)
 
     # Bearish tick (close < open) should trigger adverse selection
-    # Slippage should be higher
-    base_spread = long_signal.price * execution_params.spread_bps / 10000
-    expected_without_adverse = long_signal.price + base_spread
+    # Slippage should be higher (1.5x)
+    base_spread = candle_bearish.open * execution_params.spread_bps / 10000
+    expected_without_adverse = candle_bearish.open + base_spread
 
     # With adverse selection, price should be worse (higher for long)
     assert fill.executed_price > expected_without_adverse

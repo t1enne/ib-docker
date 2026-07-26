@@ -118,6 +118,7 @@ class TradeSignal:
     reason: Optional[Any] = None
     z_score: Optional[float] = None
     hedge_beta: Optional[float] = None
+    fill_at_next_open: bool = True
 
 
 @dataclass(frozen=True)

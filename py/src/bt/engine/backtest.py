@@ -163,9 +163,15 @@ def run_backtest(
             rows,
         )
 
-        # Stage 7: execute signals generated this tick
+        # Stage 7: execute signals generated this tick (skip fill_at_next_open
+        # signals — they fill at next bar's open via Stage 5)
         state = _execute_pending(
-            state, candle, exec_handler, config, bt.execution_params
+            state,
+            candle,
+            exec_handler,
+            config,
+            bt.execution_params,
+            skip_next_open=True,
         )
 
         # Stage 8: check stop-loss / take-profit
@@ -211,8 +217,13 @@ def _execute_pending(
     exec_handler: ExecutionHandler,
     config: StrategyConfig,
     exec_params: ExecutionParams,
+    skip_next_open: bool = False,
 ) -> BacktestState:
-    """Stage 5/7: Execute all pending signals for the current symbol."""
+    """Stage 5/7: Execute all pending signals for the current symbol.
+
+    When skip_next_open is True (Stage 7, same-bar), signals with
+    fill_at_next_open=True are deferred to the next bar's Stage 5 call.
+    """
     if not state.pending_signals:
         return state
 
@@ -220,6 +231,9 @@ def _execute_pending(
     remaining: List[TradeSignal] = []
     for signal in state.pending_signals:
         if signal.symbol != candle.symbol:
+            remaining.append(signal)
+            continue
+        if skip_next_open and signal.fill_at_next_open:
             remaining.append(signal)
             continue
 

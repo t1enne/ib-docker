@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import Optional, cast
 
 from peewee import fn
@@ -30,7 +30,8 @@ def date_to_timestamp(d: date) -> int:
 
 
 def timestamp_to_datetime(ts: int) -> datetime:
-    return datetime.fromtimestamp(ts / 1000)
+    """Convert ms epoch timestamp (UTC) to naive UTC datetime."""
+    return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).replace(tzinfo=None)
 
 
 def calculate_gaps(
@@ -442,6 +443,19 @@ async def candles(
             except Exception:
                 logger.exception("Bulk insert failed for %s", ticker)
                 raise
+
+    # Verify: re-check gaps after insert and warn if any remain
+    verify_oldest, verify_newest = await get_existing_range(ticker)
+    remaining = calculate_gaps(from_datetime, to_datetime, verify_oldest, verify_newest)
+    internal_remaining = await asyncio.to_thread(
+        find_internal_gaps, ticker, from_datetime, to_datetime
+    )
+    remaining = _merge_and_sort_gaps(remaining + internal_remaining)
+
+    if remaining:
+        logger.warning(
+            "%s still has %d gap(s) after fetch: %s", ticker, len(remaining), remaining
+        )
 
 
 async def candles_batch(

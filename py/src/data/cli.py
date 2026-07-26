@@ -151,7 +151,7 @@ def query_cmd(symbol: str, from_date: Optional[str], to_date: Optional[str], bar
 
 # ── Universe file helpers ────────────────────────────────────
 
-_UNIVERSE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "universes"
+_UNIVERSE_DIR = Path(__file__).resolve().parent.parent.parent / "universes"
 
 
 def _list_universes() -> list[str]:
@@ -220,8 +220,8 @@ def dl_cmd(
 
     result = asyncio.run(_run())
     click.echo(
-        f"resolved {result.resolved}, fetched {len(result.fetched)} symbols, "
-        f"{result.gaps_found} gaps filled",
+        f"resolved {result.resolved}/{len(symbols_list)} symbols, "
+        f"{len(result.fetched)} had new data",
         err=True,
     )
 

@@ -10,6 +10,7 @@
 - **Type checker:** `ty`
 - **Formatter:** `ruff format`
 - **Test runner:** `pytest` with `pytest-asyncio`
+- **Script Runner:** `make`
 
 ## Core Principles
 
@@ -187,12 +188,11 @@ Strategies are defined in YAML files loaded via `load_strategy()` → `StrategyC
 
 ## Quick Checklist Before Committing Code
 
+- [ ] Run `make check` for formatting, lintin, typechecking and testing
 - [ ] All functions/classes fully type-annotated (no `Any` without comment)
 - [ ] State changes return new objects (no mutation)
 - [ ] Hot-path computation is vectorized (numpy/pandas, not Python loops)
 - [ ] New logic has tests covering edge cases
 - [ ] Functions ≤ 50 LOC, classes ≤ 150 LOC (or extracted)
-- [ ] `ruff format` passes
-- [ ] `ty check` passes on changed files
 - [ ] Protocols used for injection, not inheritance
 - [ ] No dead code or commented-out blocks left behind

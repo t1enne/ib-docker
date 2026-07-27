@@ -130,7 +130,6 @@ def create_dual_online_updater(
     """
     from src.indicators.hmm.online import MarketRegimeHMMOnline
     from src.bt.regime.detectors import TREND_LABEL_TO_INT
-    from src.bt.engine.backtest import _htf_as_dataframe
 
     hmm = MarketRegimeHMMOnline(
         n_regimes=n_regimes,
@@ -166,9 +165,7 @@ def create_dual_online_updater(
             return None
         return float(df["close"].iloc[-1])
 
-    def _htf_closes(
-        state: BacktestState, sym: str, bar_key: str
-    ) -> pd.Series | None:
+    def _htf_closes(state: BacktestState, sym: str, bar_key: str) -> pd.Series | None:
         df = _get_htf_df(state, bar_key)
         if df is None or df.empty or sym not in df.index.get_level_values("symbol"):
             return None
@@ -199,10 +196,7 @@ def create_dual_online_updater(
                 trend_closes = candles_df["close"]
 
         trend_regime: int | None = None
-        if (
-            trend_closes is not None
-            and len(trend_closes) >= trend_slow
-        ):
+        if trend_closes is not None and len(trend_closes) >= trend_slow:
             fast_sma = trend_closes.rolling(trend_fast).mean().iloc[-1]
             slow_sma = trend_closes.rolling(trend_slow).mean().iloc[-1]
             spread = abs(fast_sma - slow_sma) / slow_sma

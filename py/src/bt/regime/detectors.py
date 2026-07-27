@@ -24,7 +24,6 @@ from src.bt.regime.types import (
     TREND_INT_TO_LABEL,
     TREND_LABEL_TO_INT,
     VOL_INT_TO_LABEL,
-    VOL_LABEL_TO_INT,
     TrendRegime,
     VolRegime,
 )

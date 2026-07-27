@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 
 import click
-import logging
 import pandas as pd
 import yaml
 

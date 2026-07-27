@@ -14,14 +14,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
-import numpy as np
 import pandas as pd
 
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 from src.bt.strategies.utils import close, open
 from src.bt.types import PlotConfig
-from src.bt.regime.types import REGIME_INT_TO_LABEL, RegimeLabel
+from src.bt.regime.types import (
+    TREND_INT_TO_LABEL,
+    VOL_INT_TO_LABEL,
+    TrendRegime,
+    VolRegime,
+)
 
 STRATEGY_TYPE = "momentum_regime"
 
@@ -64,46 +68,52 @@ class Params(StrategyParams):
 # ---------------------------------------------------------------------------
 
 
-def _current_regime(state: BacktestState) -> RegimeLabel | None:
-    """Extract current regime label from model state."""
-    regime_int = state.model_state.current_regime
-    if regime_int is None:
+def _current_trend(state: BacktestState) -> TrendRegime | None:
+    """Extract current trend regime label from model state."""
+    trend_int = state.model_state.current_trend
+    if trend_int is None:
         return None
-    return REGIME_INT_TO_LABEL.get(regime_int)
+    return TREND_INT_TO_LABEL.get(trend_int)
 
 
-def _should_go_long(regime: RegimeLabel | None, params: Params) -> bool:
-    """Check if regime allows long entries."""
-    if regime is None:
+def _current_vol(state: BacktestState) -> VolRegime | None:
+    """Extract current vol regime label from model state."""
+    vol_int = state.model_state.current_vol
+    if vol_int is None:
+        return None
+    return VOL_INT_TO_LABEL.get(vol_int)
+
+
+def _should_go_long(trend: TrendRegime | None, params: Params) -> bool:
+    """Check if trend regime allows long entries."""
+    if trend is None:
         return not params.regime_unknown_flat
-    if regime == "BULL":
+    if trend == "BULL":
         return params.regime_long
-    if regime == "BEAR":
+    if trend == "BEAR":
         return False  # don't buy in bear
     # RANGE
     return not params.regime_range_flat
 
 
-def _should_go_short(regime: RegimeLabel | None, params: Params) -> bool:
-    """Check if regime allows short entries."""
-    if regime is None:
+def _should_go_short(trend: TrendRegime | None, params: Params) -> bool:
+    """Check if trend regime allows short entries."""
+    if trend is None:
         return not params.regime_unknown_flat
-    if regime == "BEAR":
+    if trend == "BEAR":
         return params.regime_short
-    if regime == "BULL":
+    if trend == "BULL":
         return False
     return not params.regime_range_flat
 
 
-def _regime_size_mult(regime: RegimeLabel | None, params: Params) -> float:
-    """Return position size multiplier based on regime."""
-    if regime is None:
+def _regime_size_mult(vol: VolRegime | None, params: Params) -> float:
+    """Return position size multiplier based on vol regime."""
+    if vol is None:
         return 1.0
-    if regime == "BULL":
-        return params.size_bull
-    if regime == "BEAR":
-        return params.size_bear
-    return params.size_high_vol  # RANGE → conservative
+    if vol == "HIGH_VOL":
+        return params.size_high_vol
+    return 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +148,6 @@ def _sma_cross(
 
     sma_fast = closes.rolling(fast_window).mean().iloc[-1]
     sma_slow = closes.rolling(slow_window).mean().iloc[-1]
-    spread_pct = abs(sma_fast - sma_slow) / sma_slow
 
     # Two-bar cross detection (fast was below, now above = bullish cross)
     if len(closes) >= slow_window + 1:
@@ -174,48 +183,49 @@ def on_candle(
     if len(closes) < params.slow:
         return []
 
-    regime = _current_regime(state)
+    trend = _current_trend(state)
+    vol = _current_vol(state)
     _, _, crossed_up, crossed_down = _sma_cross(
         closes, params.fast, params.slow, params
     )
-    size_mult = _regime_size_mult(regime, params)
+    size_mult = _regime_size_mult(vol, params)
 
     # ---- Exit in-position ----
     if position is not None:
         if position.type == ActionType.long and crossed_down:
-            return close(candle, position, f"[{regime or '?'}] sma cross down")
+            return close(candle, position, f"[{trend or '?'}] sma cross down")
         if position.type == ActionType.short and crossed_up:
-            return close(candle, position, f"[{regime or '?'}] sma cross up")
+            return close(candle, position, f"[{trend or '?'}] sma cross up")
         # Also exit if regime turns hostile
-        if position.type == ActionType.long and regime == "BEAR":
-            return close(candle, position, f"[{regime}] exit long in bear")
-        if position.type == ActionType.short and regime == "BULL":
-            return close(candle, position, f"[{regime}] exit short in bull")
-        if regime == "RANGE" and params.regime_range_flat:
-            return close(candle, position, f"[RANGE] flat")
+        if position.type == ActionType.long and trend == "BEAR":
+            return close(candle, position, f"[{trend}] exit long in bear")
+        if position.type == ActionType.short and trend == "BULL":
+            return close(candle, position, f"[{trend}] exit short in bull")
+        if trend == "RANGE" and params.regime_range_flat:
+            return close(candle, position, "[RANGE] flat")
         return []
 
     # ---- Entry ----
     if (
         crossed_up
-        and _should_go_long(regime, params)
+        and _should_go_long(trend, params)
         and _momentum_ok(closes, params, "long")
     ):
         return open(
             candle,
             ActionType.long,
-            f"[{regime or '?'}] mom cross up ({size_mult:.1f}x)",
+            f"[{trend or '?'}] mom cross up ({size_mult:.1f}x)",
         )
 
     if (
         crossed_down
-        and _should_go_short(regime, params)
+        and _should_go_short(trend, params)
         and _momentum_ok(closes, params, "short")
     ):
         return open(
             candle,
             ActionType.short,
-            f"[{regime or '?'}] mom cross down ({size_mult:.1f}x)",
+            f"[{trend or '?'}] mom cross down ({size_mult:.1f}x)",
         )
 
     return []
@@ -252,9 +262,9 @@ def plot(state: BacktestState, config: object) -> PlotConfig:
             f"sma_{params.slow}": sma_slow,
         }
 
-        # Regime as subplot (if available)
-        regime_int = state.model_state.current_regime
-        if regime_int is not None:
-            subplots.append(("regime", pd.Series(regime_int, index=closes.index[:1])))
+        # Trend regime as subplot (if available)
+        trend_int = state.model_state.current_trend
+        if trend_int is not None:
+            subplots.append(("regime", pd.Series(trend_int, index=closes.index[:1])))
 
     return PlotConfig(price_overlays=price_overlays, subplots=subplots)

@@ -15,7 +15,7 @@ from src.bt.regime.model_updater import (
     create_regime_model_updater,
     create_regime_model_updater_for_symbols,
 )
-from src.bt.regime.types import TREND_INT_TO_LABEL, VOL_INT_TO_LABEL
+from src.bt.regime.types import TREND_INT_TO_LABEL
 from src.bt.state import (
     Candle,
     create_initial_backtest_state,

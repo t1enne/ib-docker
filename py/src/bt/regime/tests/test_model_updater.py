@@ -308,11 +308,11 @@ class TestDualOnlineWithHTF:
         late_trends = [t for t in trend_values[200:] if t is not None]
         assert len(late_trends) > 0, "Expected trend values after warmup"
 
-        # In a steady uptrend, BULL should dominate
+        # Daily uptrend of 1.002^day with trend_slow=20 → 100% BULL after warmup
         tc = Counter(late_trends)
         bull_pct = tc.get(1, 0) / len(late_trends)
-        assert bull_pct > 0.4, (
-            f"Expected >40% BULL in uptrend, got {bull_pct:.1%}. "
+        assert bull_pct > 0.8, (
+            f"Expected >80% BULL in clean uptrend, got {bull_pct:.1%}. "
             f"Distribution: {dict(tc)}"
         )
 

@@ -93,11 +93,13 @@ def _score_symbol(closes: pd.Series, params: Params) -> float | None:
     return (recent_price - past_price) / past_price
 
 
-def _rank_symbols(state: BacktestState, params: Params) -> dict[str, float]:
+def _rank_symbols(
+    state: BacktestState, params: Params, interval: str
+) -> dict[str, float]:
     """Score every symbol. Lower score = more beaten down = better buy."""
     scores: dict[str, float] = {}
-    for sym in state.candles:
-        closes = cast(pd.Series, state.candles[sym]["close"])
+    for sym, _ in state.candles:
+        closes = cast(pd.Series, state.candles[(sym, interval)]["close"])
         s = _score_symbol(closes, params)
         if s is not None:
             scores[sym] = s
@@ -130,7 +132,7 @@ def _is_bear_regime(
     if ts is not None and _REGIME_TS == ts:
         return _REGIME_CACHE.get(regime_symbol, False)
 
-    candles = state.candles.get(regime_symbol)
+    candles = state.candles.get((regime_symbol, bar))
     if candles is None:
         candles = _load_regime_candles(regime_symbol, bar)
 
@@ -193,7 +195,7 @@ def on_candle(
     candle: Candle,
     params: Params,
 ) -> list[TradeSignal]:
-    scores = _rank_symbols(state, params)
+    scores = _rank_symbols(state, params, candle.interval or "1h")
     if not scores:
         return []
 
@@ -209,7 +211,9 @@ def on_candle(
         rank = _rank_of(sym, scores)
         # Rank 1=best, so exit when position is now a top performer
         if rank <= params.exit_rank_threshold:
-            sym_closes = cast(pd.Series, state.candles[sym]["close"])
+            sym_closes = cast(
+                pd.Series, state.candles[(sym, candle.interval or "1h")]["close"]
+            )
             sym_price = float(sym_closes.iloc[-1])
             if np.isnan(sym_price):
                 continue
@@ -262,7 +266,7 @@ def on_candle(
             _COOLDOWNS[sym] = cd - 1
             continue
 
-        closes = cast(pd.Series, state.candles[sym]["close"])
+        closes = cast(pd.Series, state.candles[(sym, candle.interval or "1h")]["close"])
         if len(closes) < params.warmup_bars:
             continue
 

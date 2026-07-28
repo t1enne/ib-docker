@@ -109,7 +109,7 @@ def handle_entry(
     corr.get("enabled", True)
     corr.get("max_pairwise_correlation", 0.8)
 
-    candles = state.candles[symbol]
+    candles = state.candles[(symbol, tick.interval or "1h")]
     if len(candles) < atr_long + breakout_lookback + vol_lookback:
         return []
 
@@ -197,7 +197,7 @@ def handle_pullback_entry(
     corr_enabled = corr.get("enabled", True)
     max_corr = corr.get("max_pairwise_correlation", 0.8)
 
-    candles = state.candles[symbol]
+    candles = state.candles[(symbol, tick.interval or "1h")]
     closes = candles["close"]
     highs = candles["high"]
     lows = candles["low"]
@@ -344,7 +344,7 @@ def handle_exit(
     time_stop_days = stops.get("time_stop_days", 20)
     ema_exit_period = stops.get("ema_exit_period", 20)
 
-    candles = state.candles[symbol]
+    candles = state.candles[(symbol, tick.interval or "1h")]
     closes = candles["close"]
     highs = candles["high"]
     lows = candles["low"]
@@ -405,7 +405,7 @@ def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
 
     for symbol in config.symbols:
         try:
-            candles = state.candles[symbol]
+            candles = state.candles[(symbol, config.bar)]
         except KeyError:
             continue
 

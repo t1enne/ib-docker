@@ -174,7 +174,7 @@ def on_candle(
 ) -> list[TradeSignal]:
     symbol = candle.symbol
     position = state.portfolio.positions.get(symbol)
-    candles_df = state.candles.get(symbol)
+    candles_df = state.candles.get((symbol, candle.interval or "1h"))
 
     if candles_df is None or len(candles_df) < params.warmup_bars:
         return []
@@ -249,7 +249,7 @@ def plot(state: BacktestState, config: object) -> PlotConfig:
     subplots: list[tuple[str, pd.Series]] = []
 
     for symbol in strategy_config.symbols:
-        candles_df = state.candles.get(symbol)
+        candles_df = state.candles.get((symbol, strategy_config.bar))
         if candles_df is None or len(candles_df) < params.slow:
             continue
 

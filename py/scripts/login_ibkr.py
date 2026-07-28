@@ -32,7 +32,7 @@ TradingMode = Literal["paper", "live"]
 
 async def login_ibkr(username: str, password: str, mode: TradingMode = "paper") -> None:
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=False)
+        browser = await pw.chromium.launch(headless=True)
         context = await browser.new_context(ignore_https_errors=True)
         page = await context.new_page()
 

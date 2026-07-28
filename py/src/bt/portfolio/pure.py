@@ -60,10 +60,13 @@ def _open_position(
     """Open a new position from fill."""
     signal = fill.signal
 
-    # Calculate position quantity using config
+    # Calculate position quantity — use signal.qty if explicitly set, else config
     is_long = signal.action == ActionType.long
-    base_qty = portfolio.cash * position_size_pct / fill.executed_price
-    qty = round(base_qty * (signal.hedge_beta or 1.0), 4)
+    if signal.qty > 0:
+        qty = round(signal.qty, 4)
+    else:
+        base_qty = portfolio.cash * position_size_pct / fill.executed_price
+        qty = round(base_qty * (signal.hedge_beta or 1.0), 4)
     if qty <= 0:
         return portfolio
 

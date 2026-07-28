@@ -1,10 +1,9 @@
 """Functional backtest module.
 
 Candle processing pipeline (per-candle stages, in order):
-  _reject              – skip HTF bars that don't match base interval
-  _update_model        – run model_updater_fn if provided
-  _append_candle       – stash candle row in accumulator
-  _update_price_buffers – align close prices for pairs strategies
+  _append_candle       – stash every candle (base + HTF) in accumulator
+  _update_model        – run model_updater_fn if provided (base only)
+  _update_price_buffers – align close prices for pairs strategies (base only)
   _execute_pending     – fill any signals queued from prior candles
   _generate_signals    – run strategy on the last symbol per timestamp
   _execute_new         – immediately fill signals generated this tick
@@ -54,9 +53,10 @@ from src.utils import parse_timestamp
 
 import numpy as np
 
-# Per-candle row accumulator — column-major numpy arrays keyed by symbol.
-# Each symbol maps to {timestamp: ndarray, open: ndarray, ...} for zero-copy DataFrame build at flush.
-CandleRows = dict[str, dict[str, np.ndarray]]
+# Per-candle row accumulator — column-major numpy arrays keyed by (symbol, interval).
+# Each key maps to {timestamp: ndarray, open: ndarray, ...} for zero-copy DataFrame build at flush.
+# Base candles: ("SPY", "1h"), HTF candles: ("SPY", "1d").
+CandleRows = dict[tuple[str, str], dict[str, np.ndarray]]
 
 
 @dataclass
@@ -138,28 +138,28 @@ def run_backtest(
 
     for candle in candle_gen:
         can_trade = bt.window.test_start <= candle.timestamp <= bt.window.test_end
+        is_base = not candle.interval or candle.interval == config.bar
 
-        # Stage 1: reject HTF bars that don't match base interval
-        if candle.interval and candle.interval != config.bar:
-            state = _append_htf_bar(state, candle)
+        # Stage 1: stash EVERY candle (base + HTF) into the same accumulator
+        rows, state = _append_candle(rows, state, candle, config.bar)
+
+        # HTF-only candles: accumulate and skip rest of pipeline
+        if not is_base:
             continue
 
         # Stage 2: update models
         if model_updater_fn:
             state = model_updater_fn(state, candle)
 
-        # Stage 3: stash candle row
-        rows, state = _append_candle(rows, state, candle)
+        # Stage 3: align close prices for pairs strategies
+        state = _update_price_buffers(rows, state, candle, symbols, config.bar)
 
-        # Stage 4: align close prices for pairs strategies
-        state = _update_price_buffers(rows, state, candle, symbols)
-
-        # Stage 5: execute pending signals (from prior candles)
+        # Stage 4: execute pending signals (from prior candles)
         state = _execute_pending(
             state, candle, exec_handler, config, bt.execution_params
         )
 
-        # Stage 6: generate new signals (only on last symbol per timestamp)
+        # Stage 5: generate new signals (only on last symbol per timestamp)
         state = _generate_signals(
             state,
             candle,
@@ -170,8 +170,8 @@ def run_backtest(
             rows,
         )
 
-        # Stage 7: execute signals generated this tick (skip fill_at_next_open
-        # signals — they fill at next bar's open via Stage 5)
+        # Stage 6: execute signals generated this tick (skip fill_at_next_open
+        # signals — they fill at next bar's open via Stage 4)
         state = _execute_pending(
             state,
             candle,
@@ -181,7 +181,7 @@ def run_backtest(
             skip_next_open=True,
         )
 
-        # Stage 8: check stop-loss / take-profit
+        # Stage 7: check stop-loss / take-profit
         state = _check_risk(
             state,
             candle,
@@ -191,7 +191,7 @@ def run_backtest(
             bt.risk_config,
         )
 
-        # Stage 9: mark to market
+        # Stage 8: mark to market
         state = _mark_to_market(state, candle)
 
     # Finalize: flush row batches, close positions, build results
@@ -315,11 +315,10 @@ def _generate_signals(
     can_trade: bool,
     rows: CandleRows,
 ) -> BacktestState:
-    """Stage 6: Run strategy on last symbol per timestamp only."""
+    """Run strategy on last symbol per timestamp only."""
     if not (can_trade and strategy_fn and candle.symbol == last_symbol):
         return state
 
-    # Build state.candles on-demand from numpy arrays (only for this tick)
     state = merge_bt_state(state, dict(candles=_build_candles(rows)))
 
     new_signals = strategy_fn(state, candle, resolved_params)
@@ -364,16 +363,17 @@ def _update_price_buffers(
     state: BacktestState,
     candle: Candle,
     symbols: list[str],
+    base_interval: str,
 ) -> BacktestState:
-    """Stage 4: Append aligned {sym: close} pair when all symbols share this timestamp."""
+    """Append aligned {sym: close} pair when all base-interval symbols share timestamp."""
     if candle.symbol != (symbols[-1] if symbols else None):
         return state
 
     candle_ts_ns = np.datetime64(candle.timestamp.to_datetime64())
 
-    # Verify all symbols have this timestamp
     for sym in symbols:
-        sym_rows = rows.get(sym)
+        key = (sym, base_interval)
+        sym_rows = rows.get(key)
         if sym_rows is None:
             return state
         n = int(sym_rows["_len"][0])
@@ -384,8 +384,9 @@ def _update_price_buffers(
 
     pair: dict[str, float] = {}
     for sym in symbols:
-        n = int(rows[sym]["_len"][0])
-        pair[sym] = float(rows[sym]["close"][n - 1])
+        key = (sym, base_interval)
+        n = int(rows[key]["_len"][0])
+        pair[sym] = float(rows[key]["close"][n - 1])
 
     new_ms = replace(
         state.model_state,
@@ -395,17 +396,20 @@ def _update_price_buffers(
 
 
 def _append_candle(
-    rows: CandleRows, state: BacktestState, candle: Candle
+    rows: CandleRows,
+    state: BacktestState,
+    candle: Candle,
+    base_interval: str,
 ) -> Tuple[CandleRows, BacktestState]:
-    """Stage 3: Stash candle row into numpy column arrays (fast append).
+    """Stash candle row into numpy column arrays keyed by (symbol, interval).
 
+    All candles — base and HTF — land in the same accumulator.
     DataFrames are built once at flush. Strategies access state.candles
-    which is populated on-demand from the column arrays in _build_candles.
+    which is populated on-demand via _build_candles.
     """
-    sym = candle.symbol
-    if sym not in rows:
-        # Pre-allocate column arrays with room to grow
-        rows[sym] = {
+    key = (candle.symbol, candle.interval or base_interval)
+    if key not in rows:
+        rows[key] = {
             "timestamp": np.empty(256, dtype="datetime64[ms]"),
             "open": np.empty(256, dtype=np.float64),
             "high": np.empty(256, dtype=np.float64),
@@ -415,16 +419,15 @@ def _append_candle(
             "_len": np.array([0], dtype=np.int64),
         }
 
-    cols = rows[sym]
+    cols = rows[key]
     n = int(cols["_len"][0])
 
-    # Grow by 2x if full
     if n >= len(cols["timestamp"]):
         new_cap = n * 2
-        for key in ("timestamp", "open", "high", "low", "close", "volume"):
-            new_arr = np.empty(new_cap, dtype=cols[key].dtype)
-            new_arr[:n] = cols[key]
-            cols[key] = new_arr
+        for col_name in ("timestamp", "open", "high", "low", "close", "volume"):
+            new_arr = np.empty(new_cap, dtype=cols[col_name].dtype)
+            new_arr[:n] = cols[col_name]
+            cols[col_name] = new_arr
 
     cols["timestamp"][n] = np.datetime64(candle.timestamp.to_datetime64())
     cols["open"][n] = candle.open
@@ -437,10 +440,10 @@ def _append_candle(
     return rows, state
 
 
-def _build_candles(rows: CandleRows) -> dict[str, pd.DataFrame]:
-    """Build DataFrames from numpy column arrays (called on-demand)."""
-    candles: dict[str, pd.DataFrame] = {}
-    for sym, cols in rows.items():
+def _build_candles(rows: CandleRows) -> dict[tuple[str, str], pd.DataFrame]:
+    """Build DataFrames from numpy column arrays keyed by (symbol, interval)."""
+    candles: dict[tuple[str, str], pd.DataFrame] = {}
+    for (sym, interval), cols in rows.items():
         n = int(cols["_len"][0])
         if n == 0:
             continue
@@ -455,7 +458,7 @@ def _build_candles(rows: CandleRows) -> dict[str, pd.DataFrame]:
             },
             index=pd.DatetimeIndex(ts_arr),
         )
-        candles[sym] = df
+        candles[(sym, interval)] = df
     return candles
 
 
@@ -465,49 +468,6 @@ def _flush_candle_batches(rows: CandleRows, state: BacktestState) -> BacktestSta
         return state
     candles = _build_candles(rows)
     return merge_bt_state(state, dict(candles=candles))
-
-
-def _append_htf_bar(state: BacktestState, candle: Candle) -> BacktestState:
-    """Append an HTF bar to a per-interval list (lazy DataFrame build).
-
-    Lists are stored in state.htf_data as list[dict] keyed by interval.
-    The model updater calls _htf_as_dataframe() to materialize on-demand.
-    This avoids O(n²) pd.concat on every HTF tick.
-    """
-    freq = candle.interval
-    if freq is None:
-        return state
-
-    row = {
-        "symbol": candle.symbol,
-        "timestamp": candle.timestamp,
-        "open": candle.open,
-        "high": candle.high,
-        "low": candle.low,
-        "close": candle.close,
-        "volume": candle.volume,
-    }
-
-    new_htf_data = dict(state.htf_data)
-    if freq not in new_htf_data:
-        new_htf_data[freq] = []
-    rows = new_htf_data[freq]
-    rows.append(row)
-
-    return merge_bt_state(state, dict(htf_data=new_htf_data))
-
-
-def _htf_as_dataframe(htf_data: dict, freq: str) -> pd.DataFrame | None:
-    """Materialize HTF list-of-dicts into a MultiIndex DataFrame on-demand."""
-    rows = htf_data.get(freq)
-    if rows is None or (isinstance(rows, list) and len(rows) == 0):
-        return None
-    # Already materialized? (legacy path)
-    if isinstance(rows, pd.DataFrame):
-        return rows if not rows.empty else None
-    df = pd.DataFrame(rows)
-    df = df.set_index(["symbol", "timestamp"])
-    return df
 
 
 def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestState:

@@ -12,13 +12,16 @@ HTF support:
   trend_bar / vol_bar parameters let you run regime detection on higher-timeframe
   bars while trading on lower timeframes. For example, bar="1h" + trend_bar="1d"
   computes trend from daily SMA while entries/exits happen intraday.
+
+  HTF candles are stored in state.candles alongside base-interval candles,
+  keyed by (symbol, interval). No separate htf_data field needed.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Optional
+from typing import Optional, cast
 
 import pandas as pd
 
@@ -42,7 +45,8 @@ def create_regime_model_updater(
             return state
 
         sym = symbol if symbol else candle.symbol
-        candles_df = state.candles.get(sym)
+        key = (sym, candle.interval or "1h")
+        candles_df = state.candles.get(key)
         if candles_df is None or len(candles_df) < 20:
             return state
 
@@ -80,7 +84,8 @@ def create_regime_model_updater_for_symbols(
 
         new_ms = state.model_state
         for sym in symbols:
-            candles_df = state.candles.get(sym)
+            key = (sym, candle.interval or "1h")
+            candles_df = state.candles.get(key)
             if candles_df is None or len(candles_df) < 20:
                 continue
             try:
@@ -140,45 +145,13 @@ def create_dual_online_updater(
         random_state=random_state,
     )
 
-    # Cache materialized HTF DataFrames to avoid rebuilding on every tick
-    _htf_cache: dict[str, pd.DataFrame] = {}
-    _htf_cache_len: dict[str, int] = {}
-
-    def _get_htf_df(state: BacktestState, bar_key: str) -> pd.DataFrame | None:
-        rows = state.htf_data.get(bar_key)
-        if rows is None:
-            return None
-        if isinstance(rows, pd.DataFrame):
-            return rows if not rows.empty else None
-        # List of dicts — rebuild only if it grew
-        n = len(rows)
-        if _htf_cache_len.get(bar_key) == n and bar_key in _htf_cache:
-            return _htf_cache[bar_key]
-        df = pd.DataFrame(rows).set_index(["symbol", "timestamp"])
-        _htf_cache[bar_key] = df
-        _htf_cache_len[bar_key] = n
-        return df
-
-    def _htf_close(state: BacktestState, bar_key: str) -> float | None:
-        df = _get_htf_df(state, bar_key)
-        if df is None or df.empty:
-            return None
-        return float(df["close"].iloc[-1])
-
-    def _htf_closes(state: BacktestState, sym: str, bar_key: str) -> pd.Series | None:
-        df = _get_htf_df(state, bar_key)
-        if df is None or df.empty or sym not in df.index.get_level_values("symbol"):
-            return None
-        sym_df = df.xs(sym, level="symbol")
-        if sym_df.empty:
-            return None
-        return sym_df["close"]
-
     def update(state: BacktestState, candle: Candle) -> BacktestState:
         # --- Vol regime ---
         vol_close: float | None = None
         if vol_bar:
-            vol_close = _htf_close(state, vol_bar)
+            vol_df = state.candles.get((candle.symbol, vol_bar))
+            if vol_df is not None and not vol_df.empty:
+                vol_close = float(vol_df["close"].iloc[-1])
         if vol_close is None:
             vol_close = candle.close
         vol_regime = hmm.update(vol_close)
@@ -188,12 +161,18 @@ def create_dual_online_updater(
         trend_closes: pd.Series | None = None
 
         if trend_bar:
-            trend_closes = _htf_closes(state, sym, trend_bar)
+            trend_df = state.candles.get((sym, trend_bar))
+            if (
+                trend_df is not None
+                and not trend_df.empty
+                and "close" in trend_df.columns
+            ):
+                trend_closes = cast(pd.Series, trend_df["close"])
 
         if trend_closes is None:
-            candles_df = state.candles.get(sym)
-            if candles_df is not None:
-                trend_closes = candles_df["close"]
+            base_df = state.candles.get((sym, candle.interval or "1h"))
+            if base_df is not None:
+                trend_closes = base_df["close"]
 
         trend_regime: int | None = None
         if trend_closes is not None and len(trend_closes) >= trend_slow:

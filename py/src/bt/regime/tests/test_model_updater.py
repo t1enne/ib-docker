@@ -42,7 +42,12 @@ def _make_candles_df(prices: pd.Series) -> pd.DataFrame:
     )
 
 
-def _make_tick(timestamp: pd.Timestamp, symbol: str, price: float) -> Candle:
+def _make_tick(
+    timestamp: pd.Timestamp,
+    symbol: str,
+    price: float,
+    interval: str = "1d",
+) -> Candle:
     return Candle(
         timestamp=timestamp,
         symbol=symbol,
@@ -51,6 +56,7 @@ def _make_tick(timestamp: pd.Timestamp, symbol: str, price: float) -> Candle:
         low=price * 0.998,
         close=price,
         volume=1_000_000,
+        interval=interval,
     )
 
 
@@ -71,7 +77,7 @@ class TestRegimeModelUpdater:
             initial_capital=10_000,
             start_timestamp=idx[0],
         )
-        state = merge_bt_state(state, dict(candles={"AAPL": candles_df}))
+        state = merge_bt_state(state, dict(candles={("AAPL", "1d"): candles_df}))
 
         detector = create_sma_detector(fast_window=20, slow_window=50)
         update = create_regime_model_updater(detector)
@@ -94,7 +100,7 @@ class TestRegimeModelUpdater:
             initial_capital=10_000,
             start_timestamp=idx[0],
         )
-        state = merge_bt_state(state, dict(candles={"AAPL": candles_df}))
+        state = merge_bt_state(state, dict(candles={("AAPL", "1d"): candles_df}))
 
         detector = create_sma_detector(fast_window=20, slow_window=50)
         update = create_regime_model_updater(detector)
@@ -158,8 +164,8 @@ class TestRegimeModelUpdater:
             state,
             dict(
                 candles={
-                    "AAPL": _make_candles_df(bull_prices),
-                    "GOOGL": _make_candles_df(bear_prices),
+                    ("AAPL", "1d"): _make_candles_df(bull_prices),
+                    ("GOOGL", "1d"): _make_candles_df(bear_prices),
                 }
             ),
         )
@@ -186,7 +192,9 @@ class TestRegimeModelUpdater:
             initial_capital=10_000,
             start_timestamp=idx[0],
         )
-        state = merge_bt_state(state, dict(candles={"AAPL": _make_candles_df(rng)}))
+        state = merge_bt_state(
+            state, dict(candles={("AAPL", "1d"): _make_candles_df(rng)})
+        )
 
         original_regime = state.model_state.current_regime
         detector = create_sma_detector(fast_window=20, slow_window=50)
@@ -261,31 +269,15 @@ class TestDualOnlineWithHTF:
             },
             index=idx,
         )
-        state = merge_bt_state(state, dict(candles={"AAPL": daily_df}))
+        state = merge_bt_state(state, dict(candles={("AAPL", "1d"): daily_df}))
 
         trend_values: list[int | None] = []
         vol_values: list[int | None] = []
 
         for i, ts in enumerate(hourly_idx):
-            # Every 7 hours, push a daily HTF bar
-            if i > 0 and i % 7 == 0:
-                day_idx = min(i // 7, len(daily_closes) - 1)
-                day_close = float(daily_closes.iloc[day_idx])
-                row = {
-                    "symbol": "AAPL",
-                    "timestamp": ts,
-                    "open": day_close * 0.999,
-                    "high": day_close * 1.002,
-                    "low": day_close * 0.998,
-                    "close": day_close,
-                    "volume": 1_000_000,
-                }
-                new_htf = dict(state.htf_data)
-                freq_rows: list[dict] = new_htf.setdefault("1d", [])
-                freq_rows.append(row)
-                state = merge_bt_state(state, dict(htf_data=new_htf))
-
-            # Feed base (1h) tick through updater
+            # Feed base (1h) tick through updater.
+            # HTF "1d" candles already seeded as a pre-built DataFrame.
+            # The updater reads state.candles[("AAPL", "1d")] directly.
             base_tick = Candle(
                 timestamp=ts,
                 symbol="AAPL",

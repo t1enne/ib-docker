@@ -166,5 +166,4 @@ def merge_bt_state(a: BacktestState, b: dict):
         pending_signals=b.get("pending_signals", a.pending_signals),
         risk_events=b.get("risk_events", a.risk_events),
         candles=b.get("candles", a.candles),
-        htf_data=b.get("htf_data", a.htf_data),
     )

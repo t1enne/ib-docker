@@ -179,21 +179,20 @@ async def preview_sync(
     )
     from_dt = datetime.combine(from_date, datetime.min.time())
 
-    plans: list[FetchPlan] = []
-    for symbol in symbols:
+    async def _plan_for(symbol: ISymbol) -> FetchPlan:
         oldest, newest = await get_existing_range(symbol.ticker)
         edge_gaps = calculate_gaps(from_dt, to_dt, oldest, newest)
         internal_gaps = await asyncio.to_thread(
             find_internal_gaps, symbol.ticker, from_dt, to_dt
         )
         all_gaps = _merge_and_sort_gaps(edge_gaps + internal_gaps)
-        plans.append(
-            FetchPlan(
-                ticker=symbol.ticker,
-                conid=symbol.conid,
-                gaps=all_gaps,
-            )
+        return FetchPlan(
+            ticker=symbol.ticker,
+            conid=symbol.conid,
+            gaps=all_gaps,
         )
+
+    plans = await asyncio.gather(*[_plan_for(s) for s in symbols])
 
     total_gaps = sum(len(p.gaps) for p in plans)
     return PreviewResult(

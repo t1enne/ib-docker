@@ -222,11 +222,14 @@ def run_backtest(
     ]
 
     bm_curves: dict[str, pd.Series] = _get_bench_curves(config, bt)
+    # Use first benchmark curve for alpha/beta (typically the primary equity index).
+    # If no benchmark symbols configured, alpha/beta will be 0.0/1.0.
+    first_bm = next(iter(bm_curves.values()), None) if bm_curves else None
     pf_result = calculate_portfolio_result(
         equity_series,
         state.portfolio.trades,
         state.portfolio.initial_capital,
-        benchmark_curve=bm_curves.get("SPY"),
+        benchmark_curve=first_bm,
     )
 
     return (

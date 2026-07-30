@@ -206,27 +206,29 @@ def kurtosis(equity_curve: pd.Series) -> float:
 
 
 def stability(equity_curve: pd.Series) -> float:
-    if len(equity_curve) < 2:
+    clean = equity_curve.dropna()
+    if len(clean) < 2:
         return 0.0
-    x = np.arange(len(equity_curve))
-    y = equity_curve.values
+    x = np.arange(len(clean), dtype=float)
+    y = clean.values
     result = stats.linregress(x, y)
     r_value: Any = getattr(result, "rvalue", None)
     if r_value is None:
         r_value = result[2] if isinstance(result, tuple) else 0.0
-    return float(r_value) ** 2
+    r2 = float(r_value) ** 2
+    return r2 if not np.isnan(r2) else 0.0
 
 
 def alpha_beta(
     equity_curve: pd.Series,
     benchmark_curve: pd.Series | None = None,
 ) -> tuple[float, float]:
-    returns = _get_returns(equity_curve)
+    returns = _get_returns(equity_curve).dropna()
     if len(returns) < 2:
         return 0.0, 1.0
 
     if benchmark_curve is not None:
-        market_returns = _get_returns(benchmark_curve)
+        market_returns = _get_returns(benchmark_curve).dropna()
         # Align indices
         common = returns.index.intersection(market_returns.index)
         if len(common) < 2:
@@ -234,8 +236,7 @@ def alpha_beta(
         returns = returns.loc[common]
         market_returns = market_returns.loc[common]
     else:
-        # Fallback: use own returns as market proxy — weak, but backward-compat
-        market_returns = returns
+        return 0.0, 1.0
 
     covariance = np.cov(returns, market_returns)[0][1]
     market_variance = np.var(market_returns)
@@ -243,15 +244,15 @@ def alpha_beta(
     if market_variance == 0:
         return 0.0, 1.0
 
-    beta = covariance / market_variance
+    beta = float(covariance / market_variance)
     period_alpha = float(returns.mean() - beta * market_returns.mean())
     ppy = periods_per_year(equity_curve)
     if ppy <= 0:
-        return 0.0, float(beta)
+        return 0.0, beta
 
     annualized_alpha = ((1 + period_alpha) ** ppy) - 1 if period_alpha > -1 else -1
 
-    return annualized_alpha, float(beta)
+    return annualized_alpha, beta
 
 
 def calmar_ratio(equity_curve: pd.Series) -> float:
@@ -486,12 +487,15 @@ def get_backtest_results_analysis(
             bm_vol = annual_volatility(eq)
             bm_sharpe = bm_ann / bm_vol if bm_vol > 0 else 0.0
             bm_dd = max_drawdown(eq)
+            bm_alpha, bm_beta = alpha_beta(equity_curve, eq)
             bm_stats[sym] = {
                 "ann_ret": bm_ann,
                 "vol": bm_vol,
                 "sharpe": bm_sharpe,
                 "max_dd": bm_dd,
                 "total_ret": bm_total,
+                "alpha": bm_alpha,
+                "beta": bm_beta,
             }
 
         metric_cols = (Col("Metric", "<"), Col("Strategy", ">")) + tuple(
@@ -519,8 +523,8 @@ def get_backtest_results_analysis(
             ("Stability", f"{metrics.stability:.2f}") + tuple("—" for _ in bm_names),
             ("Skewness", f"{metrics.skewness:.2f}") + tuple("—" for _ in bm_names),
             ("Kurtosis", f"{metrics.kurtosis:.2f}") + tuple("—" for _ in bm_names),
-            ("Alpha", f"{metrics.alpha:.2f}") + tuple("—" for _ in bm_names),
-            ("Beta", f"{metrics.beta:.2f}") + tuple("—" for _ in bm_names),
+            ("Alpha", "—") + tuple(f"{bm_stats[s]['alpha']:.2f}" for s in bm_names),
+            ("Beta", "—") + tuple(f"{bm_stats[s]['beta']:.2f}" for s in bm_names),
         )
 
     else:
@@ -546,9 +550,10 @@ def get_backtest_results_analysis(
         for sym in bm_names:
             excess = metrics.annual_return - bm_stats[sym]["ann_ret"]
             dd_imp = abs(bm_stats[sym]["max_dd"]) - abs(metrics.max_drawdown)
+            bm_alpha, bm_beta = alpha_beta(equity_curve, benchmark_curves[sym])
             lines.append(
-                f"  vs {sym}: alpha={metrics.alpha:+.2%}  "
-                f"beta={metrics.beta:.2f}  "
+                f"  vs {sym}: alpha={bm_alpha:+.2%}  "
+                f"beta={bm_beta:.2f}  "
                 f"excess_ann_ret={excess:+.2%}  "
                 f"DD_improvement={dd_imp:+.2%}"
             )

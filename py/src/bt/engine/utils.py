@@ -142,22 +142,23 @@ def candle_generator(
         # Yield HTF ticks at their boundaries
         for freq in htf_intervals:
             ts_map = htf_timestamps_map.get(freq, {})
-            sym_ts = ts_map.get(s, None)
-            if sym_ts is None:
-                continue
-            # Find if ts matches any HTF timestamp for this symbol
-            htf_idx = np.searchsorted(sym_ts, ts)
-            if htf_idx < len(sym_ts) and sym_ts[htf_idx] == ts:
-                yield Candle(
-                    timestamp=pdt,
-                    symbol=s,
-                    open=float(htf_arrays[(freq, s, "open")][htf_idx]),
-                    high=float(htf_arrays[(freq, s, "high")][htf_idx]),
-                    low=float(htf_arrays[(freq, s, "low")][htf_idx]),
-                    close=float(htf_arrays[(freq, s, "close")][htf_idx]),
-                    volume=float(htf_arrays[(freq, s, "volume")][htf_idx]),
-                    interval=freq,
-                )
+            for s in symbols:
+                sym_ts = ts_map.get(s, None)
+                if sym_ts is None:
+                    continue
+                # Find if ts matches any HTF timestamp for this symbol
+                htf_idx = np.searchsorted(sym_ts, ts)
+                if htf_idx < len(sym_ts) and sym_ts[htf_idx] == ts:
+                    yield Candle(
+                        timestamp=pdt,
+                        symbol=s,
+                        open=float(htf_arrays[(freq, s, "open")][htf_idx]),
+                        high=float(htf_arrays[(freq, s, "high")][htf_idx]),
+                        low=float(htf_arrays[(freq, s, "low")][htf_idx]),
+                        close=float(htf_arrays[(freq, s, "close")][htf_idx]),
+                        volume=float(htf_arrays[(freq, s, "volume")][htf_idx]),
+                        interval=freq,
+                    )
 
 
 def merge_bt_state(a: BacktestState, b: dict):

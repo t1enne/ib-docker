@@ -1,0 +1,57 @@
+name: aegis-demo
+training_start: 2019-01-01
+training_end: 2020-12-31
+trading_start: 2021-01-01
+trading_end: 2024-03-01
+commission: 0.05
+initial_capital: 100000
+position_size: 0.95
+strategy_type: aegis
+stop_loss: 0.25
+take_profit: 0.50
+bar: 1d
+model_params: {}
+
+model_updater:
+  type: dual_online
+  dual_online:
+    n_regimes: 3
+    trend_fast: 50
+    trend_slow: 200
+    range_threshold_pct: 0.005
+    vol_window: 20
+    momentum_window: 10
+    retrain_interval: 50
+    window_size: 252
+    random_state: 42
+
+strategy_params:
+  mom_lookback: 63
+  vol_window: 20
+  mom_threshold: 0.01
+  corr_lookback: 60
+  max_corr: 0.65
+  min_held: 3
+  max_held: 5
+  min_candidates: 3
+  flat_in_bear: true
+  flat_in_range: true
+  warmup: 260
+
+benchmark_symbols:
+  - SPY
+
+symbols:
+  - SPY
+  - QQQ
+  - DIA
+  - XLF
+  - XLK
+  - XLE
+  - XLV
+  - XLY
+  - XLI
+  - XLB
+  - XLU
+  - XRT
+  - XBI

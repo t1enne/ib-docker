@@ -11,7 +11,7 @@ from src.bt.engine.handlers import (  # noqa: F401
     default_risk_handler,
 )
 from src.bt.metrics import get_backtest_results_analysis
-from src.bt.types import StrategyConfig, StrategyType, PortfolioResult
+from src.bt.types import StrategyConfig, PortfolioResult
 
 import yaml
 from datetime import date
@@ -61,7 +61,6 @@ __all__ = [
     "backtest_async",
     "get_backtest_results_analysis",
     "StrategyConfig",
-    "StrategyType",
     "PortfolioResult",
     "init_strat",
 ]

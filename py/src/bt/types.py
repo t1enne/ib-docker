@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple, Union
-from enum import Enum
 import pandas as pd
 
 from src.bt.state import (  # noqa: F401
@@ -75,11 +74,6 @@ class StrategyConfig:
     hmm_floating_window: Optional[int] = None
     hmm_retrain_interval: Optional[int] = None
     benchmark_symbols: list[str] = field(default_factory=lambda: ["SPY"])
-
-
-class StrategyType(Enum):
-    PND = "pnd"
-    SPREAD = "spread"
 
 
 class StrategyProtocol(Protocol):

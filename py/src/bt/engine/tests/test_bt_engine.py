@@ -18,7 +18,7 @@ from src.bt.state import (
 from src.utils import parse_timestamp
 
 
-def get_fill(s: TradeSignal, portfolio: PortfolioState):
+def get_fill(s: TradeSignal, _pf: PortfolioState):
     """Create a fill event from a signal."""
     params = create_execution_params()
     candle = Candle(
@@ -49,7 +49,7 @@ def strategy_config():
     """Sample strategy config."""
     return StrategyConfig(
         name="test",
-        strategy_type="pnd",
+        strategy_type="momentum_regime",
         symbols=["AAPL", "GOOGL"],
         stop_loss=0.05,
         take_profit=0.1,

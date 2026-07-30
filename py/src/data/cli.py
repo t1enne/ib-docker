@@ -152,20 +152,32 @@ def data_group():
 
 
 @data_group.command(name="query")
-@click.argument("symbol")
+@click.argument("symbols", nargs=-1, required=False)
+@click.option(
+    "--universe",
+    "-U",
+    help="Universe file name (e.g. 'nsdq', 'sector'). Overrides positional SYMBOLS.",
+)
 @click.option("--from", "-f", "from_date", help="Start date (YYYY-MM-DD)")
 @click.option("--to", "-t", "to_date", help="End date (YYYY-MM-DD)")
 @click.option("--bar", default="1h", help="Bar size (1h, 1d, etc.)")
-def query_cmd(symbol: str, from_date: Optional[str], to_date: Optional[str], bar: str):
+def query_cmd(
+    symbols: tuple[str, ...],
+    universe: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    bar: str,
+):
     """Query OHLCV candles for SYMBOL from the local database.
 
     Shows a recap with date range, row count, and gaps >48h.
     """
     start_ts = to_optional_ts(from_date)
     end_ts = to_optional_ts(to_date)
-
-    df = query_candles(symbol.upper(), start_ts, end_ts, bar)
-    click.echo(_recap(df, symbol.upper()), err=True)
+    symbols_list = _resolve_symbol_list(symbols, universe)
+    for symbol in symbols_list:
+        df = query_candles(symbol.upper(), start_ts, end_ts, bar)
+        click.echo(_recap(df, symbol.upper()), err=True)
 
 
 # ── Universe file helpers ────────────────────────────────────

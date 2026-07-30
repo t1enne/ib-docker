@@ -22,6 +22,7 @@ def close(
             price=tick.close,
             z_score=z,
             qty=abs(position.qty),
+            position_id=position.position_id,
             reason=reason,
         )
     ]

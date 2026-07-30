@@ -106,10 +106,10 @@ def bollinger_bands(
         Tuple of (upper_band, middle_band, lower_band)
     """
     middle: pd.Series = sma(data, window)
-    std = float(data.rolling(window=window).std())
+    std_val = data.rolling(window=window).std().iloc[-1]
 
-    upper = middle + (std * num_std)
-    lower = middle - (std * num_std)
+    upper = middle + (std_val * num_std)
+    lower = middle - (std_val * num_std)
 
     return upper, middle, lower
 

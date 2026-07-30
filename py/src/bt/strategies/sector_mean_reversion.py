@@ -36,6 +36,7 @@ class Params(StrategyParams):
     top_n: int = 2
     max_positions: int = 3
     max_positions_bear: int = 1
+    position_size_pct: float = 0.2  # % of cash per position
 
     # Exit: close when rank improves to this threshold (1 = best)
     exit_rank_threshold: int = 3
@@ -279,13 +280,15 @@ def on_candle(
             continue
 
         _COOLDOWNS[sym] = params.cooldown_bars
+        qty = (state.portfolio.cash * params.position_size_pct) / entry_price
         signals.append(
             TradeSignal(
                 action=ActionType.long,
                 symbol=sym,
                 timestamp=candle.timestamp,
                 price=entry_price,
-                reason=f"[smrv] rank {rank}/{len(scores)} ret={scores[sym]:.2%}",
+                qty=round(qty, 4),
+                reason=f"[smrv] rank {rank}/{len(scores)} ret={scores[sym]:.2%} size={params.position_size_pct:.0%}",
             )
         )
 

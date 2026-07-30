@@ -61,6 +61,7 @@ def execute_risk_event(event, tick: Candle, params: ExecutionParams) -> FillEven
     executed_price = base_price - slippage
 
     pid = getattr(event, "position_id", "")
+    qty = getattr(event, "position_qty", 0.0)
 
     signal = TradeSignal(
         action=ActionType.close,
@@ -73,7 +74,7 @@ def execute_risk_event(event, tick: Candle, params: ExecutionParams) -> FillEven
 
     return FillEvent(
         signal=signal,
-        filled_qty=1.0,
+        filled_qty=qty,
         executed_price=executed_price,
         commission=params.fixed_commission,
         slippage=slippage,

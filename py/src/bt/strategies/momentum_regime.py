@@ -61,6 +61,7 @@ class Params(StrategyParams):
     regime_unknown_flat: bool = True  # stay flat when regime is None (warmup)
 
     # Position sizing by regime
+    position_size_pct: float = 0.2  # base % of cash per position
     size_bull: float = 1.0
     size_bear: float = 1.0
     size_high_vol: float = 0.5
@@ -196,6 +197,9 @@ def on_candle(
         closes, params.fast, params.slow, params
     )
     size_mult = _regime_size_mult(vol, params)
+    price = float(closes.iloc[-1])
+    base_qty = (state.portfolio.cash * params.position_size_pct) / price
+    qty = round(base_qty * size_mult, 4)
 
     # ---- Exit in-position ----
     if position is not None:
@@ -221,6 +225,7 @@ def on_candle(
         return open(
             candle,
             ActionType.long,
+            qty,
             f"[{trend or '?'}] mom cross up ({size_mult:.1f}x)",
         )
 
@@ -232,6 +237,7 @@ def on_candle(
         return open(
             candle,
             ActionType.short,
+            qty,
             f"[{trend or '?'}] mom cross down ({size_mult:.1f}x)",
         )
 

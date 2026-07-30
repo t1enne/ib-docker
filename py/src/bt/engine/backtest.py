@@ -10,6 +10,16 @@ Candle processing pipeline (per-candle stages, in order):
   _check_risk          – evaluate stop-loss / take-profit
   _mark_to_market      – update position prices and equity curve
 
+Pipeline invariants:
+  - Signals execute before risk on the same bar. A rebalance emitted in
+    Stage 6 is applied in Stage 6 before Stage 7 risk check runs, so
+    risk events always fire against the post-rebalance position state
+    (no stale position_id crashes).
+  - Strategies emitting multiple signals for the same symbol in one batch
+    must avoid races (e.g. close+reopen): close signals fill at next bar's
+    open (Stage 4), open/rebalance fill same-bar (Stage 6), so they never
+    collide on the same pass.
+
 Usage:
     from src.bt.engine.backtest import Backtest, candle_generator, run_backtest
     from src.bt.engine.handlers import default_execution_handler, default_risk_handler
@@ -294,13 +304,7 @@ def _execute_pending(
             continue
 
         fill = exec_handler.execute_signal(signal, candle, exec_params)
-        portfolio = exec_handler.apply_fill(
-            portfolio,
-            fill,
-            position_size_pct=config.position_size,
-            stop_loss_pct=config.stop_loss,
-            take_profit_pct=config.take_profit,
-        )
+        portfolio = exec_handler.apply_fill(portfolio, fill)
 
     return merge_bt_state(state, dict(portfolio=portfolio, pending_signals=remaining))
 

@@ -312,50 +312,80 @@ def _full_rebalance(
     total: float,
     current_weights: dict[str, float],
 ) -> list[TradeSignal]:
-    """Close all positions, then reopen at target weights.
+    """Emit net rebalance signals — close extras, then delta-adjust.
+
+    For each symbol:
+      1. Close any positions beyond the first (consolidation).
+      2. Send one rebalance signal on the remaining position with net delta.
 
     Uses entry-interval prices (e.g. 1h) for execution.
-    Signal-interval closes (e.g. 1d) already determined weights and total.
     """
     signals: list[TradeSignal] = []
-
-    for sym, pos_tup in list(state.portfolio.positions.items()):
-        if sym not in risk_symbols:
-            continue
-        exit_price = entry_closes.get(sym, candle.close)
-        for pos in pos_tup:
-            signals.append(
-                TradeSignal(
-                    action=ActionType.close,
-                    symbol=sym,
-                    timestamp=candle.timestamp,
-                    price=exit_price,
-                    qty=abs(pos.qty),
-                    position_id=pos.position_id,
-                    reason=(
-                        f"[shannon] rebalance close "
-                        f"({current_weights.get(sym, 0):.1%}) @ {exit_price:.2f}"
-                    ),
-                )
-            )
 
     for sym in risk_symbols:
         price = entry_closes.get(sym) or candle.close
         if price <= 0:
             continue
+
+        pos_tup = state.portfolio.positions.get(sym, ())
+        total_qty = sum(p.qty for p in pos_tup) if pos_tup else 0.0
+
         tw_sym = target.get(sym, 0.5)
         target_value = total * tw_sym
-        qty = target_value / price
-        if qty < 1e-8:
+        target_qty = target_value / price
+
+        delta = round(target_qty - total_qty, 4)
+
+        # When multiple positions exist (shouldn't happen normally),
+        # close all and reopen at target. Otherwise emit single rebalance.
+        if len(pos_tup) > 1:
+            for pos in pos_tup:
+                signals.append(
+                    TradeSignal(
+                        action=ActionType.close,
+                        symbol=sym,
+                        timestamp=candle.timestamp,
+                        price=price,
+                        qty=abs(pos.qty),
+                        position_id=pos.position_id,
+                        reason=f"[shannon] consolidate close @ {price:.2f}",
+                    )
+                )
+            if target_qty > 0:
+                cw = current_weights.get(sym, 0)
+                signals.append(
+                    TradeSignal(
+                        action=ActionType.long,
+                        symbol=sym,
+                        timestamp=candle.timestamp,
+                        price=price,
+                        qty=target_qty,
+                        reason=(
+                            f"[shannon] consolidate open {target_qty:.4f} "
+                            f"({cw:.1%}->{tw_sym:.0%}) @ {price:.2f}"
+                        ),
+                    )
+                )
             continue
+
+        if abs(delta) < 1e-8:
+            continue
+
+        pid: str | None = pos_tup[0].position_id if pos_tup else None
+        cw = current_weights.get(sym, 0)
+        direction = "buy" if delta > 0 else "sell"
         signals.append(
             TradeSignal(
-                action=ActionType.long,
+                action=ActionType.rebalance,
                 symbol=sym,
                 timestamp=candle.timestamp,
                 price=price,
-                qty=qty,
-                reason=f"[shannon] rebalance to {tw_sym:.0%} @ {price:.2f}",
+                qty=delta,
+                position_id=pid,
+                reason=(
+                    f"[shannon] rebalance {direction} {abs(delta):.4f} "
+                    f"({cw:.1%}→{tw_sym:.0%}) @ {price:.2f}"
+                ),
             )
         )
 

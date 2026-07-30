@@ -46,6 +46,7 @@ def check_position_risk(
             trigger_price=position.stop_loss,
             reason="sl",
             position_id=pid,
+            position_qty=abs(position.qty),
         )
 
     if not is_long and position.stop_loss and tick.high >= position.stop_loss:
@@ -55,6 +56,7 @@ def check_position_risk(
             trigger_price=position.stop_loss,
             reason="sl",
             position_id=pid,
+            position_qty=abs(position.qty),
         )
 
     # Check take profit
@@ -65,6 +67,7 @@ def check_position_risk(
             trigger_price=position.take_profit,
             reason="tp",
             position_id=pid,
+            position_qty=abs(position.qty),
         )
 
     if not is_long and position.take_profit and tick.low <= position.take_profit:
@@ -74,6 +77,7 @@ def check_position_risk(
             trigger_price=position.take_profit,
             reason="tp",
             position_id=pid,
+            position_qty=abs(position.qty),
         )
 
     return None

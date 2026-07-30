@@ -30,6 +30,7 @@ def close(
 def open(
     tick: Candle,
     dir: ActionType,
+    qty: float,
     reason: Optional[str] = "",
     hedge: Optional[float] = None,
 ) -> List[TradeSignal]:
@@ -39,6 +40,7 @@ def open(
             symbol=tick.symbol,
             timestamp=tick.timestamp,
             price=tick.close,
+            qty=qty,
             reason=reason,
             hedge_beta=hedge,
         ),

@@ -25,20 +25,14 @@ from src.bt.state.types import (
 def apply_fill(
     portfolio: PortfolioState,
     fill: FillEvent,
-    position_size_pct: float = 0.2,
-    stop_loss_pct: float = 0.05,
-    take_profit_pct: float = 0.1,
 ) -> PortfolioState:
     """Apply a fill to portfolio, return new state.
 
-    This is a pure function - input portfolio is not modified.
+    Pure function - input portfolio is not modified.
 
-    Args:
-        portfolio: Current portfolio state
-        fill: The fill event to apply
-        position_size_pct: % of capital to use per position (default 20%)
-        stop_loss_pct: % stop loss (default 5%)
-        take_profit_pct: % take profit (default 10%)
+    signal.qty must be set explicitly (>0) for open/rebalance signals.
+    signal.stop_loss / signal.take_profit are used directly for new positions.
+    No fallback sizing or SL/TP levels - strategies provide everything.
     """
     signal = fill.signal
 
@@ -46,61 +40,37 @@ def apply_fill(
         return _close_position(portfolio, fill)
 
     if signal.action == ActionType.rebalance:
-        return _rebalance_position(
-            portfolio,
-            fill,
-            stop_loss_pct=stop_loss_pct,
-            take_profit_pct=take_profit_pct,
-        )
+        return _rebalance_position(portfolio, fill)
 
-    return _open_position(
-        portfolio,
-        fill,
-        position_size_pct=position_size_pct,
-        stop_loss_pct=stop_loss_pct,
-        take_profit_pct=take_profit_pct,
-    )
+    return _open_position(portfolio, fill)
 
 
 def _open_position(
     portfolio: PortfolioState,
     fill: FillEvent,
-    position_size_pct: float = 0.2,
-    stop_loss_pct: float = 0.05,
-    take_profit_pct: float = 0.1,
 ) -> PortfolioState:
-    """Open a new position from fill — appends to symbol's position tuple."""
+    """Open a new position from fill - appends to symbol's position tuple.
+
+    signal.qty and signal.sl/tp must be set explicitly by the strategy.
+    No fallback sizing or SL/TP levels.
+    """
     signal = fill.signal
 
-    # Calculate position quantity — use signal.qty if explicitly set, else config
-    is_long = signal.action == ActionType.long
-    if signal.qty > 0:
-        qty = round(signal.qty, 4)
-    else:
-        base_qty = portfolio.cash * position_size_pct / fill.executed_price
-        qty = round(base_qty * (signal.hedge_beta or 1.0), 4)
+    qty = round(signal.qty, 4)
     if qty <= 0:
         return portfolio
-
-    # Calculate SL/TP using config
-    if is_long:
-        stop_loss = round(fill.executed_price * (1 - stop_loss_pct), 2)
-        take_profit = round(fill.executed_price * (1 + take_profit_pct), 2)
-    else:
-        stop_loss = round(fill.executed_price * (1 + stop_loss_pct), 2)
-        take_profit = round(fill.executed_price * (1 - take_profit_pct), 2)
 
     # Generate position_id from signal if provided, else auto-generate
     pid = signal.position_id or f"{signal.symbol}_{fill.timestamp.timestamp()}"
 
-    # Create position
+    # Create position — SL/TP from signal, None if not set
     position = Position(
         symbol=signal.symbol,
         qty=qty,
         entry_price=fill.executed_price,
         entry_time=fill.timestamp,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
+        stop_loss=signal.stop_loss,
+        take_profit=signal.take_profit,
         last_price=fill.executed_price,
         type=signal.action,
         position_id=pid,
@@ -120,8 +90,8 @@ def _open_position(
         symbol=signal.symbol,
         position=signal.action,
         qty=qty,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
+        stop_loss=signal.stop_loss or 0.0,
+        take_profit=signal.take_profit or 0.0,
         pnl=0.0,
         reason=signal.reason,
         status=TradeStatus.open,
@@ -223,8 +193,6 @@ def _close_position(portfolio: PortfolioState, fill: FillEvent) -> PortfolioStat
 def _rebalance_position(
     portfolio: PortfolioState,
     fill: FillEvent,
-    stop_loss_pct: float = 0.05,
-    take_profit_pct: float = 0.1,
 ) -> PortfolioState:
     """Adjust position quantity by delta (positive = add, negative = reduce).
 
@@ -246,13 +214,7 @@ def _rebalance_position(
     if not positions_tuple:
         # No existing position — treat as open if delta positive
         if fill.signal.qty > 0:
-            return _open_position(
-                portfolio,
-                fill,
-                position_size_pct=1.0,  # qty is explicit, won't use this
-                stop_loss_pct=stop_loss_pct,
-                take_profit_pct=take_profit_pct,
-            )
+            return _open_position(portfolio, fill)
         return portfolio
 
     if not pid:

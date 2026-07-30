@@ -44,7 +44,9 @@ def test_both_legs_execute():
             timestamp=get_ts("2025-01-01"),
             price=500.0,
             z_score=3.0,
-            qty=0.0,
+            qty=100.0,
+            stop_loss=475.0,
+            take_profit=550.0,
         ),
         tick_spy,
         params,
@@ -56,7 +58,9 @@ def test_both_legs_execute():
             timestamp=get_ts("2025-01-01"),
             price=400.0,
             z_score=3.0,
-            qty=0.0,
+            qty=120.0,
+            stop_loss=420.0,
+            take_profit=360.0,
         ),
         tick_qqq,
         params,
@@ -68,7 +72,8 @@ def test_both_legs_execute():
     assert len(portfolio.trades) == 2
 
 
-def test_position_size_from_config():
+def test_explicit_qty_sizing():
+    """When signal.qty is set, position uses it directly — no config fallback."""
     portfolio = create_initial_portfolio(
         initial_capital=10000, start_timestamp=get_ts("2025-01-01")
     )
@@ -89,21 +94,19 @@ def test_position_size_from_config():
             timestamp=get_ts("2025-01-01"),
             price=500.0,
             z_score=3.0,
-            qty=0.0,
+            qty=42.0,
         ),
         tick,
         params,
     )
-    portfolio_after = apply_fill(
-        portfolio, fill, position_size_pct=0.3, stop_loss_pct=0.05, take_profit_pct=0.1
-    )
+    portfolio_after = apply_fill(portfolio, fill)
     spy = portfolio_after.positions["SPY"]
     assert len(spy) == 1
-    expected_qty = (10000 * 0.3) / 500.0
-    assert abs(abs(spy[0].qty) - expected_qty) < 0.01
+    assert abs(spy[0].qty - 42.0) < 0.01
 
 
-def test_sl_tp_from_config():
+def test_sl_tp_from_signal():
+    """SL/TP are taken directly from signal, not computed."""
     portfolio = create_initial_portfolio(
         initial_capital=10000, start_timestamp=get_ts("2025-01-01")
     )
@@ -124,15 +127,45 @@ def test_sl_tp_from_config():
             timestamp=get_ts("2025-01-01"),
             price=500.0,
             z_score=3.0,
+            qty=20.0,
+            stop_loss=480.0,
+            take_profit=530.0,
+        ),
+        tick,
+        params,
+    )
+    portfolio_after = apply_fill(portfolio, fill)
+    pos = portfolio_after.positions["SPY"][0]
+    assert pos.stop_loss == 480.0
+    assert pos.take_profit == 530.0
+
+
+def test_open_without_qty_is_noop():
+    """If signal.qty is 0 or unset, no position is opened."""
+    portfolio = create_initial_portfolio(
+        initial_capital=10000, start_timestamp=get_ts("2025-01-01")
+    )
+    tick = Candle(
+        timestamp=get_ts("2025-01-01"),
+        symbol="SPY",
+        open=500.0,
+        high=501.0,
+        low=499.0,
+        close=500.0,
+        volume=1_000_000,
+    )
+    params = create_execution_params(fixed_commission=0.0, spread_bps=0)
+    fill = execute_signal(
+        TradeSignal(
+            action=ActionType.long,
+            symbol="SPY",
+            timestamp=get_ts("2025-01-01"),
+            price=500.0,
             qty=0.0,
         ),
         tick,
         params,
     )
-    portfolio_after = apply_fill(
-        portfolio, fill, position_size_pct=0.2, stop_loss_pct=0.05, take_profit_pct=0.1
-    )
-    pos = portfolio_after.positions["SPY"][0]
-    # executed_price includes default slippage even with spread_bps=0
-    assert pos.stop_loss is not None and abs(pos.stop_loss - 475.095) < 0.1
-    assert pos.take_profit is not None and abs(pos.take_profit - 550.11) < 0.1
+    portfolio_after = apply_fill(portfolio, fill)
+    assert "SPY" not in portfolio_after.positions
+    assert len(portfolio_after.trades) == 0

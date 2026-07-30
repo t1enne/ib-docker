@@ -122,6 +122,8 @@ class TradeSignal:
     position_id: Optional[str] = (
         None  # target specific position; None = open new or close by symbol
     )
+    stop_loss: Optional[float] = None  # explicit SL for new positions
+    take_profit: Optional[float] = None  # explicit TP for new positions
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,7 @@ class StopLossEvent:
     trigger_price: float
     reason: str = "sl"
     position_id: str = ""  # links to the Position that triggered
+    position_qty: float = 0.0  # absolute qty of the triggering position
 
 
 @dataclass(frozen=True)
@@ -156,6 +159,7 @@ class TakeProfitEvent:
     trigger_price: float
     reason: str = "tp"
     position_id: str = ""  # links to the Position that triggered
+    position_qty: float = 0.0  # absolute qty of the triggering position
 
 
 RiskEvent = Tuple[StopLossEvent, TakeProfitEvent]

@@ -57,7 +57,9 @@ class TestApplyFill:
         # Verify changes
         assert new_portfolio.cash < portfolio.cash  # Cash decreased
         assert "AAPL" in new_portfolio.positions
-        assert new_portfolio.positions["AAPL"].qty > 0
+        aapl_positions = new_portfolio.positions["AAPL"]
+        assert len(aapl_positions) == 1
+        assert aapl_positions[0].qty > 0
         assert len(new_portfolio.trades) == 1
 
         # Original portfolio unchanged (immutability)
@@ -66,6 +68,8 @@ class TestApplyFill:
 
     def test_close_long_position(self):
         """Test closing a long position."""
+        pid = "AAPL_test_close"
+
         # Create portfolio with existing position
         position = Position(
             symbol="AAPL",
@@ -76,11 +80,12 @@ class TestApplyFill:
             take_profit=110.0,
             last_price=100.0,
             type=ActionType.long,
+            position_id=pid,
         )
 
         portfolio = PortfolioState(
             cash=5000,
-            positions={"AAPL": position},
+            positions={"AAPL": (position,)},
             trades=(
                 Trade(
                     entry_time=_ts("2024-01-01"),
@@ -96,6 +101,7 @@ class TestApplyFill:
                     take_profit=110.0,
                     pnl=0.0,
                     status=TradeStatus.open,
+                    position_id=pid,
                 ),
             ),
             equity_curve=(
@@ -114,6 +120,7 @@ class TestApplyFill:
             symbol="AAPL",
             timestamp=_ts("2024-01-02"),
             price=110.0,
+            position_id=pid,
             reason=0.5,
         )
 
@@ -211,6 +218,244 @@ class TestImmutability:
         assert len(snapshot.positions) != len(new_portfolio.positions)
 
 
+class TestPositionId:
+    """Tests for position_id generation and matching."""
+
+    def test_open_position_generates_position_id(self):
+        """_open_position generates a position_id when none is provided."""
+        portfolio = create_initial_portfolio(
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
+        )
+
+        signal = TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-01"),
+            price=100.0,
+        )
+
+        fill = FillEvent(
+            signal=signal,
+            filled_qty=10.0,
+            executed_price=100.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-01"),
+        )
+
+        new_portfolio = apply_fill(portfolio, fill)
+
+        # Position should have an auto-generated position_id
+        aapl_positions = new_portfolio.positions["AAPL"]
+        assert len(aapl_positions) == 1
+        pos = aapl_positions[0]
+        assert pos.position_id != ""
+        assert pos.position_id.startswith("AAPL_")
+
+        # Trade should carry the same position_id
+        assert len(new_portfolio.trades) == 1
+        assert new_portfolio.trades[0].position_id == pos.position_id
+
+    def test_open_position_uses_provided_position_id(self):
+        """_open_position uses position_id from signal when provided."""
+        portfolio = create_initial_portfolio(
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
+        )
+
+        custom_pid = "AAPL_custom_42"
+        signal = TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-01"),
+            price=100.0,
+            position_id=custom_pid,
+        )
+
+        fill = FillEvent(
+            signal=signal,
+            filled_qty=10.0,
+            executed_price=100.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-01"),
+        )
+
+        new_portfolio = apply_fill(portfolio, fill)
+
+        aapl_positions = new_portfolio.positions["AAPL"]
+        assert len(aapl_positions) == 1
+        pos = aapl_positions[0]
+        assert pos.position_id == custom_pid
+        assert new_portfolio.trades[0].position_id == custom_pid
+
+    def test_close_position_matches_by_position_id(self):
+        """_close_position matches trade by position_id when available."""
+        pid_keep = "AAPL_keep_me"
+
+        position_keep = Position(
+            symbol="AAPL",
+            qty=5.0,
+            entry_price=100.0,
+            entry_time=_ts("2024-01-01"),
+            stop_loss=90.0,
+            take_profit=110.0,
+            last_price=100.0,
+            type=ActionType.long,
+            position_id=pid_keep,
+        )
+
+        portfolio = PortfolioState(
+            cash=5000,
+            positions={"AAPL": (position_keep,)},
+            trades=(
+                Trade(
+                    entry_time=_ts("2024-01-01"),
+                    entry_price=100.0,
+                    exit_time=None,
+                    exit_price=None,
+                    last_price=100.0,
+                    reason="",
+                    symbol="AAPL",
+                    position=ActionType.long,
+                    qty=5.0,
+                    stop_loss=90.0,
+                    take_profit=110.0,
+                    pnl=0.0,
+                    status=TradeStatus.open,
+                    position_id=pid_keep,
+                ),
+            ),
+            equity_curve=(
+                EquityPoint(
+                    timestamp=_ts("2024-01-01"),
+                    equity=6000,
+                    cash=5000,
+                    positions_value=1000,
+                ),
+            ),
+            initial_capital=10000,
+        )
+
+        # Close with matching position_id
+        signal = TradeSignal(
+            action=ActionType.close,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-02"),
+            price=110.0,
+            position_id=pid_keep,
+        )
+
+        fill = FillEvent(
+            signal=signal,
+            filled_qty=5.0,
+            executed_price=110.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-02"),
+        )
+
+        new_portfolio = apply_fill(portfolio, fill)
+
+        # Position should be closed
+        assert "AAPL" not in new_portfolio.positions
+        assert len(new_portfolio.trades) == 1
+        assert new_portfolio.trades[0].status == TradeStatus.closed
+        assert new_portfolio.trades[0].position_id == pid_keep
+
+    def test_close_position_requires_position_id(self):
+        """_close_position raises ValueError when no position_id is set."""
+        portfolio = create_initial_portfolio(
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
+        )
+
+        # Open with auto-generated position_id
+        signal_open = TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-01"),
+            price=100.0,
+            position_id="AAPL_open_1",
+        )
+
+        fill_open = FillEvent(
+            signal=signal_open,
+            filled_qty=10.0,
+            executed_price=100.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-01"),
+        )
+
+        portfolio = apply_fill(portfolio, fill_open)
+
+        # Close without position_id — should raise
+        signal_close = TradeSignal(
+            action=ActionType.close,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-02"),
+            price=110.0,
+            # no position_id set
+        )
+
+        fill_close = FillEvent(
+            signal=signal_close,
+            filled_qty=10.0,
+            executed_price=110.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-02"),
+        )
+
+        with pytest.raises(ValueError, match="requires position_id"):
+            apply_fill(portfolio, fill_close)
+
+    def test_close_position_with_wrong_position_id_raises(self):
+        """Close with non-matching position_id raises ValueError."""
+        portfolio = create_initial_portfolio(
+            initial_capital=10000, start_timestamp=_ts("2024-01-01")
+        )
+
+        signal_open = TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-01"),
+            price=100.0,
+            position_id="AAPL_real",
+        )
+
+        fill_open = FillEvent(
+            signal=signal_open,
+            filled_qty=10.0,
+            executed_price=100.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-01"),
+        )
+
+        portfolio = apply_fill(portfolio, fill_open)
+
+        # Close with wrong position_id — should raise
+        signal_close = TradeSignal(
+            action=ActionType.close,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-02"),
+            price=110.0,
+            position_id="AAPL_wrong",
+        )
+
+        fill_close = FillEvent(
+            signal=signal_close,
+            filled_qty=10.0,
+            executed_price=110.0,
+            commission=1.0,
+            slippage=0.0,
+            timestamp=_ts("2024-01-02"),
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            apply_fill(portfolio, fill_close)
+
+
 class TestUpdatePrices:
     """Tests for update_prices function."""
 
@@ -231,7 +476,7 @@ class TestUpdatePrices:
 
         portfolio = PortfolioState(
             cash=5000,
-            positions={"AAPL": position},
+            positions={"AAPL": (position,)},
             trades=(),
             equity_curve=(
                 EquityPoint(
@@ -257,7 +502,9 @@ class TestUpdatePrices:
         new_portfolio = update_prices(portfolio, tick)
 
         # Price updated
-        assert new_portfolio.positions["AAPL"].last_price == 105.0
+        aapl_positions = new_portfolio.positions["AAPL"]
+        assert len(aapl_positions) == 1
+        assert aapl_positions[0].last_price == 105.0
 
         # Equity curve updated
         assert len(new_portfolio.equity_curve) == 2

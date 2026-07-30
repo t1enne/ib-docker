@@ -12,11 +12,17 @@ Uses state.model_state.current_regime from the regime model updater.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import Optional, cast
 
 import pandas as pd
 
-from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
+from src.bt.state import (
+    ActionType,
+    BacktestState,
+    Candle,
+    Position,
+    TradeSignal,
+)
 from src.bt.strategies.types import StrategyParams
 from src.bt.strategies.utils import close, open
 
@@ -173,7 +179,8 @@ def on_candle(
     params: Params,
 ) -> list[TradeSignal]:
     symbol = candle.symbol
-    position = state.portfolio.positions.get(symbol)
+    pos_tup = state.portfolio.positions.get(symbol, ())
+    position: Optional[Position] = pos_tup[0] if pos_tup else None
     candles_df = state.candles.get((symbol, candle.interval or "1h"))
 
     if candles_df is None or len(candles_df) < params.warmup_bars:

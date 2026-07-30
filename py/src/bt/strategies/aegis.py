@@ -459,21 +459,21 @@ def on_candle(
 
     signals: list[TradeSignal] = []
 
-    # Close deselected
+    # Close deselected — close all positions for each deselected symbol
     for sym in held - target:
-        pos = state.portfolio.positions.get(sym)
-        if pos is None:
-            continue
-        signals.append(
-            TradeSignal(
-                action=ActionType.close,
-                symbol=sym,
-                timestamp=ts,
-                price=candle.close,
-                qty=abs(pos.qty),
-                reason="deselected",
+        sym_positions = state.portfolio.positions.get(sym, ())
+        for pos in sym_positions:
+            signals.append(
+                TradeSignal(
+                    action=ActionType.close,
+                    symbol=sym,
+                    timestamp=ts,
+                    price=candle.close,
+                    qty=abs(pos.qty),
+                    position_id=pos.position_id,
+                    reason="deselected",
+                )
             )
-        )
 
     # Compute turnover cost
     # Friction = 10bp × Σ |Δw| applied as cash deduction, not per-signal
@@ -487,12 +487,14 @@ def on_candle(
     curr_weights: dict[str, float] = {}
     total_pos_value = sum(
         abs(p.qty) * (candle.close if p.symbol in closes_map else 0)
-        for p in state.portfolio.positions.values()
+        for pos_tup in state.portfolio.positions.values()
+        for p in pos_tup
     )
     portfolio_value = available_cash + total_pos_value
-    for sym, pos in state.portfolio.positions.items():
-        if portfolio_value > 0:
-            curr_weights[sym] = (abs(pos.qty) * candle.close) / portfolio_value
+    for sym, pos_tup in state.portfolio.positions.items():
+        if portfolio_value > 0 and pos_tup:
+            total_qty = sum(abs(p.qty) for p in pos_tup)
+            curr_weights[sym] = (total_qty * candle.close) / portfolio_value
 
     turnover = sum(
         abs(weights.get(s, 0.0) - curr_weights.get(s, 0.0)) for s in target | held
@@ -545,14 +547,18 @@ def on_candle(
 
 
 def _close_all(state: BacktestState, candle: Candle, reason: str) -> list[TradeSignal]:
-    return [
-        TradeSignal(
-            action=ActionType.close,
-            symbol=sym,
-            timestamp=candle.timestamp,
-            price=candle.close,
-            qty=abs(pos.qty),
-            reason=reason,
-        )
-        for sym, pos in state.portfolio.positions.items()
-    ]
+    signals: list[TradeSignal] = []
+    for sym, pos_tup in state.portfolio.positions.items():
+        for pos in pos_tup:
+            signals.append(
+                TradeSignal(
+                    action=ActionType.close,
+                    symbol=sym,
+                    timestamp=candle.timestamp,
+                    price=candle.close,
+                    qty=abs(pos.qty),
+                    position_id=pos.position_id,
+                    reason=reason,
+                )
+            )
+    return signals

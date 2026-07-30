@@ -302,7 +302,7 @@ def test_different_symbol_no_trigger(risk_config, portfolio_state):
 
     portfolio = PortfolioState(
         cash=10000,
-        positions={"GOOGL": position},
+        positions={"GOOGL": (position,)},
         trades=(),
         equity_curve=(
             EquityPoint(

@@ -17,11 +17,12 @@ def check_risk(portfolio: PortfolioState, tick: Candle, config: RiskConfig) -> T
     """Check if any positions hit risk limits.
 
     Returns tuple of risk events (StopLossEvent, TakeProfitEvent, etc.)
+    Checks all positions for the tick's symbol.
     """
     events = []
 
-    position = portfolio.positions.get(tick.symbol)
-    if position:
+    positions_tuple = portfolio.positions.get(tick.symbol, ())
+    for position in positions_tuple:
         event = check_position_risk(position, tick, config)
         if event:
             events.append(event)
@@ -94,6 +95,7 @@ def update_trailing_stop(
                 take_profit=position.take_profit,
                 last_price=position.last_price,
                 type=position.type,
+                position_id=position.position_id,
             )
     else:
         new_stop = tick.low * (1 + config.stop_loss_pct)
@@ -107,6 +109,7 @@ def update_trailing_stop(
                 take_profit=position.take_profit,
                 last_price=position.last_price,
                 type=position.type,
+                position_id=position.position_id,
             )
 
     return position

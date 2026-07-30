@@ -55,7 +55,9 @@ def candle_generator(
     if hasattr(config, "symbols"):
         symbols = config.symbols
         base_interval = getattr(config, "bars", ["1h"])[0]
-        htf_intervals = getattr(config, "bars", ["1h"])[1:] if hasattr(config, "bars") else []
+        htf_intervals = (
+            getattr(config, "bars", ["1h"])[1:] if hasattr(config, "bars") else []
+        )
     else:
         symbols = config
         base_interval = "1h"

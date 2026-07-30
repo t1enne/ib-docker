@@ -12,6 +12,10 @@ nonzero volatility, rebalancing creates a diversification return
 Classic pair: SPY (risky) + TLT (bonds/cash proxy). Can use any volatile
 pair — the key is volatility, not direction.
 
+Multi-timeframe: when config.bars has multiple intervals (e.g. ["1h", "1d"]),
+the strategy uses the longest interval for signal/weight decisions and the
+candle's interval for execution pricing.
+
 References:
   - Poundstone, "Fortune's Formula" (2005), Ch. 12
   - Luenberger, "Investment Science" (1998), §15.7
@@ -64,8 +68,9 @@ class Params(StrategyParams):
 # module-level state
 # ---------------------------------------------------------------------------
 
-_last_rebalance: dict[str, int] = {}  # cache_key → bar index
-_bar_idx: int = 0
+_last_rebalance: dict[str, int] = {}  # cache_key → signal bar index
+_bar_idx: int = 0  # count of signal-interval bars seen
+_last_signal_close: dict[str, float] = {}  # symbol → last seen signal close
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +83,20 @@ def _interval_bars(params: Params) -> int:
         return params.rebalance_days
     mapping = {"daily": 1, "weekly": 5, "monthly": 21, "quarterly": 63}
     return mapping.get(params.rebalance_frequency, 21)
+
+
+def _read_closes(
+    state: BacktestState,
+    symbols: list[str],
+    interval: str,
+) -> dict[str, float]:
+    """Return {symbol: latest close} from given interval's candles."""
+    closes: dict[str, float] = {}
+    for sym in symbols:
+        df = state.candles.get((sym, interval))
+        if df is not None and len(df) > 0:
+            closes[sym] = float(cast(pd.Series, df["close"]).iloc[-1])
+    return closes
 
 
 def _portfolio_closes(
@@ -93,8 +112,9 @@ def _portfolio_closes(
             closes[sym] = float(cast(pd.Series, df["close"]).iloc[-1])
 
     pos_value = sum(
-        abs(pos.qty) * closes.get(sym, 0.0)
-        for sym, pos in state.portfolio.positions.items()
+        abs(p.qty) * closes.get(sym, 0.0)
+        for sym, pos_tup in state.portfolio.positions.items()
+        for p in pos_tup
     )
     cash = state.portfolio.cash
     total = pos_value + cash
@@ -112,9 +132,10 @@ def _current_weights(
     if total <= 0:
         return {}
     weights: dict[str, float] = {}
-    for sym, pos in state.portfolio.positions.items():
-        if sym in closes:
-            weights[sym] = (abs(pos.qty) * closes[sym]) / total
+    for sym, pos_tup in state.portfolio.positions.items():
+        if sym in closes and pos_tup:
+            total_qty = sum(abs(p.qty) for p in pos_tup)
+            weights[sym] = (total_qty * closes[sym]) / total
     if cash_leg:
         weights["__cash__"] = state.portfolio.cash / total
     return weights
@@ -137,28 +158,64 @@ def _drift_exceeds(
 # ---------------------------------------------------------------------------
 
 
+def _pick_intervals(state: BacktestState) -> tuple[str, str]:
+    """Return (signal_interval, entry_interval).
+
+    Signal = longest available interval (e.g. "1d").
+    Entry  = shortest available interval (e.g. "1h").
+
+    Single-interval backtests: both are the same.
+    """
+    intervals = sorted(
+        {i for _, i in state.candles},
+        key=lambda x: (0 if x.endswith("d") else 1 if x.endswith("h") else 2, x),
+    )
+    if len(intervals) <= 1:
+        iv = intervals[0] if intervals else "1d"
+        return iv, iv
+    # Sorted: daily first, then hourly — so [0] is signal (longest), [-1] is entry (shortest)
+    return intervals[0], intervals[-1]
+
+
 def on_candle(
     state: BacktestState,
     candle: Candle,
     params: Params,
 ) -> list[TradeSignal]:
-    global _bar_idx
+    global _bar_idx, _last_signal_close
 
-    interval = candle.interval or "1d"
+    signal_interval, entry_interval = _pick_intervals(state)
     symbols = sorted({s for s, _ in state.candles})
 
-    # Warmup
-    first = next(iter(state.candles.values()), None)
-    if first is None or len(first) < params.warmup_bars:
-        return []
-
-    # Determine legs
+    # Determine legs early — needed for signal-close tracking
     if params.cash_leg:
         risk_symbols = [symbols[0]] if symbols else []
     else:
         if len(symbols) < 2:
             return []
         risk_symbols = symbols[:2]
+
+    # New signal bar detection: only count when signal-interval close changes
+    sig_closes = _read_closes(state, risk_symbols, signal_interval)
+    if not sig_closes:
+        return []
+
+    new_signal_bar = not _last_signal_close or any(
+        sig_closes.get(sym) != _last_signal_close.get(sym) for sym in risk_symbols
+    )
+    _last_signal_close = dict(sig_closes)
+
+    if new_signal_bar:
+        _bar_idx += 1
+
+    # Warmup on signal interval
+    sig_df = state.candles.get((risk_symbols[0], signal_interval))
+    if sig_df is None or len(sig_df) < params.warmup_bars:
+        return []
+
+    # Only act on new signal bars (not every entry bar)
+    if not new_signal_bar:
+        return []
 
     all_legs = risk_symbols + (["__cash__"] if params.cash_leg else [])
 
@@ -171,7 +228,6 @@ def on_candle(
     # --- Rebalance gate ---
     cache_key = "shannons"
     interval_bars = _interval_bars(params)
-    _bar_idx += 1
 
     bars_since = _bar_idx - _last_rebalance.get(cache_key, -interval_bars)
     if bars_since < interval_bars:
@@ -179,15 +235,23 @@ def on_candle(
 
     _last_rebalance[cache_key] = _bar_idx
 
-    closes, pos_value, total = _portfolio_closes(state, risk_symbols, interval)
+    # Signal decisions: use signal-interval closes (e.g. daily)
+    signal_closes, _, total = _portfolio_closes(state, risk_symbols, signal_interval)
     if total <= 0:
         return []
 
-    current_weights = _current_weights(state, risk_symbols, params.cash_leg, interval)
+    current_weights = _current_weights(
+        state, risk_symbols, params.cash_leg, signal_interval
+    )
+
+    # Entry/exit prices: use entry-interval closes (e.g. hourly)
+    entry_closes, _, _ = _portfolio_closes(state, risk_symbols, entry_interval)
 
     # First deployment: buy both legs at target weights
     if not current_weights:
-        return _deploy_initial(candle, risk_symbols, all_legs, target, closes, total)
+        return _deploy_initial(
+            candle, risk_symbols, all_legs, target, entry_closes, total
+        )
 
     # Drift gate
     if not _drift_exceeds(current_weights, target, params.drift_tolerance):
@@ -195,7 +259,14 @@ def on_candle(
 
     # Rebalance: close all positions, then reopen at target weights
     return _full_rebalance(
-        state, candle, risk_symbols, all_legs, target, closes, total, current_weights
+        state,
+        candle,
+        risk_symbols,
+        all_legs,
+        target,
+        entry_closes,
+        total,
+        current_weights,
     )
 
 
@@ -204,17 +275,18 @@ def _deploy_initial(
     risk_symbols: list[str],
     all_legs: list[str],
     target: dict[str, float],
-    closes: dict[str, float],
+    entry_closes: dict[str, float],
     total: float,
 ) -> list[TradeSignal]:
-    """First deployment: buy to match target weights."""
+    """First deployment: buy at entry-interval prices."""
     signals: list[TradeSignal] = []
     for sym in risk_symbols:
-        if sym not in closes or closes[sym] <= 0:
+        price = entry_closes.get(sym) or candle.close
+        if price <= 0:
             continue
         tw_sym = target.get(sym, 0.5)
         target_value = total * tw_sym
-        qty = target_value / closes[sym]
+        qty = target_value / price
         if qty < 1e-8:
             continue
         signals.append(
@@ -222,9 +294,9 @@ def _deploy_initial(
                 action=ActionType.long,
                 symbol=sym,
                 timestamp=candle.timestamp,
-                price=closes[sym],
+                price=price,
                 qty=qty,
-                reason=f"[shannon] deploy {tw_sym:.0%}",
+                reason=f"[shannon] deploy {tw_sym:.0%} @ {price:.2f}",
             )
         )
     return signals
@@ -236,42 +308,44 @@ def _full_rebalance(
     risk_symbols: list[str],
     all_legs: list[str],
     target: dict[str, float],
-    closes: dict[str, float],
+    entry_closes: dict[str, float],
     total: float,
     current_weights: dict[str, float],
 ) -> list[TradeSignal]:
-    """Close all current positions, then reopen at target weights.
+    """Close all positions, then reopen at target weights.
 
-    Close-first-then-buy ensures clean position tracking. The signals
-    are in order (closes first, then longs) and the engine processes
-    them sequentially within the same bar.
+    Uses entry-interval prices (e.g. 1h) for execution.
+    Signal-interval closes (e.g. 1d) already determined weights and total.
     """
     signals: list[TradeSignal] = []
 
-    # Step 1: close all existing positions
-    for sym, pos in list(state.portfolio.positions.items()):
+    for sym, pos_tup in list(state.portfolio.positions.items()):
         if sym not in risk_symbols:
             continue
-        signals.append(
-            TradeSignal(
-                action=ActionType.close,
-                symbol=sym,
-                timestamp=candle.timestamp,
-                price=closes.get(sym, candle.close),
-                qty=abs(pos.qty),
-                reason=f"[shannon] rebalance close ({current_weights.get(sym, 0):.1%})",
+        exit_price = entry_closes.get(sym, candle.close)
+        for pos in pos_tup:
+            signals.append(
+                TradeSignal(
+                    action=ActionType.close,
+                    symbol=sym,
+                    timestamp=candle.timestamp,
+                    price=exit_price,
+                    qty=abs(pos.qty),
+                    position_id=pos.position_id,
+                    reason=(
+                        f"[shannon] rebalance close "
+                        f"({current_weights.get(sym, 0):.1%}) @ {exit_price:.2f}"
+                    ),
+                )
             )
-        )
 
-    # Step 2: reopen at target weights (total value is the same ballpark)
-    # Cash after closes ≈ total portfolio value, use actual portfolio cash
-    # But we can't predict final cash here — use total as estimate
     for sym in risk_symbols:
-        if sym not in closes or closes[sym] <= 0:
+        price = entry_closes.get(sym) or candle.close
+        if price <= 0:
             continue
         tw_sym = target.get(sym, 0.5)
         target_value = total * tw_sym
-        qty = target_value / closes[sym]
+        qty = target_value / price
         if qty < 1e-8:
             continue
         signals.append(
@@ -279,9 +353,9 @@ def _full_rebalance(
                 action=ActionType.long,
                 symbol=sym,
                 timestamp=candle.timestamp,
-                price=closes[sym],
+                price=price,
                 qty=qty,
-                reason=f"[shannon] rebalance to {tw_sym:.0%}",
+                reason=f"[shannon] rebalance to {tw_sym:.0%} @ {price:.2f}",
             )
         )
 

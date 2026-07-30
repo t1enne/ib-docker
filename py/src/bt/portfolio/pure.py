@@ -2,9 +2,12 @@
 
 All functions are pure: they take state and inputs, return new state.
 No mutations, no side effects.
+
+positions dict: Dict[str, Tuple[Position, ...]] — symbol → tuple of Positions.
+Multiple positions per symbol are supported (e.g. partial entries, net rebalancing).
 """
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple as TupleT
 
 from src.bt.state.types import (
     PortfolioState,
@@ -57,7 +60,7 @@ def _open_position(
     stop_loss_pct: float = 0.05,
     take_profit_pct: float = 0.1,
 ) -> PortfolioState:
-    """Open a new position from fill."""
+    """Open a new position from fill — appends to symbol's position tuple."""
     signal = fill.signal
 
     # Calculate position quantity — use signal.qty if explicitly set, else config
@@ -78,9 +81,8 @@ def _open_position(
         stop_loss = round(fill.executed_price * (1 + stop_loss_pct), 2)
         take_profit = round(fill.executed_price * (1 - take_profit_pct), 2)
 
-    # TODO: Partial take profit support - for strategies like vol_extension_pullback
-    # that want to take 50% profit at 2R and trail the remainder.
-    # This would require modifying Position to track partial fills and remaining qty.
+    # Generate position_id from signal if provided, else auto-generate
+    pid = signal.position_id or f"{signal.symbol}_{fill.timestamp.timestamp()}"
 
     # Create position
     position = Position(
@@ -92,6 +94,7 @@ def _open_position(
         take_profit=take_profit,
         last_price=fill.executed_price,
         type=signal.action,
+        position_id=pid,
     )
 
     # Calculate new cash
@@ -114,11 +117,13 @@ def _open_position(
         reason=signal.reason,
         status=TradeStatus.open,
         close_reason=None,
+        position_id=pid,
     )
 
-    # Build new state
+    # Build new state — append position to symbol's tuple
     new_positions = dict(portfolio.positions)
-    new_positions[signal.symbol] = position
+    existing = new_positions.get(signal.symbol, ())
+    new_positions[signal.symbol] = existing + (position,)
 
     return PortfolioState(
         cash=new_cash,
@@ -130,50 +135,71 @@ def _open_position(
 
 
 def _close_position(portfolio: PortfolioState, fill: FillEvent) -> PortfolioState:
-    """Close a position from fill."""
-    symbol = fill.signal.symbol
-    position = portfolio.positions.get(symbol)
+    """Close a position from fill.
 
-    # No position to close
-    if not position:
+    Requires position_id on the fill signal. Matches the exact position
+    by position_id and removes it from the symbol's tuple. If no
+    position_id is provided, raises ValueError.
+    """
+    symbol = fill.signal.symbol
+    pid = fill.signal.position_id
+
+    if not pid:
+        raise ValueError(
+            f"_close_position requires position_id on TradeSignal. "
+            f"Signal for {symbol} has no position_id set."
+        )
+
+    positions_tuple = portfolio.positions.get(symbol)
+    if not positions_tuple:
         return portfolio
 
-    # Calculate PnL
-    is_long = position.type == ActionType.long
-    qty = abs(position.qty)
-
-    if is_long:
-        pnl = (fill.executed_price - position.entry_price) * qty
-        cash_change = qty * fill.executed_price - fill.commission
-    else:
-        pnl = (position.entry_price - fill.executed_price) * qty
-        cash_change = (qty * position.entry_price) + pnl - fill.commission
-
-    # Update trade record
-    # Find the matching open trade
-    updated_trades = list(portfolio.trades)
-    for i, trade in enumerate(updated_trades):
-        if trade.symbol == symbol and trade.status == TradeStatus.open:
-            updated_trades[i] = Trade(
-                entry_time=trade.entry_time,
-                entry_price=trade.entry_price,
-                exit_time=fill.timestamp,
-                exit_price=fill.executed_price,
-                last_price=fill.executed_price,
-                reason=trade.reason,
-                symbol=trade.symbol,
-                position=trade.position,
-                qty=trade.qty,
-                stop_loss=trade.stop_loss,
-                take_profit=trade.take_profit,
-                pnl=pnl,
-                status=TradeStatus.closed,
-                close_reason=fill.signal.reason or TradeExitReason.none,
-            )
+    # Find target position by position_id
+    target_idx: Optional[int] = None
+    target: Optional[Position] = None
+    for i, pos in enumerate(positions_tuple):
+        if pos.position_id == pid:
+            target_idx = i
+            target = pos
             break
 
-    # Build new state
-    new_positions = {k: v for k, v in portfolio.positions.items() if k != symbol}
+    if target is None:
+        raise ValueError(
+            f"Position {pid} not found for symbol {symbol}. "
+            f"Available: {[p.position_id for p in positions_tuple]}"
+        )
+
+    # Calculate PnL
+    is_long = target.type == ActionType.long
+    qty = abs(target.qty)
+
+    if is_long:
+        pnl = (fill.executed_price - target.entry_price) * qty
+        cash_change = qty * fill.executed_price - fill.commission
+    else:
+        pnl = (target.entry_price - fill.executed_price) * qty
+        cash_change = (qty * target.entry_price) + pnl - fill.commission
+
+    # Update trade record — match by position_id
+    updated_trades = list(portfolio.trades)
+    for i, trade in enumerate(updated_trades):
+        if (
+            trade.status == TradeStatus.open
+            and trade.position_id == pid
+            and trade.symbol == symbol
+        ):
+            updated_trades[i] = _close_trade(trade, fill, pnl)
+            break
+
+    # Build new positions — remove only the target position from the tuple
+    assert target_idx is not None  # guaranteed by target-is-None check above
+    new_positions = dict(portfolio.positions)
+    remaining = positions_tuple[:target_idx] + positions_tuple[target_idx + 1 :]
+    if remaining:
+        new_positions[symbol] = remaining
+    else:
+        del new_positions[symbol]
+
     new_cash = portfolio.cash + cash_change
 
     return PortfolioState(
@@ -185,25 +211,50 @@ def _close_position(portfolio: PortfolioState, fill: FillEvent) -> PortfolioStat
     )
 
 
+def _close_trade(trade: Trade, fill: FillEvent, pnl: float) -> Trade:
+    """Return trade closed by fill."""
+    return Trade(
+        entry_time=trade.entry_time,
+        entry_price=trade.entry_price,
+        exit_time=fill.timestamp,
+        exit_price=fill.executed_price,
+        last_price=fill.executed_price,
+        reason=trade.reason,
+        symbol=trade.symbol,
+        position=trade.position,
+        qty=trade.qty,
+        stop_loss=trade.stop_loss,
+        take_profit=trade.take_profit,
+        pnl=pnl,
+        status=TradeStatus.closed,
+        close_reason=fill.signal.reason or TradeExitReason.none,
+        position_id=trade.position_id,
+    )
+
+
 def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
     """Update position prices and equity curve with new tick."""
     symbol = tick.symbol
     new_positions = dict(portfolio.positions)
 
-    # Update position price if it exists
-    if symbol in portfolio.positions:
-        position = portfolio.positions[symbol]
-        updated_position = Position(
-            symbol=position.symbol,
-            qty=position.qty,
-            entry_price=position.entry_price,
-            entry_time=position.entry_time,
-            stop_loss=position.stop_loss,
-            take_profit=position.take_profit,
-            last_price=tick.close,
-            type=position.type,
+    # Update all positions for the tick's symbol
+    symbol_positions = portfolio.positions.get(symbol)
+    if symbol_positions:
+        updated = tuple(
+            Position(
+                symbol=pos.symbol,
+                qty=pos.qty,
+                entry_price=pos.entry_price,
+                entry_time=pos.entry_time,
+                stop_loss=pos.stop_loss,
+                take_profit=pos.take_profit,
+                last_price=tick.close,
+                type=pos.type,
+                position_id=pos.position_id,
+            )
+            for pos in symbol_positions
         )
-        new_positions[symbol] = updated_position
+        new_positions[symbol] = updated
 
     # Calculate equity (always do this, even if no positions)
     positions_value = calculate_positions_value(new_positions)
@@ -226,17 +277,16 @@ def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
     )
 
 
-def calculate_positions_value(positions: Dict[str, Position]) -> float:
-    """Calculate total value of all positions."""
+def calculate_positions_value(positions: Dict[str, TupleT[Position, ...]]) -> float:
+    """Calculate total value of all positions across all symbols."""
     value = 0.0
-    for position in positions.values():
-        if position.type == ActionType.long:
-            value += position.qty * position.last_price
-        else:
-            # Short: collateral + unrealized pnl
-            upnl = position.qty * (position.entry_price - position.last_price)
-            position.last_price - position.entry_price
-            value += (position.qty * position.entry_price) + upnl
+    for positions_tuple in positions.values():
+        for position in positions_tuple:
+            if position.type == ActionType.long:
+                value += position.qty * position.last_price
+            else:
+                upnl = position.qty * (position.entry_price - position.last_price)
+                value += (position.qty * position.entry_price) + upnl
     return value
 
 
@@ -245,6 +295,28 @@ def calculate_equity(portfolio: PortfolioState) -> float:
     return portfolio.cash + calculate_positions_value(portfolio.positions)
 
 
-def get_open_position(portfolio: PortfolioState, symbol: str) -> Optional[Position]:
-    """Get open position for symbol if exists."""
-    return portfolio.positions.get(symbol)
+# ---------------------------------------------------------------------------
+# Multi-position helpers — iterate all positions across all symbols
+# ---------------------------------------------------------------------------
+
+
+def iter_positions(
+    portfolio: PortfolioState,
+) -> Dict[str, TupleT[Position, ...]]:
+    """Return positions dict directly — iterate via .items(), .values(), .keys().
+
+    Each value is Tuple[Position, ...].
+    """
+    return portfolio.positions
+
+
+def count_positions(portfolio: PortfolioState) -> int:
+    """Total number of individual positions across all symbols."""
+    return sum(len(tup) for tup in portfolio.positions.values())
+
+
+def get_symbol_positions(
+    portfolio: PortfolioState, symbol: str
+) -> TupleT[Position, ...]:
+    """Return all positions for a symbol. Empty tuple if none."""
+    return portfolio.positions.get(symbol, ())

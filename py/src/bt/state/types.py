@@ -60,6 +60,7 @@ class Position:
     take_profit: Optional[float]
     last_price: float
     type: ActionType
+    position_id: str = ""  # unique identifier, e.g. "SPY_1714003200.0"
 
 
 @dataclass
@@ -80,6 +81,7 @@ class Trade:
     reason: Optional[str] = ""
     status: TradeStatus = TradeStatus.open
     close_reason: Optional[Any] = None
+    position_id: str = ""  # links back to the Position that generated this trade
 
 
 @dataclass(frozen=True)
@@ -97,7 +99,7 @@ class PortfolioState:
     """Immutable portfolio state."""
 
     cash: float
-    positions: Dict[str, Position]  # Symbol -> Position
+    positions: Dict[str, Tuple[Position, ...]]  # Symbol -> tuple of Positions
     trades: Tuple[Trade, ...]
     equity_curve: Tuple[EquityPoint, ...]
     initial_capital: float
@@ -116,6 +118,9 @@ class TradeSignal:
     z_score: Optional[float] = None
     hedge_beta: Optional[float] = None
     fill_at_next_open: bool = True
+    position_id: Optional[str] = (
+        None  # target specific position; None = open new or close by symbol
+    )
 
 
 @dataclass(frozen=True)

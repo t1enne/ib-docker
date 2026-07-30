@@ -205,8 +205,8 @@ def on_candle(
     exiting: set[str] = set()
 
     # -- Exit: close positions whose rank has improved to top tier --
-    for sym, position in list(state.portfolio.positions.items()):
-        if sym not in scores:
+    for sym, pos_tup in list(state.portfolio.positions.items()):
+        if sym not in scores or not pos_tup:
             continue
         rank = _rank_of(sym, scores)
         # Rank 1=best, so exit when position is now a top performer
@@ -219,16 +219,18 @@ def on_candle(
                 continue
             _COOLDOWNS[sym] = params.cooldown_bars
             exiting.add(sym)
-            signals.append(
-                TradeSignal(
-                    action=ActionType.close,
-                    symbol=sym,
-                    timestamp=candle.timestamp,
-                    price=sym_price,
-                    qty=abs(position.qty),
-                    reason=f"[smrv] recovered rank {rank} <= {params.exit_rank_threshold}",
+            for position in pos_tup:
+                signals.append(
+                    TradeSignal(
+                        action=ActionType.close,
+                        symbol=sym,
+                        timestamp=candle.timestamp,
+                        price=sym_price,
+                        qty=abs(position.qty),
+                        position_id=position.position_id,
+                        reason=f"[smrv] recovered rank {rank} <= {params.exit_rank_threshold}",
+                    )
                 )
-            )
 
     # -- Max positions --
     if params.regime_filter:
@@ -239,7 +241,9 @@ def on_candle(
     else:
         max_pos = params.max_positions
 
-    effective = len(state.portfolio.positions) - len(exiting)
+    effective = sum(
+        len(t) for s, t in state.portfolio.positions.items() if s not in exiting
+    )
 
     # -- Entry: buy the worst performers --
     for sym in sorted_worst_first:

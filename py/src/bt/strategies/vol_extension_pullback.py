@@ -46,16 +46,18 @@ def on_candle(
         }
 
     symbol_state = signal_state[symbol]
-    position = state.portfolio.positions.get(symbol)
+    pos_tup = state.portfolio.positions.get(symbol, ())
 
-    if position:
-        return handle_exit(state, candle, strategy_params, symbol_state, position)
+    if pos_tup:
+        return handle_exit(state, candle, strategy_params, symbol_state, pos_tup[0])
 
     if symbol_state["phase"] == SignalPhase.ENTERED:
         return []
 
     max_positions = strategy_params.get("max_concurrent_positions", 5)
-    if len(state.portfolio.positions) >= max_positions:
+    from src.bt.portfolio.pure import count_positions
+
+    if count_positions(state.portfolio) >= max_positions:
         return []
 
     return handle_entry(state, candle, strategy_params, symbol_state)
@@ -290,9 +292,10 @@ def handle_pullback_entry(
     if corr_enabled and state.model_state.correlation_model is not None:
         corr_model = state.model_state.correlation_model
         for existing_sym in state.portfolio.positions:
-            corr = corr_model.get_correlation(symbol, existing_sym)
-            if corr > max_corr:
-                return []
+            if state.portfolio.positions[existing_sym]:  # has at least one position
+                corr = corr_model.get_correlation(symbol, existing_sym)
+                if corr > max_corr:
+                    return []
 
     capital = state.portfolio.initial_capital
     atr_14 = ta.atr(highs, lows, closes, atr_short)

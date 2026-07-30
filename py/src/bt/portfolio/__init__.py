@@ -22,7 +22,9 @@ from src.bt.portfolio.pure import (
     update_prices,
     calculate_equity,
     calculate_positions_value,
-    get_open_position,
+    iter_positions,
+    count_positions,
+    get_symbol_positions,
 )
 
 # For backward compatibility - these are deprecated
@@ -46,7 +48,9 @@ __all__ = [
     "update_prices",
     "calculate_equity",
     "calculate_positions_value",
-    "get_open_position",
+    "iter_positions",
+    "count_positions",
+    "get_symbol_positions",
     # Deprecated (for migration only)
     "Portfolio",
     "PortfolioProps",

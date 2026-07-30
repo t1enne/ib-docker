@@ -14,7 +14,6 @@ from src.bt.metrics import get_backtest_results_analysis
 from src.bt.types import StrategyConfig, PortfolioResult
 
 import json
-from datetime import date
 import asyncio
 
 

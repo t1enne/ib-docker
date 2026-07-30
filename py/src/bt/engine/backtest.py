@@ -473,27 +473,29 @@ def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestSta
     """Close all positions at end of backtest."""
     portfolio = state.portfolio
 
-    for symbol, position in list(portfolio.positions.items()):
-        close_signal = TradeSignal(
-            action=ActionType.close,
-            symbol=symbol,
-            timestamp=state.timestamp or pd.Timestamp.now(),
-            price=position.last_price,
-            reason=TradeExitReason.end,
-        )
+    for symbol, positions_tuple in list(portfolio.positions.items()):
+        for position in positions_tuple:
+            close_signal = TradeSignal(
+                action=ActionType.close,
+                symbol=symbol,
+                timestamp=state.timestamp or pd.Timestamp.now(),
+                price=position.last_price,
+                reason=TradeExitReason.end,
+                position_id=position.position_id,
+            )
 
-        fill = FillEvent(
-            signal=close_signal,
-            filled_qty=abs(position.qty),
-            executed_price=position.last_price,
-            commission=exec_params.fixed_commission,
-            slippage=0.0,
-            timestamp=close_signal.timestamp,
-        )
+            fill = FillEvent(
+                signal=close_signal,
+                filled_qty=abs(position.qty),
+                executed_price=position.last_price,
+                commission=exec_params.fixed_commission,
+                slippage=0.0,
+                timestamp=close_signal.timestamp,
+            )
 
-        from src.bt.portfolio.pure import apply_fill
+            from src.bt.portfolio.pure import apply_fill
 
-        portfolio = apply_fill(portfolio, fill)
+            portfolio = apply_fill(portfolio, fill)
 
     return merge_bt_state(
         state,

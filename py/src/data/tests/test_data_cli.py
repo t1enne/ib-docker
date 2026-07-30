@@ -6,13 +6,10 @@ Focus: gap-detection logic that runs without API calls.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
-import pytest
-import json
 
-from src.data.cli import _find_gaps_48h, _recap, load_universe_config
+from src.data.cli import _find_gaps_48h, _recap
 
 
 # ── Fixtures ────────────────────────────────────────────────────

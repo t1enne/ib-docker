@@ -145,7 +145,9 @@ class TestPositionSizing:
 
         # Expected: 30% of capital / 500 = 6 shares
         expected_qty = (initial_capital * position_size_pct) / 500.0
-        actual_qty = abs(portfolio_after.positions["SPY"].qty)
+        spy_positions = portfolio_after.positions.get("SPY", ())
+        assert len(spy_positions) == 1
+        actual_qty = abs(spy_positions[0].qty)
 
         assert abs(actual_qty - expected_qty) < 0.01, (
             f"Position size should use config (expected {expected_qty}, got {actual_qty})"
@@ -197,7 +199,9 @@ class TestStopLossTakeProfit:
             take_profit_pct=0.1,
         )
 
-        position = portfolio_after.positions["SPY"]
+        spy_positions = portfolio_after.positions.get("SPY", ())
+        assert len(spy_positions) == 1
+        position = spy_positions[0]
 
         # executed_price = 500.1 (signal price + default slippage)
         # Config values: stop_loss: 5%, take_profit: 10%

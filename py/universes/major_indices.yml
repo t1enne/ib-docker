@@ -1,8 +1,0 @@
-# Major U.S. equity indices — five core benchmarks
-# S&P 500, S&P MidCap 400, S&P SmallCap 600, NASDAQ-100, DJIA
-symbols:
-  - spy
-  - mdy
-  - ijr
-  - qqq
-  - dia

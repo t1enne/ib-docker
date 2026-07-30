@@ -1,0 +1,29 @@
+{
+  "name": "shannons-demon-qqq-gld",
+  "training_start": "2015-01-01",
+  "training_end": "2016-01-01",
+  "trading_start": "2016-01-02",
+  "trading_end": "2026-01-01",
+  "commission": 0.05,
+  "initial_capital": 100000,
+  "position_size": 0.95,
+  "strategy_type": "shannons_demon",
+  "stop_loss": 0.5,
+  "take_profit": 0.8,
+  "bars": ["1h", "1d"],
+  "model_params": {},
+  "model_updater": false,
+  "benchmark_symbols": ["QQQ", "GLD"],
+  "strategy_params": {
+    "rebalance_frequency": "monthly",
+    "rebalance_days": 21,
+    "target_weights": [0.6, 0.4],
+    "drift_tolerance": 0.05,
+    "warmup_bars": 63,
+    "cash_leg": false,
+    "trend_gate_enabled": true,
+    "trend_gate_lookback": 200,
+    "trend_gate_threshold": 0.05
+  },
+  "symbols": ["QQQ", "GLD"]
+}

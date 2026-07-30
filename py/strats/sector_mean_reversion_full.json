@@ -10,7 +10,7 @@
   "strategy_type": "sector_mean_reversion",
   "stop_loss": 0.15,
   "take_profit": 0.3,
-  "bar": "1d",
+  "bars": ["1d"],
   "model_params": {},
   "strategy_params": {
     "momentum_lookback": 126,

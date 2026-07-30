@@ -138,10 +138,10 @@ def run_backtest(
 
     for candle in candle_gen:
         can_trade = bt.window.test_start <= candle.timestamp <= bt.window.test_end
-        is_base = not candle.interval or candle.interval == config.bar
+        is_base = not candle.interval or candle.interval == config.bars[0]
 
         # Stage 1: stash EVERY candle (base + HTF) into the same accumulator
-        rows, state = _append_candle(rows, state, candle, config.bar)
+        rows, state = _append_candle(rows, state, candle, config.bars[0])
 
         # HTF-only candles: accumulate and skip rest of pipeline
         if not is_base:
@@ -152,7 +152,7 @@ def run_backtest(
             state = model_updater_fn(state, candle)
 
         # Stage 3: align close prices for pairs strategies
-        state = _update_price_buffers(rows, state, candle, symbols, config.bar)
+        state = _update_price_buffers(rows, state, candle, symbols, config.bars[0])
 
         # Stage 4: execute pending signals (from prior candles)
         state = _execute_pending(
@@ -244,7 +244,7 @@ def _get_bench_curves(config: StrategyConfig, bt: Backtest):
             config.benchmark_symbols,
             bt.window.train_start,
             bt.window.test_end,
-            config.bar,
+            config.bars[0],
         )
         for bm_sym in config.benchmark_symbols:
             try:

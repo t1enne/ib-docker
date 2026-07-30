@@ -21,8 +21,6 @@ import asyncio
 def load_strategy(path: str) -> StrategyConfig:
     with open(path, "r") as f:
         data = json.load(f)
-    if data.get("htf") is None:
-        data["htf"] = []
     return StrategyConfig(**data)
 
 
@@ -35,7 +33,7 @@ async def backtest_async(strategy_conf: StrategyConfig) -> str:
         strategy_conf.symbols,
         bt.window.train_start,
         bt.window.test_end,
-        strategy_conf.bar,
+        strategy_conf.bars[0],
     )
     strat_mod = init_strat(strategy_conf.strategy_type)
     results = run(bt, df, strat_mod=strat_mod)

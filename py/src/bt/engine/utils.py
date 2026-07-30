@@ -54,8 +54,8 @@ def candle_generator(
     # Handle both StrategyConfig and legacy list of symbols
     if hasattr(config, "symbols"):
         symbols = config.symbols
-        base_interval = getattr(config, "bar", "1h")
-        htf_intervals = getattr(config, "htf", []) or []
+        base_interval = getattr(config, "bars", ["1h"])[0]
+        htf_intervals = getattr(config, "bars", ["1h"])[1:] if hasattr(config, "bars") else []
     else:
         symbols = config
         base_interval = "1h"

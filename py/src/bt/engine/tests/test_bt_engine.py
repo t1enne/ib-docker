@@ -60,7 +60,7 @@ def strategy_config():
         training_end="2024-12-31",
         trading_start="2025-01-01",
         trading_end="2025-12-31",
-        bar="1h",
+        bars=["1h"],
         strategy_params={},
         model_params={},
     )

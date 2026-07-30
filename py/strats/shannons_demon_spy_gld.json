@@ -10,7 +10,7 @@
   "strategy_type": "shannons_demon",
   "stop_loss": 0.5,
   "take_profit": 0.8,
-  "bar": "1h",
+  "bars": ["1h"],
   "model_params": {},
   "model_updater": false,
   "benchmark_symbols": [

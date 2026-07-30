@@ -10,7 +10,7 @@
   "strategy_type": "aegis",
   "stop_loss": 0.5,
   "take_profit": 1.0,
-  "bar": "1d",
+  "bars": ["1d"],
   "model_params": {},
   "model_updater": false,
   "strategy_params": {

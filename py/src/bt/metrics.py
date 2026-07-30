@@ -440,12 +440,20 @@ def get_backtest_results_analysis(
     lines.append("\nTrading Statistics")
     stat_cols = (Col("Metric", "<"), Col("Value", ">"))
     total_pnl = equity_curve.iloc[-1] - equity_curve.iloc[0]
+    total_commission = (
+        sum(t.commission for t in closed_trades) if closed_trades else 0.0
+    )
+    total_slippage = sum(t.slippage for t in closed_trades) if closed_trades else 0.0
+    total_costs = total_commission + total_slippage
     stat_rows: tuple[tuple[str, ...], ...] = (
         ("Starting Capital", f"{equity_curve.iloc[0]:,.2f}"),
         ("Total Trades", str(len(trades))),
         ("Closed Trades", str(len(closed_trades))),
         ("Win Rate", f"{win_rate:.2%}"),
         ("Total P&L", f"{total_pnl:,.2f}"),
+        ("Commission Costs", f"{total_commission:,.2f}"),
+        ("Slippage Costs", f"{total_slippage:,.2f}"),
+        ("Total Costs", f"{total_costs:,.2f}"),
     )
     lines.extend(render(Table(columns=stat_cols, rows=stat_rows)))
 

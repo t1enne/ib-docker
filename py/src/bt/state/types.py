@@ -84,6 +84,8 @@ class Trade:
     stop_loss: float
     take_profit: float
     pnl: float = 0.0
+    commission: float = 0.0
+    slippage: float = 0.0
     reason: Optional[str] = ""
     status: TradeStatus = TradeStatus.open
     close_reason: Optional[Any] = None

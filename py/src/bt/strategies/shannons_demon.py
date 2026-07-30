@@ -342,7 +342,7 @@ def _deploy_initial(
                 timestamp=candle.timestamp,
                 price=price,
                 qty=qty,
-                reason=f"[shannon] deploy {tw_sym:.0%} @ {price:.2f}",
+                reason=f"deploy {tw_sym:.0%} @ {price:.2f}",
             )
         )
     return signals
@@ -394,7 +394,7 @@ def _full_rebalance(
                         price=price,
                         qty=abs(pos.qty),
                         position_id=pos.position_id,
-                        reason=f"[shannon] consolidate close @ {price:.2f}",
+                        reason=f"consolidate close @ {price:.2f}",
                     )
                 )
             if target_qty > 0:
@@ -407,7 +407,7 @@ def _full_rebalance(
                         price=price,
                         qty=target_qty,
                         reason=(
-                            f"[shannon] consolidate open {target_qty:.4f} "
+                            f"consolidate open {target_qty:.4f} "
                             f"({cw:.1%}->{tw_sym:.0%}) @ {price:.2f}"
                         ),
                     )
@@ -429,7 +429,7 @@ def _full_rebalance(
                 qty=delta,
                 position_id=pid,
                 reason=(
-                    f"[shannon] rebalance {direction} {abs(delta):.4f} "
+                    f"rebalance {direction} {abs(delta):.4f} "
                     f"({cw:.1%}→{tw_sym:.0%}) @ {price:.2f}"
                 ),
             )

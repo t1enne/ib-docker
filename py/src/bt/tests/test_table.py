@@ -31,11 +31,7 @@ def test_render_mixed_alignment():
     assert result[0].startswith("Benchmark")
     assert result[0].endswith("Sharpe")
     # Ann Ret column right-aligned
-    ann_ret_pos = result[0].index("Ann Ret")
-    # Check data rows align under headers
-    for row in result[2:]:
-        # Values in Ann Ret column should be right-padded (space before number)
-        pass
+    result[0].index("Ann Ret")  # smoke: column exists
     # Verify column alignment visually
     for line in result:
         print(line)

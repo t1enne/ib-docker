@@ -195,9 +195,10 @@ def _list_universes() -> list[str]:
 def _resolve_symbol_list(
     symbols: tuple[str, ...], universe: Optional[str]
 ) -> list[str]:
-    """Resolve CLI symbol args — universe file or inline list."""
+    """Resolve CLI symbol args — universe name or inline list."""
     if universe:
-        return load_universe_config(universe).symbols
+        path = _UNIVERSE_DIR / f"{universe}.json"
+        return load_universe_config(str(path)).symbols
     if symbols:
         return list(symbols)
     raise click.UsageError("provide SYMBOLS or --universe/-U")

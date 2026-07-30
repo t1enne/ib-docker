@@ -3,7 +3,6 @@
 Candle processing pipeline (per-candle stages, in order):
   _append_candle       – stash every candle (base + HTF) in accumulator
   _update_model        – run model_updater_fn if provided (base only)
-  _update_price_buffers – align close prices for pairs strategies (base only)
   _execute_pending     – fill any signals queued from prior candles
   _generate_signals    – run strategy on the last symbol per timestamp
   _execute_new         – immediately fill signals generated this tick
@@ -161,10 +160,7 @@ def run_backtest(
         if model_updater_fn:
             state = model_updater_fn(state, candle)
 
-        # Stage 3: align close prices for pairs strategies
-        state = _update_price_buffers(rows, state, candle, symbols, config.bars[0])
-
-        # Stage 4: execute pending signals (from prior candles)
+        # Stage 3: execute pending signals (from prior candles)
         state = _execute_pending(
             state, candle, exec_handler, config, bt.execution_params
         )
@@ -258,6 +254,7 @@ def _get_bench_curves(config: StrategyConfig, bt: Backtest):
             bt.window.test_end,
             config.bars[0],
         )
+        closes: dict[str, pd.Series] = {}
         for bm_sym in config.benchmark_symbols:
             try:
                 bm_close = bm_df.xs(bm_sym, axis=1, level=0)["close"]
@@ -271,8 +268,23 @@ def _get_bench_curves(config: StrategyConfig, bt: Backtest):
                 # Normalize to same initial capital as strategy
                 bm_eq = bm_close / bm_close.iloc[0] * config.initial_capital
                 bm_curves[bm_sym] = bm_eq
+                closes[bm_sym] = bm_eq
             except KeyError:
                 pass
+
+        # Composite 50/50 buy-and-hold rebalanced: half capital in each symbol
+        if len(closes) == 2:
+            sym_a, sym_b = list(closes.keys())
+            aligned = pd.concat(
+                [closes[sym_a].rename("a"), closes[sym_b].rename("b")],
+                axis=1,
+            ).dropna()
+            if len(aligned) > 1:
+                ret_a = aligned["a"].pct_change().fillna(0.0)
+                ret_b = aligned["b"].pct_change().fillna(0.0)
+                avg_ret = (ret_a + ret_b) / 2.0
+                cum = (1.0 + avg_ret).cumprod()
+                bm_curves["50/50"] = cum * config.initial_capital
     except Exception:
         pass
 

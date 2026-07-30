@@ -291,6 +291,7 @@ def on_candle(
 
     # First deployment: buy both legs at target weights
     if not current_weights:
+        _last_rebalance[cache_key] = _bar_idx
         return _deploy_initial(
             candle, risk_symbols, all_legs, target, entry_closes, total
         )
@@ -304,6 +305,7 @@ def on_candle(
         return []
 
     # Rebalance: close all positions, then reopen at target weights
+    _last_rebalance[cache_key] = _bar_idx
     return _full_rebalance(
         state,
         candle,

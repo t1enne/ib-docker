@@ -102,21 +102,27 @@ def candle_generator(
     sorted_timestamps = sorted(all_timestamps)
     ts_to_idx = {ts: i for i, ts in enumerate(timestamps)}  # fast lookup
 
-    # Pre-compute HTF arrays for fast iteration
-    htf_arrays: dict[tuple[str, str, str], np.ndarray] = {}  # (freq, sym, field)
-    htf_timestamps_map: dict[
-        str, dict[str, np.ndarray]
-    ] = {}  # freq -> sym -> timestamps
+    # Pre-compute HTF: { (freq, sym): {timestamp_ns: (open, high, low, close, volume)} }
+    htf_points: dict[
+        tuple[str, str], dict[int, tuple[float, float, float, float, float]]
+    ] = {}
     for freq, htf_df in htf_dfs.items():
         if htf_df.empty:
             continue
-        htf_timestamps_map[freq] = {}
         for s in symbols:
             try:
                 sym_htf = htf_df.xs(s, level="symbol")
-                htf_timestamps_map[freq][s] = sym_htf.index.to_numpy()
-                for f in fields:
-                    htf_arrays[(freq, s, f)] = sym_htf[f].to_numpy(dtype=float)
+                htf_ts = sym_htf.index.to_numpy()
+                htf_vals = {}
+                for i, ts in enumerate(htf_ts):
+                    htf_vals[hash(ts)] = (
+                        float(sym_htf["open"].iloc[i]),
+                        float(sym_htf["high"].iloc[i]),
+                        float(sym_htf["low"].iloc[i]),
+                        float(sym_htf["close"].iloc[i]),
+                        float(sym_htf["volume"].iloc[i]),
+                    )
+                htf_points[(freq, s)] = htf_vals
             except KeyError:
                 continue
 
@@ -139,24 +145,20 @@ def candle_generator(
                     interval=base_interval,
                 )
 
-        # Yield HTF ticks at their boundaries
+        # Yield HTF ticks at their boundaries — O(1) dict lookup
+        ts_h = hash(ts)
         for freq in htf_intervals:
-            ts_map = htf_timestamps_map.get(freq, {})
             for s in symbols:
-                sym_ts = ts_map.get(s, None)
-                if sym_ts is None:
-                    continue
-                # Find if ts matches any HTF timestamp for this symbol
-                htf_idx = np.searchsorted(sym_ts, ts)
-                if htf_idx < len(sym_ts) and sym_ts[htf_idx] == ts:
+                htf_v = htf_points.get((freq, s), {}).get(ts_h)
+                if htf_v is not None:
                     yield Candle(
                         timestamp=pdt,
                         symbol=s,
-                        open=float(htf_arrays[(freq, s, "open")][htf_idx]),
-                        high=float(htf_arrays[(freq, s, "high")][htf_idx]),
-                        low=float(htf_arrays[(freq, s, "low")][htf_idx]),
-                        close=float(htf_arrays[(freq, s, "close")][htf_idx]),
-                        volume=float(htf_arrays[(freq, s, "volume")][htf_idx]),
+                        open=htf_v[0],
+                        high=htf_v[1],
+                        low=htf_v[2],
+                        close=htf_v[3],
+                        volume=htf_v[4],
                         interval=freq,
                     )
 

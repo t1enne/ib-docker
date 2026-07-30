@@ -1,0 +1,27 @@
+name: shannons-demon-spy-gld-hourly
+training_start: 2015-01-01
+training_end: 2015-01-02
+trading_start: 2015-01-02
+trading_end: 2025-03-01
+commission: 0.05
+initial_capital: 100000
+position_size: 0.95
+strategy_type: shannons_demon
+stop_loss: 0.50
+take_profit: 0.80
+bar: 1h
+model_params: {}
+model_updater: false
+benchmark_symbols:
+  - SPY
+  - GLD
+strategy_params:
+  rebalance_frequency: "daily"
+  rebalance_days: 21
+  target_weights: [0.5, 0.5]
+  drift_tolerance: 0.015
+  warmup_bars: 500
+  cash_leg: false
+symbols:
+  - SPY
+  - GLD

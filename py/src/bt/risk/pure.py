@@ -35,6 +35,7 @@ def check_position_risk(
 ) -> Optional[Union[StopLossEvent, TakeProfitEvent]]:
     """Check single position for SL/TP triggers."""
     position = update_trailing_stop(_position, tick, config)
+    pid = position.position_id
     is_long = position.type == ActionType.long
 
     # Check stop loss
@@ -44,6 +45,7 @@ def check_position_risk(
             timestamp=tick.timestamp,
             trigger_price=position.stop_loss,
             reason="sl",
+            position_id=pid,
         )
 
     if not is_long and position.stop_loss and tick.high >= position.stop_loss:
@@ -52,6 +54,7 @@ def check_position_risk(
             timestamp=tick.timestamp,
             trigger_price=position.stop_loss,
             reason="sl",
+            position_id=pid,
         )
 
     # Check take profit
@@ -61,6 +64,7 @@ def check_position_risk(
             timestamp=tick.timestamp,
             trigger_price=position.take_profit,
             reason="tp",
+            position_id=pid,
         )
 
     if not is_long and position.take_profit and tick.low <= position.take_profit:
@@ -69,6 +73,7 @@ def check_position_risk(
             timestamp=tick.timestamp,
             trigger_price=position.take_profit,
             reason="tp",
+            position_id=pid,
         )
 
     return None

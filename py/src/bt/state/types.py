@@ -17,6 +17,7 @@ class ActionType(Enum):
     long = "long"
     short = "short"
     close = "close"
+    rebalance = "rebalance"  # net delta adjustment to existing position
 
 
 class TradeStatus(Enum):
@@ -143,6 +144,7 @@ class StopLossEvent:
     timestamp: pd.Timestamp
     trigger_price: float
     reason: str = "sl"
+    position_id: str = ""  # links to the Position that triggered
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,7 @@ class TakeProfitEvent:
     timestamp: pd.Timestamp
     trigger_price: float
     reason: str = "tp"
+    position_id: str = ""  # links to the Position that triggered
 
 
 RiskEvent = Tuple[StopLossEvent, TakeProfitEvent]

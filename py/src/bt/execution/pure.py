@@ -60,12 +60,15 @@ def execute_risk_event(event, tick: Candle, params: ExecutionParams) -> FillEven
     slippage = event.trigger_price * (slippage_bps / 10000)
     executed_price = base_price - slippage
 
+    pid = getattr(event, "position_id", "")
+
     signal = TradeSignal(
         action=ActionType.close,
         symbol=event.symbol,
         timestamp=event.timestamp,
         price=event.trigger_price,
         reason=event.reason,
+        position_id=pid,
     )
 
     return FillEvent(

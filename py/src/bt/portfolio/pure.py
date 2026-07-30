@@ -13,6 +13,7 @@ from src.bt.state.types import (
     PortfolioState,
     Position,
     Trade,
+    TradeSignal,
     FillEvent,
     EquityPoint,
     ActionType,
@@ -43,6 +44,14 @@ def apply_fill(
 
     if signal.action == ActionType.close:
         return _close_position(portfolio, fill)
+
+    if signal.action == ActionType.rebalance:
+        return _rebalance_position(
+            portfolio,
+            fill,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+        )
 
     return _open_position(
         portfolio,
@@ -206,6 +215,174 @@ def _close_position(portfolio: PortfolioState, fill: FillEvent) -> PortfolioStat
         cash=new_cash,
         positions=new_positions,
         trades=tuple(updated_trades),
+        equity_curve=portfolio.equity_curve,
+        initial_capital=portfolio.initial_capital,
+    )
+
+
+def _rebalance_position(
+    portfolio: PortfolioState,
+    fill: FillEvent,
+    stop_loss_pct: float = 0.05,
+    take_profit_pct: float = 0.1,
+) -> PortfolioState:
+    """Adjust position quantity by delta (positive = add, negative = reduce).
+
+    Requires signal.position_id to target the exact position.
+    Signal.qty is the DELTA, not the absolute quantity:
+      - +qty: add to position (buy more)
+      - -qty: reduce position (sell some or all)
+
+    When the resulting qty <= 0, the position is fully closed.
+    When the resulting qty > 0, the position is adjusted — entry_price
+    is NOT updated (simple average, not time-weighted). Trade record
+    is closed and a new one opened to track the adjusted position.
+    """
+    symbol = fill.signal.symbol
+    pid = fill.signal.position_id
+
+    positions_tuple = portfolio.positions.get(symbol)
+
+    if not positions_tuple:
+        # No existing position — treat as open if delta positive
+        if fill.signal.qty > 0:
+            return _open_position(
+                portfolio,
+                fill,
+                position_size_pct=1.0,  # qty is explicit, won't use this
+                stop_loss_pct=stop_loss_pct,
+                take_profit_pct=take_profit_pct,
+            )
+        return portfolio
+
+    if not pid:
+        raise ValueError(
+            f"_rebalance_position requires position_id on TradeSignal. "
+            f"Signal for {symbol} has no position_id set "
+            f"but positions exist: {[p.position_id for p in positions_tuple]}"
+        )
+
+    # Find target position by position_id
+    target_idx: Optional[int] = None
+    target: Optional[Position] = None
+    for i, pos in enumerate(positions_tuple):
+        if pos.position_id == pid:
+            target_idx = i
+            target = pos
+            break
+
+    if target is None:
+        raise ValueError(
+            f"Position {pid} not found for symbol {symbol}. "
+            f"Available: {[p.position_id for p in positions_tuple]}"
+        )
+
+    delta = round(fill.signal.qty, 4)
+    if delta == 0:
+        return portfolio
+
+    new_qty = round(target.qty + delta, 4)
+
+    if new_qty <= 0:
+        # Full close — build a close fill for the remaining position
+        close_fill = FillEvent(
+            signal=TradeSignal(
+                action=ActionType.close,
+                symbol=fill.signal.symbol,
+                timestamp=fill.signal.timestamp,
+                price=fill.executed_price,
+                qty=abs(target.qty),
+                reason=fill.signal.reason,
+                position_id=pid,
+            ),
+            filled_qty=abs(target.qty),
+            executed_price=fill.executed_price,
+            commission=fill.commission,
+            slippage=fill.slippage,
+            timestamp=fill.timestamp,
+        )
+        return _close_position(portfolio, close_fill)
+
+    # Partial adjustment: close old trade, open new trade with adjusted qty
+    is_long = target.type == ActionType.long
+
+    if delta > 0:
+        # Adding: cash goes out
+        cash_change = -(delta * fill.executed_price + fill.commission)
+        pnl_on_closed = 0.0  # no PnL realized on add — old position continues
+    else:
+        # Reducing: cash comes in, realize partial PnL
+        reduce_qty = abs(delta)
+        if is_long:
+            partial_pnl = (fill.executed_price - target.entry_price) * reduce_qty
+            cash_change = reduce_qty * fill.executed_price - fill.commission
+        else:
+            partial_pnl = (target.entry_price - fill.executed_price) * reduce_qty
+            cash_change = (
+                (reduce_qty * target.entry_price) + partial_pnl - fill.commission
+            )
+        pnl_on_closed = partial_pnl
+
+    new_cash = portfolio.cash + cash_change
+
+    # Close the old trade with its partial PnL
+    updated_trades = list(portfolio.trades)
+    for i, trade in enumerate(updated_trades):
+        if (
+            trade.status == TradeStatus.open
+            and trade.position_id == pid
+            and trade.symbol == symbol
+        ):
+            updated_trades[i] = _close_trade(trade, fill, pnl_on_closed)
+            break
+
+    # Open a new trade/position for the remaining qty
+    new_pid = f"{symbol}_{fill.timestamp.timestamp()}"
+
+    new_position = Position(
+        symbol=symbol,
+        qty=new_qty,
+        entry_price=target.entry_price,  # preserve original entry price
+        entry_time=target.entry_time,  # preserve original entry time
+        stop_loss=target.stop_loss,
+        take_profit=target.take_profit,
+        last_price=fill.executed_price,
+        type=target.type,
+        position_id=new_pid,
+    )
+
+    new_trade = Trade(
+        entry_time=target.entry_time,
+        entry_price=target.entry_price,
+        exit_time=None,
+        exit_price=None,
+        last_price=fill.executed_price,
+        symbol=symbol,
+        position=target.type,
+        qty=new_qty,
+        stop_loss=target.stop_loss or 0.0,
+        take_profit=target.take_profit or 0.0,
+        pnl=0.0,
+        reason=fill.signal.reason,
+        status=TradeStatus.open,
+        close_reason=None,
+        position_id=new_pid,
+    )
+
+    # Replace old position with new in the tuple
+    assert target_idx is not None
+    new_positions = dict(portfolio.positions)
+    new_tup = (
+        positions_tuple[:target_idx]
+        + (new_position,)
+        + positions_tuple[target_idx + 1 :]
+    )
+    new_positions[symbol] = new_tup
+
+    return PortfolioState(
+        cash=new_cash,
+        positions=new_positions,
+        trades=tuple(updated_trades + [new_trade]),
         equity_curve=portfolio.equity_curve,
         initial_capital=portfolio.initial_capital,
     )

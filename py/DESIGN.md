@@ -32,10 +32,10 @@ py spread analyze AAPL MSFT --from 2024-01-01
 py hmm fit AAPL --from 2024-01-01 --n-regimes 3
 
 # Backtest
-py bt run strategy.yml
+py bt run strategy.json
 
 # Screen
-py screen run breakout_screen universe.yml --param fast=50
+py screen run breakout_screen universe.json --param fast=50
 ```
 
 ## Architecture

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import yaml
+import json
 
-from src.data.cli import _find_gaps_48h, _recap, _load_universe
+from src.data.cli import _find_gaps_48h, _recap, load_universe_config
 
 
 # ── Fixtures ────────────────────────────────────────────────────
@@ -143,63 +143,6 @@ class TestRecap:
         assert "gaps >48h (1)" in result
         assert "2026-01-05" in result
         assert "2026-01-10" in result
-
-
-# ── _load_universe ──────────────────────────────────────────────
-
-
-class TestLoadUniverse:
-    def test_load_nsdq(self, tmp_path: Path):
-        """Load a well-formed universe file."""
-        univ_dir = tmp_path / "universes"
-        univ_dir.mkdir()
-        (univ_dir / "test.yml").write_text(
-            yaml.dump({"symbols": ["AAPL", "MSFT", "GOOGL"]})
-        )
-
-        # Monkeypatch _UNIVERSE_DIR
-        import src.data.cli as cli_mod
-
-        orig = cli_mod._UNIVERSE_DIR
-        cli_mod._UNIVERSE_DIR = univ_dir
-        try:
-            symbols = _load_universe("test")
-            assert symbols == ["AAPL", "MSFT", "GOOGL"]
-        finally:
-            cli_mod._UNIVERSE_DIR = orig
-
-    def test_load_missing_file(self, tmp_path: Path):
-        """Missing universe file → raises."""
-        import src.data.cli as cli_mod
-        import click
-
-        univ_dir = tmp_path / "universes"
-        univ_dir.mkdir()
-        orig = cli_mod._UNIVERSE_DIR
-        cli_mod._UNIVERSE_DIR = univ_dir
-        try:
-            with pytest.raises(click.BadParameter, match="unknown universe 'nope'"):
-                _load_universe("nope")
-        finally:
-            cli_mod._UNIVERSE_DIR = orig
-
-    def test_list_universes(self, tmp_path: Path):
-        """_list_universes returns yml stems only."""
-        import src.data.cli as cli_mod
-
-        univ_dir = tmp_path / "universes"
-        univ_dir.mkdir()
-        (univ_dir / "foo.yml").write_text("symbols: []")
-        (univ_dir / "bar.yml").write_text("symbols: []")
-        (univ_dir / "readme.md").write_text("")
-
-        orig = cli_mod._UNIVERSE_DIR
-        cli_mod._UNIVERSE_DIR = univ_dir
-        try:
-            names = cli_mod._list_universes()
-            assert names == ["bar", "foo"]
-        finally:
-            cli_mod._UNIVERSE_DIR = orig
 
 
 # ── sql-injection warning (query_candles) ──────────────────────

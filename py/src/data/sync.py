@@ -3,7 +3,7 @@
 Public API:
   sync_data       — Fetch missing candle data for a list of tickers
   preview_sync    — Dry-run: show what gaps exist without fetching
-  load_universe_config — Load and validate a universe.yml file
+  load_universe_config — Load and validate a universe .json file
 
 All functions at the I/O boundary are async. Core gap-calculation
 logic (calculate_gaps) is pure — no side effects.
@@ -16,7 +16,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional
 
-import yaml
+import json
 
 from src.data.types import SymbolSchema, ISymbol
 from src.data.ibkr.candles import (
@@ -203,15 +203,15 @@ async def preview_sync(
 
 
 def load_universe_config(file_path: str) -> UniverseConf:
-    """Load and validate a universe configuration YAML file.
+    """Load and validate a universe configuration JSON file.
 
     Validates:
       - File exists and is readable
-      - Content is a YAML dict (not list, scalar, or empty)
+      - Content is a JSON object (not array, scalar, or empty)
       - Required 'symbols' key is present and non-empty
 
     Args:
-        file_path: Path to the universe.yml file
+        file_path: Path to the universe .json file
 
     Returns:
         Frozen UniverseConf with validated fields.
@@ -222,15 +222,15 @@ def load_universe_config(file_path: str) -> UniverseConf:
     """
     try:
         with open(file_path, "r") as f:
-            data = yaml.safe_load(f)
+            data = json.load(f)
     except FileNotFoundError:
         raise FileNotFoundError(f"Universe config not found: {file_path}")
-    except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML in {file_path}: {e}") from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {file_path}: {e}") from e
 
     if not isinstance(data, dict):
         raise ValueError(
-            f"Invalid universe config: expected a mapping (dict), "
+            f"Invalid universe config: expected a JSON object, "
             f"got {type(data).__name__}"
         )
 
@@ -238,12 +238,7 @@ def load_universe_config(file_path: str) -> UniverseConf:
         raise ValueError(
             "Universe config missing required 'symbols' field. "
             "Expected format:\n"
-            "  symbols:\n"
-            "    - AAPL\n"
-            "    - MSFT\n"
-            "  from_date: '2024-01-01'  # optional\n"
-            "  to_date: '2024-12-31'    # optional\n"
-            "  bar: '1h'                # optional, default: 1h"
+            '  { "symbols": ["AAPL", "MSFT"] }\n'
         )
 
     symbols = data.get("symbols", [])

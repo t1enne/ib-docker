@@ -2,10 +2,10 @@
 
 Usage:
     py data dl AAPL MSFT --from 2026-01-01
-    py data dl --universe universes/nsdq.yml --from 2026-01-01
+    py data dl --universe universes/nsdq.json --from 2026-01-01
     py data query AAPL --from 2026-01-01 --to 2026-06-01
     py data preview AAPL MSFT --from 2026-01-01
-    py data preview --universe universes/sector.yml --from 2024-01-01
+    py data preview --universe universes/sector.json --from 2024-01-01
 """
 
 from __future__ import annotations
@@ -186,10 +186,10 @@ _UNIVERSE_DIR = Path(__file__).resolve().parent.parent.parent / "universes"
 
 
 def _list_universes() -> list[str]:
-    """Return list of available universe names (stem of each .yml file)."""
+    """Return list of available universe names (stem of each .json file)."""
     if not _UNIVERSE_DIR.is_dir():
         return []
-    return sorted(p.stem for p in _UNIVERSE_DIR.glob("*.yml") if p.is_file())
+    return sorted(p.stem for p in _UNIVERSE_DIR.glob("*.json") if p.is_file())
 
 
 def _resolve_symbol_list(

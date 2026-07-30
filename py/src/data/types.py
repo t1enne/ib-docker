@@ -5,7 +5,7 @@ data over control flow, make invalid states unrepresentable.
 
 Types defined here:
   CandleDict     — TypedDict for OHLCV candle data (structural product type)
-  UniverseConf   — frozen config loaded from universe.yml
+  UniverseConf   — frozen config loaded from universe .json
   SyncResult     — frozen result of a sync operation
   FetchPlan      — frozen per-symbol gap plan for dry-run
   PreviewResult  — frozen result of a dry-run preview
@@ -117,7 +117,7 @@ class CandleDict(TypedDict, total=True):
 
 @dataclass(frozen=True)
 class UniverseConf:
-    """Configuration loaded from universe.yml.
+    """Configuration loaded from universe .json.
 
     Frozen — configuration is immutable after loading.
     """

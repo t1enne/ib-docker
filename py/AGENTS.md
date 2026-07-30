@@ -172,9 +172,9 @@ def on_tick(self, state: BacktestState, tick: Tick, params: dict) -> list[TradeS
 
 Assertions document invariants. They're also free runtime checks during tests.
 
-### 7. Configuration & Strategy YAML
+### 7. Configuration & Strategy JSON
 
-Strategies are defined in YAML files loaded via `load_strategy()` → `StrategyConfig`.
+Strategies are defined in JSON files loaded via `load_strategy()` → `StrategyConfig`.
 
 - Add new fields to `StrategyConfig` dataclass, not as loose dict entries.
 - Validate config early. The codebase currently lacks schema validation — when adding validation, use dataclass field constraints or a schema library, not ad-hoc checks scattered across the codebase.

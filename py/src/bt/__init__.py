@@ -13,19 +13,16 @@ from src.bt.engine.handlers import (  # noqa: F401
 from src.bt.metrics import get_backtest_results_analysis
 from src.bt.types import StrategyConfig, PortfolioResult
 
-import yaml
+import json
 from datetime import date
 import asyncio
 
 
 def load_strategy(path: str) -> StrategyConfig:
     with open(path, "r") as f:
-        data = yaml.safe_load(f)
-        for key in ["training_start", "training_end", "trading_start", "trading_end"]:
-            if key in data and isinstance(data[key], date):
-                data[key] = data[key].isoformat()
-        if data.get("htf") is None:
-            data["htf"] = []
+        data = json.load(f)
+    if data.get("htf") is None:
+        data["htf"] = []
     return StrategyConfig(**data)
 
 

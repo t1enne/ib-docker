@@ -1,6 +1,6 @@
 ---
 name: backtester
-description: Backtest quantitative trading strategies independently — create YAML configs, write custom strategies, run backtests, and interpret results. Use when asked to "backtest a trading strategy", "test a pairs trade", "run a backtest", "create a strategy", or "evaluate a trading idea".
+description: Backtest quantitative trading strategies independently — create JSON configs, write custom strategies, run backtests, and interpret results. Use when asked to "backtest a trading strategy", "test a pairs trade", "run a backtest", "create a strategy", or "evaluate a trading idea".
 allowed-tools: Bash(uv:*), Bash(cd:*), Bash(find:*), Bash(cat:*), Bash(ls:*), Bash(grep:*), Read, Write, Edit
 ---
 
@@ -86,33 +86,32 @@ def init_strat(strat_name: str):
             return src.bt.strategies.my_strategy
 ```
 
-### Step 2: Write the YAML Config
+### Step 2: Write the JSON Config
 
-Create `strats/<name>.yaml`:
+Create `strats/<name>.json`:
 
-```yaml
-name: strategy-name
-training_start: 2024-01-01
-training_end: 2024-01-02
-trading_start: 2024-01-02
-trading_end: 2025-01-01
-commission: 0.1
-initial_capital: 10000
-position_size: 0.2
-strategy_type: ema_cross # must match init_strat() key
-stop_loss: 0.2 # % of entry price
-take_profit: 0.5 # % of entry price
-bar: 1h # bar size
-htf: # higher timeframes (optional)
-  - 4h
-  - 1D
-model_params: {}
-strategy_params: # forwarded to on_candle()
-  fast: 9
-  slow: 30
-symbols:
-  - COIN
-  - AAPL
+```json
+{
+  "name": "strategy-name",
+  "training_start": "2024-01-01",
+  "training_end": "2024-01-02",
+  "trading_start": "2024-01-02",
+  "trading_end": "2025-01-01",
+  "commission": 0.1,
+  "initial_capital": 10000,
+  "position_size": 0.2,
+  "strategy_type": "ema_cross",
+  "stop_loss": 0.2,
+  "take_profit": 0.5,
+  "bar": "1h",
+  "htf": ["4h", "1D"],
+  "model_params": {},
+  "strategy_params": {
+    "fast": 9,
+    "slow": 30
+  },
+  "symbols": ["COIN", "AAPL"]
+}
 ```
 
 **Config field reference:**
@@ -125,17 +124,17 @@ symbols:
 - `htf` — resampled higher-timeframe bars injected alongside base bars (lookahead-safe)
 - `strategy_params` — arbitrary dict forwarded verbatim to `on_candle(state, candle, params)`
 
-**Available tickers** — see `/home/nasrt/Documents/code/dev/ibkr/py/universe.yml` for symbols with local data.
+**Available tickers** — see `/home/nasrt/Documents/code/dev/ibkr/py/universes/*.json` for symbols with local data.
 
 ### Step 3: Run the Backtest
 
 ```bash
 cd /home/nasrt/Documents/code/dev/ibkr/py
-uv run py bt run strats/<name>.yaml
-make run bt run strats/<name>.yaml   # same, via Make shortcut
+uv run py bt run strats/<name>.json
+make run bt run strats/<name>.json   # same, via Make shortcut
 ```
 
-> **Note:** Make intercepts its own flags (`--help`, `--format`). To pass them through to `main.py`, use `-- ` separator: `make run bt run strat.yaml -- --format jsonl`.
+> **Note:** Make intercepts its own flags (`--help`, `--format`). To pass them through to `main.py`, use `-- ` separator: `make run bt run strat.json -- --format jsonl`.
 
 **For programmatic use** (if you need structured output):
 
@@ -145,7 +144,7 @@ from src.bt import load_strategy, Backtest, run
 from src.bt.data_feed import load_candles
 from src.bt.strategies import init_strat
 
-config = load_strategy("strats/trend.yaml")
+config = load_strategy("strats/trend.json")
 bt = Backtest(config)
 df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bar)
 strat_mod = init_strat(config.strategy_type)
@@ -210,8 +209,8 @@ uv run pytest src/bt/risk/tests/ -v
 
 ## Common Gotchas
 
-- **Data availability**: not all symbols in `universe.yml` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run py data query <SYMBOL>` (or `make run data query <SYMBOL>`).
-- **Bar size**: strategies expect the bar size in YAML to match available data. Most data is `1h`.
+- **Data availability**: not all symbols in `universes/*.json` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run py data query <SYMBOL>` (or `make run data query <SYMBOL>`).
+- **Bar size**: strategies expect the bar size in config to match available data. Most data is `1h`.
 - **HTF lookahead**: `htf_candles()` is safe. Direct `state.htf_data[freq]` is not — it contains all bars including those after current tick.
 - **Multiple symbols**: the engine iterates all symbols per timestamp. The strategy runs on the last symbol. Entry signals for all symbols work; position management happens per-symbol.
 - **Pairs strategy** (`pnd`): requires exactly 2 symbols. Uses `model_state.price_buffers` for aligned close prices.

@@ -1,14 +1,14 @@
 # IBKR PY — Composable Quantitative Trading Toolkit
 
-A modular CLI toolkit for quantitative trading: data synchronization, indicator computation, statistical models, and a functional backtesting engine. Configure strategies in YAML, run them from the terminal, and iterate fast.
+A modular CLI toolkit for quantitative trading: data synchronization, indicator computation, statistical models, and a functional backtesting engine. Configure strategies in JSON, run them from the terminal, and iterate fast.
 
 ## Quickstart
 
 ```bash
 uv sync
-uv run py bt run strats/trend.yaml
-make run bt run strats/trend.yaml   # same, via Make shortcut
-make exec bt run strats/trend.yaml  # alias for the same
+uv run py bt run strats/trend.json
+make run bt run strats/trend.json   # same, via Make shortcut
+make exec bt run strats/trend.json  # alias for the same
 ```
 
 `make run` (or `make exec`) passes all args straight to the CLI. With no args, it shows available commands:
@@ -62,38 +62,38 @@ src/
 
 ## Running a Backtest
 
-### 1. Define a Strategy (YAML)
+### 1. Define a Strategy (JSON)
 
-```yaml
-# strats/my_strat.yaml
-name: ema-cross
-training_start: 2024-01-01
-training_end: 2024-01-02
-trading_start: 2024-01-02
-trading_end: 2025-01-01
-commission: 0.1
-initial_capital: 10000
-position_size: 0.2
-strategy_type: ema_cross
-stop_loss: 0.2
-take_profit: 0.5
-bar: 1h
-htf:
-  - 4h
-model_params: {}
-strategy_params:
-  fast: 9
-  slow: 30
-symbols:
-  - COIN
+```json
+{
+  "name": "ema-cross",
+  "training_start": "2024-01-01",
+  "training_end": "2024-01-02",
+  "trading_start": "2024-01-02",
+  "trading_end": "2025-01-01",
+  "commission": 0.1,
+  "initial_capital": 10000,
+  "position_size": 0.2,
+  "strategy_type": "ema_cross",
+  "stop_loss": 0.2,
+  "take_profit": 0.5,
+  "bar": "1h",
+  "htf": ["4h"],
+  "model_params": {},
+  "strategy_params": {
+    "fast": 9,
+    "slow": 30
+  },
+  "symbols": ["COIN"]
+}
 ```
 
 ### 2. Run
 
 ```bash
-uv run py bt run strats/my_strat.yaml
+uv run py bt run strats/my_strat.json
 # or via Make shortcut:
-make run bt run strats/my_strat.yaml
+make run bt run strats/my_strat.json
 ```
 
 Output: equity curve summary, trade log, metrics table (Sharpe, Sortino, Calmar, max drawdown, win rate, etc.).
@@ -101,8 +101,8 @@ Output: equity curve summary, trade log, metrics table (Sharpe, Sortino, Calmar,
 For JSON output:
 
 ```bash
-uv run py bt run strats/my_strat.yaml --format jsonl
-make run bt run strats/my_strat.yaml --format jsonl
+uv run py bt run strats/my_strat.json --format jsonl
+make run bt run strats/my_strat.json --format jsonl
 ```
 
 ## Built-in Strategies
@@ -184,10 +184,8 @@ htf_candles(state, "4h", tick)                          # → pd.DataFrame (no l
 
 Strategies can access resampled bars from higher timeframes without lookahead bias. Enable in config:
 
-```yaml
-htf:
-  - 4h
-  - 1D
+```json
+{"htf": ["4h", "1D"]}
 ```
 
 Then use in `on_candle()`:
@@ -256,7 +254,7 @@ from src.bt import load_strategy, Backtest, run, get_backtest_results_analysis
 from src.bt.data_feed import load_candles
 from src.bt.strategies import init_strat
 
-config = load_strategy("strats/trend.yaml")
+config = load_strategy("strats/trend.json")
 bt = Backtest(config)
 df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bar)
 strat_mod = init_strat(config.strategy_type)
@@ -268,20 +266,20 @@ print(get_backtest_results_analysis(results.pf))
 
 ```bash
 # Run a backtest
-uv run py bt run <strategy.yaml> [--format jsonl]
-make run bt run <strategy.yaml>          # same, via Make shortcut
-make exec bt run <strategy.yaml>         # alias for make run
+uv run py bt run <strategy.json> [--format jsonl]
+make run bt run <strategy.json>          # same, via Make shortcut
+make exec bt run <strategy.json>         # alias for make run
 
 # Analyze a strategy (detailed JSON metrics)
-uv run py bt analyze <strategy.yaml>
-make run bt analyze <strategy.yaml>      # same
+uv run py bt analyze <strategy.json>
+make run bt analyze <strategy.json>      # same
 
 # Data commands
 uv run py data query AAPL --from 2024-01-01   # Fetch candles
 make run data query AAPL --from 2024-01-01     # same
 
 # Pipe workflows
-uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.yml
+uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.json
 ```
 
 > **Tip:** `make run` / `make exec` passes all extra words as args to the CLI. No `--` separator needed for most flags. If Make itself intercepts a flag (e.g. `-B`, `--debug`), use `make run help` to get Click's help instead. With no args, prints available commands.

@@ -1,8 +1,8 @@
 """Backtest CLI — run walk-forward backtests from strategy configs.
 
 Usage:
-    py bt run breakout.yml
-    py data query AAPL --from 2024-01-01 | py ind ema --span 20 | py bt run strategy.yml
+    py bt run breakout.json
+    py data query AAPL --from 2024-01-01 | py ind ema --span 20 | py bt run strategy.json
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ def bt_group():
     help="Output format: jsonl (equity curve + trades) or text (summary)",
 )
 def bt_run(strategy_file: str, fmt: str):
-    """Run a backtest from a strategy YAML config file.
+    """Run a backtest from a strategy JSON config file.
 
-    STRATEGY_FILE: YAML config with symbols, dates, strategy params.
+    STRATEGY_FILE: JSON config with symbols, dates, strategy params.
 
     Output (text mode): human-readable summary table.
     Output (jsonl mode): equity curve + trades as JSON lines.

@@ -1,13 +1,13 @@
 """IBKR Trading Library — agent-friendly CLI.
 
 Usage:
-    py bt run strategy.yml
-    py bt analyze strategy.yml
+    py bt run strategy.json
+    py bt analyze strategy.json
     py data query AAPL --from 2026-01-01
     py data dl AAPL MSFT --from 2026-01-01
 
 Pipe composition:
-    py data query AAPL | py bt run strategy.yml
+    py data query AAPL | py bt run strategy.json
 """
 
 import click

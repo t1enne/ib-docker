@@ -356,57 +356,6 @@ def get_backtest_results_analysis(
     lines.append(f"\n{title}")
     lines.append("=" * 80)
 
-    # --- Benchmark Comparison ---
-    if benchmark_curves:
-        lines.append("\nBenchmark Comparison")
-        bench_cols = (
-            Col("Benchmark", "<"),
-            Col("Ann Ret", ">"),
-            Col("Vol", ">"),
-            Col("Sharpe", ">"),
-            Col("Max DD", ">"),
-            Col("Total Ret", ">"),
-        )
-        bench_rows: list[tuple[str, ...]] = [
-            (
-                "Strategy",
-                f"{metrics.annual_return:.2%}",
-                f"{metrics.annual_volatility:.2%}",
-                f"{metrics.sharpe_ratio:.2f}",
-                f"{metrics.max_drawdown:.2%}",
-                f"{result.total_return:.2%}",
-            )
-        ]
-        for bm_sym, bm_eq in benchmark_curves.items():
-            bm_total = (bm_eq.iloc[-1] - bm_eq.iloc[0]) / bm_eq.iloc[0]
-            bm_ann = annual_return(bm_eq)
-            bm_vol = annual_volatility(bm_eq)
-            bm_sharpe = bm_ann / bm_vol if bm_vol > 0 else 0.0
-            bm_dd = max_drawdown(bm_eq)
-            bench_rows.append(
-                (
-                    bm_sym,
-                    f"{bm_ann:.2%}",
-                    f"{bm_vol:.2%}",
-                    f"{bm_sharpe:.2f}",
-                    f"{bm_dd:.2%}",
-                    f"{bm_total:.2%}",
-                )
-            )
-        lines.extend(render(Table(columns=bench_cols, rows=tuple(bench_rows))))
-
-        # Relative outperformance
-        for bm_sym, bm_eq in benchmark_curves.items():
-            bm_ann = annual_return(bm_eq)
-            bm_dd = max_drawdown(bm_eq)
-            excess_ret = metrics.annual_return - bm_ann
-            lines.append(
-                f"\n  vs {bm_sym}: alpha={metrics.alpha:+.2%}  "
-                f"beta={metrics.beta:.2f}  "
-                f"excess_ann_ret={excess_ret:+.2%}  "
-                f"DD_improvement={abs(bm_dd) - abs(metrics.max_drawdown):+.2%}"
-            )
-
     # --- Drawdowns ---
     dds = drawdown_periods(equity_curve)
     if dds:
@@ -524,22 +473,85 @@ def get_backtest_results_analysis(
 
     # --- Metrics Table ---
     lines.append("\nPerformance Metrics")
-    metric_cols = (Col("Metric", "<"), Col("Value", ">"))
-    metric_rows: tuple[tuple[str, ...], ...] = (
-        ("Annual Return", f"{metrics.annual_return:.2%}"),
-        ("Annual Volatility", f"{metrics.annual_volatility:.2%}"),
-        ("Sharpe Ratio", f"{metrics.sharpe_ratio:.2f}"),
-        ("Calmar Ratio", f"{metrics.calmar_ratio:.2f}"),
-        ("Sortino Ratio", f"{metrics.sortino_ratio:.2f}"),
-        ("Omega Ratio", f"{metrics.omega_ratio:.2f}"),
-        ("Max Drawdown", f"{metrics.max_drawdown:.2%}"),
-        ("Stability", f"{metrics.stability:.2f}"),
-        ("Skewness", f"{metrics.skewness:.2f}"),
-        ("Kurtosis", f"{metrics.kurtosis:.2f}"),
-        ("Alpha", f"{metrics.alpha:.2f}"),
-        ("Beta", f"{metrics.beta:.2f}"),
-    )
+    metric_cols: tuple[Col, ...]
+    metric_rows: tuple[tuple[str, ...], ...]
+
+    bm_names: list[str] = sorted(benchmark_curves) if benchmark_curves else []
+    bm_stats: dict[str, dict[str, float]] = {}
+
+    if benchmark_curves:
+        for sym, eq in benchmark_curves.items():
+            bm_total = (eq.iloc[-1] - eq.iloc[0]) / eq.iloc[0]
+            bm_ann = annual_return(eq)
+            bm_vol = annual_volatility(eq)
+            bm_sharpe = bm_ann / bm_vol if bm_vol > 0 else 0.0
+            bm_dd = max_drawdown(eq)
+            bm_stats[sym] = {
+                "ann_ret": bm_ann,
+                "vol": bm_vol,
+                "sharpe": bm_sharpe,
+                "max_dd": bm_dd,
+                "total_ret": bm_total,
+            }
+
+        metric_cols = (Col("Metric", "<"), Col("Strategy", ">")) + tuple(
+            Col(s, ">") for s in bm_names
+        )
+
+        metric_rows = (
+            ("Total Return", f"{result.total_return:.2%}")
+            + tuple(f"{bm_stats[s]['total_ret']:.2%}" for s in bm_names),
+            ("Annual Return", f"{metrics.annual_return:.2%}")
+            + tuple(f"{bm_stats[s]['ann_ret']:.2%}" for s in bm_names),
+            ("Annual Volatility", f"{metrics.annual_volatility:.2%}")
+            + tuple(f"{bm_stats[s]['vol']:.2%}" for s in bm_names),
+            ("Sharpe Ratio", f"{metrics.sharpe_ratio:.2f}")
+            + tuple(f"{bm_stats[s]['sharpe']:.2f}" for s in bm_names),
+            ("Max Drawdown", f"{metrics.max_drawdown:.2%}")
+            + tuple(f"{bm_stats[s]['max_dd']:.2%}" for s in bm_names),
+            ("", "") + tuple("" for _ in bm_names),
+            ("Calmar Ratio", f"{metrics.calmar_ratio:.2f}")
+            + tuple("—" for _ in bm_names),
+            ("Sortino Ratio", f"{metrics.sortino_ratio:.2f}")
+            + tuple("—" for _ in bm_names),
+            ("Omega Ratio", f"{metrics.omega_ratio:.2f}")
+            + tuple("—" for _ in bm_names),
+            ("Stability", f"{metrics.stability:.2f}") + tuple("—" for _ in bm_names),
+            ("Skewness", f"{metrics.skewness:.2f}") + tuple("—" for _ in bm_names),
+            ("Kurtosis", f"{metrics.kurtosis:.2f}") + tuple("—" for _ in bm_names),
+            ("Alpha", f"{metrics.alpha:.2f}") + tuple("—" for _ in bm_names),
+            ("Beta", f"{metrics.beta:.2f}") + tuple("—" for _ in bm_names),
+        )
+
+    else:
+        metric_cols = (Col("Metric", "<"), Col("Value", ">"))
+        metric_rows = (
+            ("Annual Return", f"{metrics.annual_return:.2%}"),
+            ("Annual Volatility", f"{metrics.annual_volatility:.2%}"),
+            ("Sharpe Ratio", f"{metrics.sharpe_ratio:.2f}"),
+            ("Calmar Ratio", f"{metrics.calmar_ratio:.2f}"),
+            ("Sortino Ratio", f"{metrics.sortino_ratio:.2f}"),
+            ("Omega Ratio", f"{metrics.omega_ratio:.2f}"),
+            ("Max Drawdown", f"{metrics.max_drawdown:.2%}"),
+            ("Stability", f"{metrics.stability:.2f}"),
+            ("Skewness", f"{metrics.skewness:.2f}"),
+            ("Kurtosis", f"{metrics.kurtosis:.2f}"),
+            ("Alpha", f"{metrics.alpha:.2f}"),
+            ("Beta", f"{metrics.beta:.2f}"),
+        )
     lines.extend(render(Table(columns=metric_cols, rows=metric_rows)))
+
+    # Relative outperformance (after table, when benchmarks exist)
+    if benchmark_curves:
+        for sym in bm_names:
+            excess = metrics.annual_return - bm_stats[sym]["ann_ret"]
+            dd_imp = abs(bm_stats[sym]["max_dd"]) - abs(metrics.max_drawdown)
+            lines.append(
+                f"  vs {sym}: alpha={metrics.alpha:+.2%}  "
+                f"beta={metrics.beta:.2f}  "
+                f"excess_ann_ret={excess:+.2%}  "
+                f"DD_improvement={dd_imp:+.2%}"
+            )
 
     return "\n".join(lines)
 

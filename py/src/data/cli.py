@@ -2,13 +2,14 @@
 
 Usage:
     py data dl AAPL MSFT --from 2026-01-01
-    py data dl --universe nsdq --from 2026-01-01
+    py data dl --universe universes/nsdq.yml --from 2026-01-01
     py data query AAPL --from 2026-01-01 --to 2026-06-01
     py data preview AAPL MSFT --from 2026-01-01
-    py data preview --universe sector --from 2024-01-01
+    py data preview --universe universes/sector.yml --from 2024-01-01
 """
 
 from __future__ import annotations
+from src.data import load_universe_config
 
 import asyncio
 import json
@@ -19,7 +20,6 @@ from typing import Optional
 
 import click
 import pandas as pd
-import yaml
 
 from src.utils import to_optional_ts
 from src.data.db import query_candles
@@ -192,27 +192,12 @@ def _list_universes() -> list[str]:
     return sorted(p.stem for p in _UNIVERSE_DIR.glob("*.yml") if p.is_file())
 
 
-def _load_universe(name: str) -> list[str]:
-    """Load symbols from a universe file by name (e.g. 'nsdq')."""
-    path = _UNIVERSE_DIR / f"{name}.yml"
-    if not path.is_file():
-        avail = ", ".join(_list_universes())
-        raise click.BadParameter(
-            f"unknown universe '{name}'. available: {avail}",
-            param_hint="--universe",
-        )
-    with open(path) as f:
-        data = yaml.safe_load(f)
-    symbols: list[str] = data.get("symbols", []) if isinstance(data, dict) else []
-    return symbols
-
-
 def _resolve_symbol_list(
     symbols: tuple[str, ...], universe: Optional[str]
 ) -> list[str]:
     """Resolve CLI symbol args — universe file or inline list."""
     if universe:
-        return _load_universe(universe)
+        return load_universe_config(universe).symbols
     if symbols:
         return list(symbols)
     raise click.UsageError("provide SYMBOLS or --universe/-U")

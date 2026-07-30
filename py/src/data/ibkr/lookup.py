@@ -6,8 +6,22 @@ from ib_rest_api_client.api.trading_contracts import get_iserver_secdef_search
 from src.data.ibkr.shared import auth_client
 
 
-def _is_usd_stock(entry: SecdefSearchResponseItem):
-    return entry.description in ["ARCA", "NASDAQ"]
+US_EXCHANGES: frozenset[str] = frozenset({
+    "ARCA", "NASDAQ", "NYSE", "AMEX", "BATS", "IEX", "BATY",
+    "ARCAEDGE", "EDGEA", "NYSEAMERICAN", "NASDAQNM",
+})
+
+
+def _is_usd_stock(entry: SecdefSearchResponseItem) -> bool:
+    desc = entry.description
+    if isinstance(desc, str) and desc in US_EXCHANGES:
+        return True
+    # Also match via sections: US stocks have 'STK' section
+    if entry.sections:
+        for s in entry.sections:
+            if hasattr(s, 'sec_type') and s.sec_type == 'STK':
+                return True
+    return False
 
 
 async def lookup(ticker: str) -> SecdefSearchResponseItem:
@@ -23,11 +37,10 @@ async def lookup(ticker: str) -> SecdefSearchResponseItem:
             raise ValueError(f"Failed to search contract for {ticker}")
 
         data = [item for item in r if _is_usd_stock(item)]
-        first = data[0]
-        if not data or not first:
-            raise ValueError(f"No contract found for {ticker}")
+        if not data:
+            raise ValueError(f"No US stock contract found for {ticker}")
 
-        return first
+        return data[0]
 
     except Exception as e:
         raise ValueError(f"Failed to search contract for {ticker}: {e}")

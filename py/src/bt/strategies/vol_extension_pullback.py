@@ -1,15 +1,11 @@
 import src.indicators.ta as ta
 from src.bt.strategies.utils import close
-from typing import List, Dict, TYPE_CHECKING
+from typing import List, Dict
 from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
-from src.bt.types import PlotConfig
+
 import pandas as pd
 
 STRATEGY_TYPE = "volatility_expansion_pullback_continuation"
-
-
-if TYPE_CHECKING:
-    from src.bt.types import StrategyConfig
 
 
 class SignalPhase:
@@ -384,53 +380,3 @@ def handle_exit(
     reason = exit_reasons[0]
 
     return close(tick, position, reason, 0)
-
-
-def plot(state: BacktestState, config: "StrategyConfig") -> PlotConfig:
-    """Calculate indicators from candles and return as price overlays."""
-    strategy_params = config.strategy_params
-
-    comp = strategy_params.get("compression", {})
-    atr_short = comp.get("atr_short", 14)
-    atr_long = comp.get("atr_long", 100)
-
-    trend = strategy_params.get("trend_filter", {})
-    ma_fast = trend.get("ma_fast", 20)
-    ma_slow = trend.get("ma_slow", 50)
-
-    exits = strategy_params.get("stops", {})
-    ema_exit_period = exits.get("ema_exit_period", 20)
-
-    price_overlays: Dict[str, Dict[str, pd.Series]] = {}
-
-    for symbol in config.symbols:
-        try:
-            candles = state.candles[(symbol, config.bar)]
-        except KeyError:
-            continue
-
-        if len(candles) < max(atr_long, ma_slow, ema_exit_period):
-            continue
-
-        closes = candles["close"]
-        highs = candles["high"]
-        lows = candles["low"]
-
-        overlays = {}
-
-        atr_14 = ta.atr(highs, lows, closes, atr_short)
-        atr_100 = ta.atr(highs, lows, closes, atr_long)
-        overlays[f"atr_{atr_short}"] = atr_14
-        overlays[f"atr_{atr_long}"] = atr_100
-
-        ma_20 = ta.sma(closes, ma_fast)
-        ma_50 = ta.sma(closes, ma_slow)
-        overlays[f"ma_{ma_fast}"] = ma_20
-        overlays[f"ma_{ma_slow}"] = ma_50
-
-        ema_exit = closes.ewm(span=ema_exit_period, adjust=False).mean()
-        overlays[f"ema_{ema_exit_period}"] = ema_exit
-
-        price_overlays[symbol] = overlays
-
-    return PlotConfig(price_overlays=price_overlays)

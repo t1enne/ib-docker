@@ -286,14 +286,3 @@ def on_candle(
         )
 
     return signals
-
-
-# ---------------------------------------------------------------------------
-# plot
-# ---------------------------------------------------------------------------
-
-
-def plot(state: BacktestState, config: object) -> object:
-    from src.bt.types import PlotConfig
-
-    return PlotConfig(price_overlays={}, subplots=[])

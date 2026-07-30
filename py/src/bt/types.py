@@ -43,12 +43,6 @@ class EngineWindow:
     test_end: pd.Timestamp
 
 
-@dataclass(frozen=True)
-class PlotConfig:
-    price_overlays: Dict[str, Dict[str, pd.Series]] = field(default_factory=dict)
-    subplots: List[tuple[str, pd.Series]] = field(default_factory=list)
-
-
 @dataclass
 class StrategyConfig:
     name: str

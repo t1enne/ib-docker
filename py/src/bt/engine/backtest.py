@@ -47,7 +47,7 @@ from src.bt.state import (
     create_risk_config,
     TradeExitReason,
 )
-from src.bt.types import StrategyConfig, EngineWindow, BacktestResults, PlotConfig
+from src.bt.types import StrategyConfig, EngineWindow, BacktestResults
 from src.bt.engine.handlers import ExecutionHandler, RiskHandler
 from src.utils import parse_timestamp
 
@@ -225,7 +225,6 @@ def run_backtest(
             pf=pf_result,
             data=state.candles,
             final_state=state,
-            plot_config=PlotConfig(),
             benchmark_curves=bm_curves,
         ),
         state,

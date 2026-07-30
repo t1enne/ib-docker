@@ -8,12 +8,9 @@ All state is immutable (frozen dataclasses) to enable:
 """
 
 from dataclasses import dataclass, field
-from typing import Tuple, Dict, Optional, Any, List, TYPE_CHECKING
+from typing import Tuple, Dict, Optional, Any, List
 from enum import Enum
 import pandas as pd
-
-if TYPE_CHECKING:
-    from src.bt.types import PlotConfig
 
 
 class ActionType(Enum):
@@ -242,5 +239,4 @@ class BacktestResults:
     final_state: BacktestState
     z_scores: Optional[pd.DataFrame] = None
     regimes: Optional[pd.DataFrame] = None
-    plot_config: Optional["PlotConfig"] = None
     benchmark_curves: dict[str, "pd.Series"] = field(default_factory=dict)

@@ -19,7 +19,7 @@ import pandas as pd
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 from src.bt.strategies.utils import close, open
-from src.bt.types import PlotConfig
+
 from src.bt.regime.types import (
     TREND_INT_TO_LABEL,
     VOL_INT_TO_LABEL,
@@ -229,42 +229,3 @@ def on_candle(
         )
 
     return []
-
-
-# ---------------------------------------------------------------------------
-# plot
-# ---------------------------------------------------------------------------
-
-
-def plot(state: BacktestState, config: object) -> PlotConfig:
-    from src.bt.types import StrategyConfig as SC
-
-    strategy_config = cast(SC, config)
-
-    if not strategy_config.strategy_params:
-        return PlotConfig()
-
-    params = Params.from_dict(strategy_config.strategy_params)
-    price_overlays: dict[str, dict[str, pd.Series]] = {}
-    subplots: list[tuple[str, pd.Series]] = []
-
-    for symbol in strategy_config.symbols:
-        candles_df = state.candles.get((symbol, strategy_config.bar))
-        if candles_df is None or len(candles_df) < params.slow:
-            continue
-
-        closes = cast(pd.Series, candles_df["close"])
-        sma_fast = closes.rolling(params.fast).mean()
-        sma_slow = closes.rolling(params.slow).mean()
-
-        price_overlays[symbol] = {
-            f"sma_{params.fast}": sma_fast,
-            f"sma_{params.slow}": sma_slow,
-        }
-
-        # Trend regime as subplot (if available)
-        trend_int = state.model_state.current_trend
-        if trend_int is not None:
-            subplots.append(("regime", pd.Series(trend_int, index=closes.index[:1])))
-
-    return PlotConfig(price_overlays=price_overlays, subplots=subplots)

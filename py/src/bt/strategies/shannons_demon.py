@@ -56,6 +56,14 @@ class Params(StrategyParams):
     # Use cash as second leg when True; else use symbols[0], symbols[1]
     cash_leg: bool = False
 
+    # ---- Trend gate ----
+    # Skip rebalancing when asset ratio is trending (not mean-reverting).
+    # Shannon's Demon bleeds when one asset consistently outperforms —
+    # selling the winner to buy the loser fights momentum.
+    trend_gate_enabled: bool = False
+    trend_gate_lookback: int = 200  # SMA window for ratio trend detection
+    trend_gate_threshold: float = 0.10  # skip rebalance when |ratio/SMA - 1| > this
+
     @classmethod
     def from_dict(cls, d: dict) -> Params:
         d = dict(d)
@@ -153,6 +161,45 @@ def _drift_exceeds(
     return False
 
 
+def _ratio_trending(
+    state: BacktestState,
+    symbols: list[str],
+    params: Params,
+) -> bool:
+    """Return True if the price ratio is trending away from its SMA.
+
+    Finds any candle interval that has both symbols, computes
+    ratio = symbols[0]/symbols[1], and checks deviation from SMA.
+    """
+    if len(symbols) < 2:
+        return False
+
+    # Find an interval where both symbols exist
+    for iv in sorted({i for _, i in state.candles}, reverse=True):
+        if (symbols[0], iv) in state.candles and (symbols[1], iv) in state.candles:
+            break
+    else:
+        return False
+
+    closes_a = state.candles[(symbols[0], iv)]
+    closes_b = state.candles[(symbols[1], iv)]
+    common_idx = closes_a.index.intersection(closes_b.index)
+    if len(common_idx) < params.trend_gate_lookback:
+        return False
+
+    a_close = cast(pd.Series, closes_a.loc[common_idx, "close"])
+    b_close = cast(pd.Series, closes_b.loc[common_idx, "close"])
+    ratio = a_close / b_close
+    sma = ratio.rolling(params.trend_gate_lookback).mean()
+    last_sma = sma.iloc[-1]
+
+    if pd.isna(last_sma) or last_sma <= 0:
+        return False
+
+    deviation = abs(ratio.iloc[-1] / last_sma - 1)
+    return deviation > params.trend_gate_threshold
+
+
 # ---------------------------------------------------------------------------
 # on_candle
 # ---------------------------------------------------------------------------
@@ -233,8 +280,6 @@ def on_candle(
     if bars_since < interval_bars:
         return []
 
-    _last_rebalance[cache_key] = _bar_idx
-
     # Signal decisions: use signal-interval closes (e.g. daily)
     signal_closes, _, total = _portfolio_closes(state, risk_symbols, signal_interval)
     if total <= 0:
@@ -255,6 +300,10 @@ def on_candle(
 
     # Drift gate
     if not _drift_exceeds(current_weights, target, params.drift_tolerance):
+        return []
+
+    # Trend gate: skip rebalancing when ratio is trending
+    if params.trend_gate_enabled and _ratio_trending(state, risk_symbols, params):
         return []
 
     # Rebalance: close all positions, then reopen at target weights

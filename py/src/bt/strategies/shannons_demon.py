@@ -98,13 +98,13 @@ def _read_closes(
     symbols: list[str],
     interval: str,
 ) -> dict[str, float]:
-    """Return {symbol: latest close} from given interval's candles."""
-    closes: dict[str, float] = {}
-    for sym in symbols:
-        df = state.candles.get((sym, interval))
-        if df is not None and len(df) > 0:
-            closes[sym] = float(cast(pd.Series, df["close"]).iloc[-1])
-    return closes
+    """Return {symbol: latest close} from CandleStore — O(1) numpy read."""
+    store = state.candles
+    return {
+        sym: float(v)
+        for sym in symbols
+        if (v := store.latest(sym, interval)) is not None
+    }
 
 
 def _portfolio_closes(
@@ -113,12 +113,7 @@ def _portfolio_closes(
     interval: str,
 ) -> tuple[dict[str, float], float, float]:
     """Return (closes dict, pos_value, total_portfolio_value)."""
-    closes: dict[str, float] = {}
-    for sym in symbols:
-        df = state.candles.get((sym, interval))
-        if df is not None and len(df) > 0:
-            closes[sym] = float(cast(pd.Series, df["close"]).iloc[-1])
-
+    closes = _read_closes(state, symbols, interval)
     pos_value = sum(
         abs(p.qty) * closes.get(sym, 0.0)
         for sym, pos_tup in state.portfolio.positions.items()
@@ -170,6 +165,9 @@ def _ratio_trending(
 
     Finds any candle interval that has both symbols, computes
     ratio = symbols[0]/symbols[1], and checks deviation from SMA.
+
+    Accesses full close history via state.candles[(sym, iv)] — build
+    cost paid here (~N times per backtest, not per tick).
     """
     if len(symbols) < 2:
         return False
@@ -256,8 +254,7 @@ def on_candle(
         _bar_idx += 1
 
     # Warmup on signal interval
-    sig_df = state.candles.get((risk_symbols[0], signal_interval))
-    if sig_df is None or len(sig_df) < params.warmup_bars:
+    if state.candles.count(risk_symbols[0], signal_interval) < params.warmup_bars:
         return []
 
     # Only act on new signal bars (not every entry bar)

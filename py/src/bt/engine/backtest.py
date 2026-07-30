@@ -33,11 +33,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.bt.engine.candle_store import CandleStore, CandleRows
 from src.bt.engine.utils import candle_generator, merge_bt_state
 
 from dataclasses import dataclass, field, replace
 from typing import Generator, Tuple, Optional, Any, List, Callable
 
+import numpy as np
 import pandas as pd
 
 from src.bt.metrics import calculate_portfolio_result
@@ -60,13 +62,6 @@ from src.bt.state import (
 from src.bt.types import StrategyConfig, EngineWindow, BacktestResults
 from src.bt.engine.handlers import ExecutionHandler, RiskHandler
 from src.utils import parse_timestamp
-
-import numpy as np
-
-# Per-candle row accumulator — column-major numpy arrays keyed by (symbol, interval).
-# Each key maps to {timestamp: ndarray, open: ndarray, ...} for zero-copy DataFrame build at flush.
-# Base candles: ("SPY", "1h"), HTF candles: ("SPY", "1d").
-CandleRows = dict[tuple[str, str], dict[str, np.ndarray]]
 
 
 @dataclass
@@ -146,6 +141,11 @@ def run_backtest(
     state = initial_state or get_initial_state()
     rows: CandleRows = {}
 
+    # Create CandleStore once — wraps rows by reference, mutates in-place.
+    # Strategies access it as state.candles (Mapping interface) + .latest()/.count().
+    store = CandleStore(rows)
+    state = merge_bt_state(state, dict(candles=store))
+
     for candle in candle_gen:
         can_trade = bt.window.test_start <= candle.timestamp <= bt.window.test_end
         is_base = not candle.interval or candle.interval == config.bars[0]
@@ -204,8 +204,7 @@ def run_backtest(
         # Stage 8: mark to market
         state = _mark_to_market(state, candle)
 
-    # Finalize: flush row batches, close positions, build results
-    state = _flush_candle_batches(rows, state)
+    # Finalize: close positions, build results
     state = _finalize(state, bt.execution_params)
 
     # Build equity series, deduplicating by timestamp (equity curve
@@ -322,7 +321,8 @@ def _generate_signals(
     if not (can_trade and strategy_fn and candle.symbol == last_symbol):
         return state
 
-    state = merge_bt_state(state, dict(candles=_build_candles(rows)))
+    # Advance cursor so CandleStore only sees data up to this timestamp
+    state.candles.advance(candle.timestamp)
 
     new_signals = strategy_fn(state, candle, resolved_params)
     if not new_signals:
@@ -407,8 +407,6 @@ def _append_candle(
     """Stash candle row into numpy column arrays keyed by (symbol, interval).
 
     All candles — base and HTF — land in the same accumulator.
-    DataFrames are built once at flush. Strategies access state.candles
-    which is populated on-demand via _build_candles.
     """
     key = (candle.symbol, candle.interval or base_interval)
     if key not in rows:
@@ -441,36 +439,6 @@ def _append_candle(
     cols["_len"][0] = n + 1
 
     return rows, state
-
-
-def _build_candles(rows: CandleRows) -> dict[tuple[str, str], pd.DataFrame]:
-    """Build DataFrames from numpy column arrays keyed by (symbol, interval)."""
-    candles: dict[tuple[str, str], pd.DataFrame] = {}
-    for (sym, interval), cols in rows.items():
-        n = int(cols["_len"][0])
-        if n == 0:
-            continue
-        ts_arr = cols["timestamp"][:n]
-        df = pd.DataFrame(
-            {
-                "open": cols["open"][:n],
-                "high": cols["high"][:n],
-                "low": cols["low"][:n],
-                "close": cols["close"][:n],
-                "volume": cols["volume"][:n],
-            },
-            index=pd.DatetimeIndex(ts_arr),
-        )
-        candles[(sym, interval)] = df
-    return candles
-
-
-def _flush_candle_batches(rows: CandleRows, state: BacktestState) -> BacktestState:
-    """Build final DataFrames from numpy arrays at end of backtest."""
-    if not rows:
-        return state
-    candles = _build_candles(rows)
-    return merge_bt_state(state, dict(candles=candles))
 
 
 def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestState:

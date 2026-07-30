@@ -1,8 +1,10 @@
 """Factory functions for creating initial states."""
 
 from typing import List, Optional
+
 import pandas as pd
 
+from src.bt.engine.candle_store import CandleStore
 from src.bt.state.types import (
     PortfolioState,
     MarketDataState,
@@ -68,7 +70,7 @@ def create_initial_backtest_state(
         pending_signals=[],
         model_state=create_initial_model_state(symbols, rolling_window_size),
         risk_events=(),
-        candles={},
+        candles=CandleStore({}),
     )
 
 

@@ -7,10 +7,15 @@ All state is immutable (frozen dataclasses) to enable:
 - Deterministic behavior
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Tuple, Dict, Optional, Any, List
 from enum import Enum
+
 import pandas as pd
+
+from src.bt.engine.candle_store import CandleStore
 
 
 class ActionType(Enum):
@@ -216,9 +221,7 @@ class BacktestState:
     pending_signals: List[TradeSignal]
     model_state: ModelState
     risk_events: Tuple[Any, ...]  # RiskEvent tuple
-    candles: dict[tuple[str, str], pd.DataFrame] = field(
-        default_factory=dict
-    )  # {(symbol, interval): df}
+    candles: CandleStore = field(default_factory=lambda: CandleStore({}))
 
 
 @dataclass(frozen=True)
@@ -247,7 +250,7 @@ class BacktestResults:
     """Complete backtest results."""
 
     pf: PortfolioResult
-    data: dict[tuple[str, str], pd.DataFrame]  # {(symbol, interval): df}
+    data: CandleStore  # full OHLCV history (cursor at end-of-data post-backtest); also accessible via final_state.candles
     final_state: BacktestState
     z_scores: Optional[pd.DataFrame] = None
     regimes: Optional[pd.DataFrame] = None

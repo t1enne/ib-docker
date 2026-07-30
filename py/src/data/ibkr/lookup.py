@@ -6,10 +6,21 @@ from ib_rest_api_client.api.trading_contracts import get_iserver_secdef_search
 from src.data.ibkr.shared import auth_client
 
 
-US_EXCHANGES: frozenset[str] = frozenset({
-    "ARCA", "NASDAQ", "NYSE", "AMEX", "BATS", "IEX", "BATY",
-    "ARCAEDGE", "EDGEA", "NYSEAMERICAN", "NASDAQNM",
-})
+US_EXCHANGES: frozenset[str] = frozenset(
+    {
+        "ARCA",
+        "NASDAQ",
+        "NYSE",
+        "AMEX",
+        "BATS",
+        "IEX",
+        "BATY",
+        "ARCAEDGE",
+        "EDGEA",
+        "NYSEAMERICAN",
+        "NASDAQNM",
+    }
+)
 
 
 def _is_usd_stock(entry: SecdefSearchResponseItem) -> bool:
@@ -19,7 +30,7 @@ def _is_usd_stock(entry: SecdefSearchResponseItem) -> bool:
     # Also match via sections: US stocks have 'STK' section
     if entry.sections:
         for s in entry.sections:
-            if hasattr(s, 'sec_type') and s.sec_type == 'STK':
+            if hasattr(s, "sec_type") and s.sec_type == "STK":
                 return True
     return False
 

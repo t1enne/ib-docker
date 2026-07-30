@@ -42,7 +42,9 @@ async def backtest_async(strategy_conf: StrategyConfig) -> str:
     )
     strat_mod = init_strat(strategy_conf.strategy_type)
     results = run(bt, df, strat_mod=strat_mod)
-    return get_backtest_results_analysis(results.pf)
+    return get_backtest_results_analysis(
+        results.pf, benchmark_curves=results.benchmark_curves
+    )
 
 
 def backtest(strategy_conf: StrategyConfig) -> str:

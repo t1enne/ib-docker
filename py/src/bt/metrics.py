@@ -5,6 +5,7 @@ from typing import List, Optional, Any, cast
 from scipy import stats
 
 from src.bt.types import PortfolioResult, ActionType
+from src.bt.table import Col, Table, render
 
 
 @dataclass
@@ -357,33 +358,42 @@ def get_backtest_results_analysis(
 
     # --- Benchmark Comparison ---
     if benchmark_curves:
-        lines.append(f"\n{'Benchmark Comparison':<60}")
-        sep = "-" * 72
-        header = f"{'Benchmark':<12} {'Ann Ret':>10} {'Vol':>8} {'Sharpe':>8} {'Max DD':>8} {'Total Ret':>10}"
-        lines.append(header)
-        lines.append(sep)
-
-        # Strategy row
-        lines.append(
-            f"{'Strategy':<12} {metrics.annual_return:>9.2%} "
-            f"{metrics.annual_volatility:>7.2%} {metrics.sharpe_ratio:>7.2f} "
-            f"{metrics.max_drawdown:>7.2%} {result.total_return:>9.2%}"
+        lines.append("\nBenchmark Comparison")
+        bench_cols = (
+            Col("Benchmark", "<"),
+            Col("Ann Ret", ">"),
+            Col("Vol", ">"),
+            Col("Sharpe", ">"),
+            Col("Max DD", ">"),
+            Col("Total Ret", ">"),
         )
-
+        bench_rows: list[tuple[str, ...]] = [
+            (
+                "Strategy",
+                f"{metrics.annual_return:.2%}",
+                f"{metrics.annual_volatility:.2%}",
+                f"{metrics.sharpe_ratio:.2f}",
+                f"{metrics.max_drawdown:.2%}",
+                f"{result.total_return:.2%}",
+            )
+        ]
         for bm_sym, bm_eq in benchmark_curves.items():
             bm_total = (bm_eq.iloc[-1] - bm_eq.iloc[0]) / bm_eq.iloc[0]
             bm_ann = annual_return(bm_eq)
             bm_vol = annual_volatility(bm_eq)
-            bm_sharpe = 0.0
-            if bm_vol > 0:
-                bm_sharpe = bm_ann / bm_vol
+            bm_sharpe = bm_ann / bm_vol if bm_vol > 0 else 0.0
             bm_dd = max_drawdown(bm_eq)
-
-            lines.append(
-                f"{bm_sym:<12} {bm_ann:>9.2%} "
-                f"{bm_vol:>7.2%} {bm_sharpe:>7.2f} "
-                f"{bm_dd:>7.2%} {bm_total:>9.2%}"
+            bench_rows.append(
+                (
+                    bm_sym,
+                    f"{bm_ann:.2%}",
+                    f"{bm_vol:.2%}",
+                    f"{bm_sharpe:.2f}",
+                    f"{bm_dd:.2%}",
+                    f"{bm_total:.2%}",
+                )
             )
+        lines.extend(render(Table(columns=bench_cols, rows=tuple(bench_rows))))
 
         # Relative outperformance
         for bm_sym, bm_eq in benchmark_curves.items():
@@ -400,24 +410,33 @@ def get_backtest_results_analysis(
     # --- Drawdowns ---
     dds = drawdown_periods(equity_curve)
     if dds:
-        lines.append(f"\n{'Worst Drawdown Periods':<60}")
-        header = f"{'Net DD %':>8}  {'Peak Date':>12}  {'Valley Date':>12}  {'Recovery':>12}  {'Days':>6}"
-        lines.append(header)
-        lines.append("-" * 62)
+        lines.append("\nWorst Drawdown Periods")
+        dd_cols = (
+            Col("Net DD %", ">"),
+            Col("Peak Date", ">"),
+            Col("Valley Date", ">"),
+            Col("Recovery", ">"),
+            Col("Days", ">"),
+        )
+        dd_rows: list[tuple[str, ...]] = []
         for dd in dds[:5]:
             rec_str = (
                 _safe_date_str(dd.recovery_date)
                 if dd.recovery_date is not None
-                else "  —"
+                else "—"
             )
-            lines.append(
-                f"{dd.net_drawdown_pct:>7.2f}%  "
-                f"{_safe_date_str(dd.peak_date):>12}  "
-                f"{_safe_date_str(dd.valley_date):>12}  "
-                f"{rec_str:>12}  "
-                f"{dd.duration:>6}"
+            dd_rows.append(
+                (
+                    f"{dd.net_drawdown_pct:.2f}%",
+                    _safe_date_str(dd.peak_date),
+                    _safe_date_str(dd.valley_date),
+                    rec_str,
+                    str(dd.duration),
+                )
             )
-        if not any(dds):
+        if dd_rows:
+            lines.extend(render(Table(columns=dd_cols, rows=tuple(dd_rows))))
+        else:
             lines.append("  (none)")
     else:
         lines.append("\nWorst Drawdown Periods")
@@ -425,30 +444,23 @@ def get_backtest_results_analysis(
 
     # --- Trades ---
     if trades:
-        lines.append(f"\n{'Trades':<60}")
-        # Columns: Sym  Entry         Exit          Entry$   Exit$    PnL$     Pos  Exit Reason
-        sep = "-" * 114
-        header = (
-            f"{'Sym':<5} "
-            f"{'Entry':>10}  "
-            f"{'Exit':>10}  "
-            f"{'Entry$':>8}  "
-            f"{'Exit$':>8}  "
-            f"{'PnL$':>9}  "
-            f"{'Pos':>3}  "
-            f"{'Exit Reason':<30}  "
-            f"{'SL/TP':<12}"
+        lines.append("\nTrades")
+        trade_cols = (
+            Col("Sym", "<"),
+            Col("Entry", ">"),
+            Col("Exit", ">"),
+            Col("Entry$", ">"),
+            Col("Exit$", ">"),
+            Col("PnL$", ">"),
+            Col("Pos", ">"),
+            Col("Exit Reason", "<"),
+            Col("SL/TP", "<"),
         )
-        lines.append(header)
-        lines.append(sep)
-
+        trade_rows: list[tuple[str, ...]] = []
         for t in trades:
-            exit_price_str = (
-                f"{t.exit_price:.2f}" if t.exit_price is not None else "     —"
-            )
+            exit_price_str = f"{t.exit_price:.2f}" if t.exit_price is not None else "—"
             pos_str = "L" if t.position == ActionType.long else "S"
             reason = str(t.close_reason)
-            # Truncate long reasons
             if len(reason) > 30:
                 reason = reason[:27] + "..."
             sl_tp = (
@@ -456,32 +468,36 @@ def get_backtest_results_analysis(
                 if t.stop_loss and t.take_profit
                 else "—"
             )
-
-            lines.append(
-                f"{t.symbol:<5} "
-                f"{_safe_date_str(t.entry_time):>10}  "
-                f"{_safe_date_str(t.exit_time):>10}  "
-                f"{t.entry_price:>7.2f}  "
-                f"{exit_price_str:>8}  "
-                f"{t.pnl:>8.2f}  "
-                f"{pos_str:>3}  "
-                f"{reason:<30}  "
-                f"{sl_tp:<12}"
+            trade_rows.append(
+                (
+                    t.symbol,
+                    _safe_date_str(t.entry_time),
+                    _safe_date_str(t.exit_time),
+                    f"{t.entry_price:.2f}",
+                    exit_price_str,
+                    f"{t.pnl:.2f}",
+                    pos_str,
+                    reason,
+                    sl_tp,
+                )
             )
+        lines.extend(render(Table(columns=trade_cols, rows=tuple(trade_rows))))
     else:
         lines.append("\nTrades")
         lines.append("  (none)")
 
     # --- Trading Statistics ---
-    lines.append(f"\n{'Trading Statistics':<25}")
-    lines.append("-" * 42)
-    lines.append(f"{'Starting Capital':<25} {equity_curve.iloc[0]:>15,.2f}")
-    lines.append(f"{'Total Trades':<25} {len(trades):>15}")
-    lines.append(f"{'Closed Trades':<25} {len(closed_trades):>15}")
-    lines.append(f"{'Win Rate':<25} {win_rate:>14.2%}")
-    lines.append(
-        f"{'Total P&L':<25} {equity_curve.iloc[-1] - equity_curve.iloc[0]:>15,.2f}"
+    lines.append("\nTrading Statistics")
+    stat_cols = (Col("Metric", "<"), Col("Value", ">"))
+    total_pnl = equity_curve.iloc[-1] - equity_curve.iloc[0]
+    stat_rows: tuple[tuple[str, ...], ...] = (
+        ("Starting Capital", f"{equity_curve.iloc[0]:,.2f}"),
+        ("Total Trades", str(len(trades))),
+        ("Closed Trades", str(len(closed_trades))),
+        ("Win Rate", f"{win_rate:.2%}"),
+        ("Total P&L", f"{total_pnl:,.2f}"),
     )
+    lines.extend(render(Table(columns=stat_cols, rows=stat_rows)))
 
     # --- Date Range ---
     first_str = _safe_date_str(equity_curve.index[0])
@@ -507,20 +523,23 @@ def get_backtest_results_analysis(
     lines.append(f"Duration: {' · '.join(duration_parts)}")
 
     # --- Metrics Table ---
-    lines.append(f"\n{'Metric':<22} {'Value':>10}")
-    lines.append("-" * 34)
-    lines.append(f"{'Annual Return':<22} {metrics.annual_return:>9.2%}")
-    lines.append(f"{'Annual Volatility':<22} {metrics.annual_volatility:>9.2%}")
-    lines.append(f"{'Sharpe Ratio':<22} {metrics.sharpe_ratio:>10.2f}")
-    lines.append(f"{'Calmar Ratio':<22} {metrics.calmar_ratio:>10.2f}")
-    lines.append(f"{'Sortino Ratio':<22} {metrics.sortino_ratio:>10.2f}")
-    lines.append(f"{'Omega Ratio':<22} {metrics.omega_ratio:>10.2f}")
-    lines.append(f"{'Max Drawdown':<22} {metrics.max_drawdown:>9.2%}")
-    lines.append(f"{'Stability':<22} {metrics.stability:>10.2f}")
-    lines.append(f"{'Skewness':<22} {metrics.skewness:>10.2f}")
-    lines.append(f"{'Kurtosis':<22} {metrics.kurtosis:>10.2f}")
-    lines.append(f"{'Alpha':<22} {metrics.alpha:>10.2f}")
-    lines.append(f"{'Beta':<22} {metrics.beta:>10.2f}")
+    lines.append("\nPerformance Metrics")
+    metric_cols = (Col("Metric", "<"), Col("Value", ">"))
+    metric_rows: tuple[tuple[str, ...], ...] = (
+        ("Annual Return", f"{metrics.annual_return:.2%}"),
+        ("Annual Volatility", f"{metrics.annual_volatility:.2%}"),
+        ("Sharpe Ratio", f"{metrics.sharpe_ratio:.2f}"),
+        ("Calmar Ratio", f"{metrics.calmar_ratio:.2f}"),
+        ("Sortino Ratio", f"{metrics.sortino_ratio:.2f}"),
+        ("Omega Ratio", f"{metrics.omega_ratio:.2f}"),
+        ("Max Drawdown", f"{metrics.max_drawdown:.2%}"),
+        ("Stability", f"{metrics.stability:.2f}"),
+        ("Skewness", f"{metrics.skewness:.2f}"),
+        ("Kurtosis", f"{metrics.kurtosis:.2f}"),
+        ("Alpha", f"{metrics.alpha:.2f}"),
+        ("Beta", f"{metrics.beta:.2f}"),
+    )
+    lines.extend(render(Table(columns=metric_cols, rows=metric_rows)))
 
     return "\n".join(lines)
 

@@ -54,6 +54,11 @@ def create_initial_model_state(
         resample_cache={},
         resample_anchor={},
         resample_partial={},
+        kalman_spread=None,
+        kalman_z_score=None,
+        kalman_beta=None,
+        kalman_alpha=None,
+        kalman_n_steps=0,
     )
 
 

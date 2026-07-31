@@ -557,6 +557,24 @@ def _resolve_model_updater(config: "StrategyConfig") -> Any | None:
         )
         return create_regime_model_updater(detector)
 
+    if mu_type == "kalman_pairs":
+        from src.indicators.kalman.model_updater import create_kalman_pairs_updater
+
+        kp_cfg = mu.get("kalman_pairs", {})
+        pair = kp_cfg.get("pair")
+        if pair is not None and isinstance(pair, list) and len(pair) == 2:
+            pair = (str(pair[0]), str(pair[1]))
+        return create_kalman_pairs_updater(
+            pair=pair,
+            process_noise=kp_cfg.get("process_noise", 1e-4),
+            measurement_noise=kp_cfg.get("measurement_noise", 1e-3),
+            ols_warmup=kp_cfg.get("ols_warmup", 50),
+            adaptive=kp_cfg.get("adaptive", True),
+            vol_window=kp_cfg.get("vol_window", 20),
+            z_window=kp_cfg.get("z_window", 20),
+            warmup_bars=kp_cfg.get("warmup_bars", 150),
+        )
+
     return None
 
 

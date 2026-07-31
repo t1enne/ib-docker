@@ -483,10 +483,13 @@ def on_candle(
     if available_cash <= 1.0:
         return signals
 
-    # Estimate turnover: sum of absolute weight changes
+    # Estimate turnover: sum of absolute weight changes.
+    # Use per-position last_price (updated by mark-to-market) — NOT
+    # candle.close, which is the trigger candle's close and may be NaN
+    # for symbols with sparse/incomplete data (e.g. PYPL).
     curr_weights: dict[str, float] = {}
     total_pos_value = sum(
-        abs(p.qty) * (candle.close if p.symbol in closes_map else 0)
+        abs(p.qty) * p.last_price
         for pos_tup in state.portfolio.positions.values()
         for p in pos_tup
     )
@@ -494,7 +497,8 @@ def on_candle(
     for sym, pos_tup in state.portfolio.positions.items():
         if portfolio_value > 0 and pos_tup:
             total_qty = sum(abs(p.qty) for p in pos_tup)
-            curr_weights[sym] = (total_qty * candle.close) / portfolio_value
+            # All positions for the same symbol share the same last_price
+            curr_weights[sym] = (total_qty * pos_tup[0].last_price) / portfolio_value
 
     turnover = sum(
         abs(weights.get(s, 0.0) - curr_weights.get(s, 0.0)) for s in target | held

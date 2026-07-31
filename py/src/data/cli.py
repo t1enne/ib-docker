@@ -15,7 +15,6 @@ import asyncio
 import json
 import sys
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
 import click

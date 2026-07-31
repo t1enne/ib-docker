@@ -48,12 +48,15 @@ def _is_all_non_trading(gap_start: datetime, gap_end: datetime) -> bool:
 
     For partial days at the boundaries:
     - Start day: ignored if gap starts after 18:00 (market already closed)
-    - End day: ignored if gap ends before 09:30 (market hasn't opened yet)
+    - End day: ignored if gap ends before 16:00 (market hasn't closed —
+      incomplete trading day at the forward edge, e.g. last close → now)
 
     Examples:
       Fri 19:00 → Sun 10:23:  Sat+Sun are non-trading → True
       Fri 10:00 → Sun 10:23:  Fri is a trading day, gap starts during market → False
-      Fri 19:00 → Mon 10:23:  Mon is a trading day → False
+      Fri 19:00 → Mon 10:23:  Mon is a trading day → False (Mon still in session)
+      Fri 19:00 → Mon 16:30:  Mon closed → False (Mon is a trading day)
+      Fri 19:00 → Mon 15:00:  Mon hasn't closed → Mon skipped → True
     """
     d = gap_start.date()
     end = gap_end.date()
@@ -63,8 +66,8 @@ def _is_all_non_trading(gap_start: datetime, gap_end: datetime) -> bool:
         if d == gap_start.date() and gap_start.hour >= 18:
             d += timedelta(days=1)
             continue
-        # Skip end day if gap ends before market open
-        if d == gap_end.date() and gap_end.hour < 9:
+        # Skip end day if gap ends before market close — incomplete day, no data to fetch
+        if d == gap_end.date() and gap_end.hour < 16:
             d += timedelta(days=1)
             continue
         if not is_non_trading_day(dt):

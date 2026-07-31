@@ -63,7 +63,8 @@ def _open_position(
     # Generate position_id from signal if provided, else auto-generate
     pid = signal.position_id or f"{signal.symbol}_{fill.timestamp.timestamp()}"
 
-    # Create position — SL/TP from signal, None if not set
+    # Create position — SL/TP from signal, None if not set.
+    # Mark explicit so risk module doesn't override signal-provided levels.
     position = Position(
         symbol=signal.symbol,
         qty=qty,
@@ -74,6 +75,8 @@ def _open_position(
         last_price=fill.executed_price,
         type=signal.action,
         position_id=pid,
+        sl_explicit=signal.stop_loss is not None,
+        tp_explicit=signal.take_profit is not None,
     )
 
     # Calculate new cash
@@ -313,6 +316,8 @@ def _rebalance_position(
         last_price=fill.executed_price,
         type=target.type,
         position_id=new_pid,
+        sl_explicit=target.sl_explicit,
+        tp_explicit=target.tp_explicit,
     )
 
     new_trade = Trade(
@@ -394,6 +399,8 @@ def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
                 last_price=tick.close,
                 type=pos.type,
                 position_id=pos.position_id,
+                sl_explicit=pos.sl_explicit,
+                tp_explicit=pos.tp_explicit,
             )
             for pos in symbol_positions
         )

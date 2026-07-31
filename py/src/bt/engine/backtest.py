@@ -355,12 +355,16 @@ def _check_risk(
     exec_params: ExecutionParams,
     risk_config: RiskConfig,
 ) -> BacktestState:
-    """Stage 8: Check stop-loss / take-profit and execute risk closes."""
-    risk_events = risk_handler.check_risk(state.portfolio, candle, risk_config)
-    if not risk_events:
-        return state
+    """Stage 8: Check stop-loss / take-profit and execute risk closes.
 
-    portfolio = state.portfolio
+    risk_handler.check_risk returns (events, updated_portfolio). The updated
+    portfolio carries persisted SL/TP levels (initialised or trailed) even
+    when no risk event fires.
+    """
+    risk_events, portfolio = risk_handler.check_risk(
+        state.portfolio, candle, risk_config
+    )
+
     for event in risk_events:
         fill = exec_handler.execute_risk_event(event, candle, exec_params)
         portfolio = exec_handler.apply_fill(portfolio, fill)

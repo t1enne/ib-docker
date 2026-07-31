@@ -148,7 +148,7 @@ class RiskCheckFn(Protocol):
         portfolio: PortfolioState,
         tick: Candle,
         risk_config: RiskConfig,
-    ) -> Tuple[StateRiskEvent, ...]: ...
+    ) -> Tuple[Tuple[StateRiskEvent, ...], PortfolioState]: ...
 
 
 class ZScoreFn(Protocol):

@@ -3,6 +3,26 @@
 > AI coding agent instructions for this repository.
 > Read this before generating any code.
 
+## Workflow
+
+When implementing a feature or fix:
+
+1. **Understand** — read relevant strategy code, types, and tests. Don't guess.
+2. **Plan** — state approach before writing. If unclear, ask.
+3. **Implement** — minimum code that works. Pure functions, immutable state, full type annotations.
+4. **Test** — every new computation gets a test. Run `make test` before declaring done.
+5. **Verify** — `make check` must pass (lint + format + typecheck + tests).
+
+### Running things
+
+```bash
+uv run ibkr bt run strats/trend.json      # CLI entry point
+make run bt run strats/trend.json          # Make shortcut
+make check                                 # lint + format + typecheck + test
+make test                                  # all tests
+make test-fast                             # quick tests
+```
+
 ## Language & Toolchain
 
 - **Python 3.14+** (required)
@@ -11,6 +31,7 @@
 - **Formatter:** `ruff format`
 - **Test runner:** `pytest` with `pytest-asyncio`
 - **Script Runner:** `make`
+- **CLI binary:** `ibkr` (installed via `uv sync` from `pyproject.toml` entry point)
 
 ## Core Principles
 
@@ -125,7 +146,7 @@ def apply_fill(portfolio: PortfolioState, fill: FillEvent) -> None:
 - **`replace()` for state updates.** Use `dataclasses.replace()` when modifying frozen dataclasses.
 - **Return new state, never mutate.** Every function in the pipeline takes state in, returns new state out.
 - **Compose functions,** don't chain methods. The backtest engine composes `model_updater_fn → strategy_fn → exec_handler → risk_handler`.
-- **Protocol-based injection** over class inheritance. Strategy logic doesn't extend a base class; it implements `StrategyProtocol` or `StrategyFn`.
+- **Protocol-based injection** over class inheritance. Strategy logic is a plain module with `on_candle()`. The engine type-annotates it as `StrategyFn`.
 - **No side effects in pure functions.** I/O (DB, HTTP, file) belongs at the edges.
 - **Use `merge_bt_state`** for partial state updates — it's the established pattern.
 

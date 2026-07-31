@@ -1,310 +1,162 @@
 # IBKR PY — Composable Quantitative Trading Toolkit
 
-A modular CLI toolkit for quantitative trading: data synchronization, indicator computation, statistical models, and a functional backtesting engine. Configure strategies in JSON, run them from the terminal, and iterate fast.
+Modular CLI toolkit for quantitative trading: data synchronization, indicator computation, statistical models, and a functional backtesting engine. Configure strategies in JSON, run from the terminal, iterate fast.
 
 ## Quickstart
 
 ```bash
 uv sync
-uv run py bt run strats/trend.json
+uv run ibkr bt run strats/trend.json
 make run bt run strats/trend.json   # same, via Make shortcut
-make exec bt run strats/trend.json  # alias for the same
 ```
 
-`make run` (or `make exec`) passes all args straight to the CLI. With no args, it shows available commands:
+`make run` with no args shows available commands:
 
 ```bash
-make run                           # → prints make help
-make run bt --help                 # → prints Click help for bt subcommand
+make run bt -- --help              # Click help for backtesting subgroup
 ```
 
-## Core Concepts
+## Architecture
 
-### Functional Pipeline
+Pure functions + immutable state. No classes, no side effects in the hot path.
 
-Every component is a **pure function** operating on immutable state. The backtest loop composes these functions:
+### Pipeline (per candle)
 
 ```
-Data → model_updater → strategy → execution → portfolio → risk → mark-to-market
+append_candle → update_model → execute_pending → generate_signals
+     → execute_pending (same-bar) → check_risk → mark_to_market
 ```
 
-- **Pure functions** — same inputs, same outputs. No side effects.
-- **Immutable state** — `dataclasses.replace()` returns new state, never mutates.
-- **Protocol-based injection** — components implement `StrategyFn`, `ExecutionFn`, `RiskCheckFn` etc., not base classes.
+- Signals fill at next bar's open (fill_at_next_open) or same bar (immediate).
+- Risk checks (stop-loss / take-profit) run after same-bar fills, so they always see the post-rebalance position.
+- Higher-timeframe candles accumulate alongside base candles; HTF-only candles skip the pipeline.
 
-### Code Organization
+### Composition
+
+Strategies are plain modules with `on_candle(state, candle, params) → list[TradeSignal]`.
+Handlers (`ExecutionHandler`, `RiskHandler`) are dataclasses wrapping injectable functions.
+Auto-discovery scans `src/bt/strategies/` — any `.py` with `STRATEGY_TYPE` + `on_candle()` is registered.
 
 ```
 src/
 ├── data/             ← IBKR market data sync, DB, resampling
-│   ├── ibkr/         ← IBKR REST API client (candles, lookup, rate limiter)
-│   ├── sync.py       ← sync_data(), preview_sync()
-│   ├── db.py         ← SQLite query helpers
-│   ├── resample.py   ← OHLCV resampling
-│   └── cli.py        ← `data` CLI group
-├── indicators/       ← Signal processing models
-│   ├── ta.py         ← Technical indicators: EMA, RSI, MACD, ATR, ADX, MFI, LSMA...
-│   ├── kalman/       ← Kalman filter (univariate + pairs)
-│   └── hmm/          ← Hidden Markov Model regime detection
+├── indicators/       ← TA, Kalman filters, HMM regime detection
 ├── bt/               ← Backtesting engine
-│   ├── engine/       ← Backtest loop (pure functional)
-│   ├── strategies/   ← Strategy implementations (6 built-in)
-│   ├── state/        ← Immutable dataclasses
-│   ├── types.py      ← Protocols, StrategyConfig
+│   ├── engine/       ← Backtest loop (pure functional), candle store
+│   ├── strategies/   ← Strategy implementations (auto-discovered)
+│   ├── state/        ← Immutable dataclasses + factories
+│   ├── types.py      ← StrategyConfig, EngineWindow, Protocol types
 │   ├── portfolio/    ← Position sizing, fill application, mark-to-market
 │   ├── execution/    ← Signal → fill with slippage/spread
 │   ├── risk/         ← Stop-loss/take-profit checks
+│   ├── regime/       ← Regime detection (HMM, trend, volatility)
 │   ├── metrics.py    ← Sharpe, Sortino, Calmar, drawdowns
 │   └── data_feed/    ← Load/sync OHLCV candles
-├── utils.py          ← Shared utilities (DB read, z-score, env loader)
-└── main.py           ← CLI entry point
-```
-
-## Running a Backtest
-
-### 1. Define a Strategy (JSON)
-
-```json
-{
-  "name": "ema-cross",
-  "training_start": "2024-01-01",
-  "training_end": "2024-01-02",
-  "trading_start": "2024-01-02",
-  "trading_end": "2025-01-01",
-  "commission": 0.1,
-  "initial_capital": 10000,
-  "position_size": 0.2,
-  "strategy_type": "ema_cross",
-  "stop_loss": 0.2,
-  "take_profit": 0.5,
-  "bar": "1h",
-  "htf": ["4h"],
-  "model_params": {},
-  "strategy_params": {
-    "fast": 9,
-    "slow": 30
-  },
-  "symbols": ["COIN"]
-}
-```
-
-### 2. Run
-
-```bash
-uv run py bt run strats/my_strat.json
-# or via Make shortcut:
-make run bt run strats/my_strat.json
-```
-
-Output: equity curve summary, trade log, metrics table (Sharpe, Sortino, Calmar, max drawdown, win rate, etc.).
-
-For JSON output:
-
-```bash
-uv run py bt run strats/my_strat.json --format jsonl
-make run bt run strats/my_strat.json --format jsonl
-```
-
-## Built-in Strategies
-
-Strategies are auto-discovered from `src/bt/strategies/`. Each `.py` file with a `STRATEGY_TYPE` and `on_candle()` registers itself — no manual wiring.
-
-| Strategy                | `strategy_type`                              | File                          | Description                                                            |
-| ----------------------- | -------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------- |
-| EMA Cross               | `ema_cross`                                  | `ema_cross.py`                | EMA fast/slow cross with ranging detection (ATR + EMA convergence)     |
-| Trend Following         | `trend_following`                            | `trend_following.py`          | LSMA+EMA with DMI, MFI, volume confirmation, HTF alignment             |
-| Breakout EMA            | `breakout_ema`                               | `breakout_ema.py`             | Squeeze detection → breakout with volume spike → trend ride            |
-| Pairs Trading           | `pnd`                                        | `pairs_trading_functional.py` | Z-score mean reversion on pairs with OLS hedge ratio                   |
-| Vol Extension Pullback  | `volatility_expansion_pullback_continuation` | `vol_extension_pullback.py`   | ATR compression → breakout → pullback entry with continuation triggers |
-| Yesterday High Breakout | `yesterday_high_breakout`                    | `yesterday_high_breakout.py`  | Breaks previous day's high with gap entry and trailing stop            |
-
-## Writing a Custom Strategy
-
-A strategy module needs one function: `on_candle()`.
-
-```python
-# src/bt/strategies/my_strat.py
-
-STRATEGY_TYPE = "my_strat"
-
-import src.indicators.ta as ta
-from src.bt.strategies.utils import open, close
-from src.bt.state import BacktestState, TradeSignal, Candle, ActionType
-
-def on_candle(
-    state: BacktestState, candle: Candle, strategy_params: dict
-) -> list[TradeSignal]:
-    """Called on every candle. Return signals."""
-    symbol = candle.symbol
-    position = state.portfolio.positions.get(symbol)
-    candles = state.candles[symbol]
-    closes = candles["close"]
-
-    ema_fast = ta.ema(closes, 9).iloc[-1]
-    ema_slow = ta.ema(closes, 21).iloc[-1]
-
-    # No position → check entry
-    if not position and ema_fast > ema_slow:
-        return open(candle, ActionType.long, "golden cross")
-
-    # In position → check exit
-    if position and ema_fast < ema_slow:
-        return close(candle, position, "death cross")
-
-    return []
-```
-
-**That's it.** Drop your `.py` file in `src/bt/strategies/`, define `STRATEGY_TYPE` and `on_candle()`, and the engine finds it automatically — no registry edits needed.
-
-### Available State in `on_candle()`
-
-```python
-state.portfolio                # PortfolioState: cash, positions, trades, equity_curve
-state.portfolio.positions      # Dict[str, Position] — open positions by symbol
-state.candles                  # Dict[str, pd.DataFrame] — OHLCV per symbol
-state.model_state.z_score      # Current z-score (pairs strategies)
-state.model_state.price_buffers# Aligned {sym: close} pairs
-state.htf_data                 # Dict[str, pd.DataFrame] — higher-timeframe bars
-state.timestamp                # Current timestamp
-```
-
-### Available Indicators (`src.indicators.ta`) `
-
-`ema`, `sma`, `rsi`, `atr`, `bollinger_bands`, `macd`, `stochastic`, `momentum`, `volatility`, `vwma`, `obv`, `mfi`, `lsma`, `plus_di`, `minus_di`, `adx`
-
-### Helper Utilities (`src/bt/strategies/utils`)
-
-```python
-open(candle, ActionType.long, "reason", hedge=1.0)    # → [TradeSignal]
-close(candle, position, "reason")                       # → [TradeSignal]
-htf_candles(state, "4h", tick)                          # → pd.DataFrame (no lookahead)
-```
-
-## Higher Timeframe Data
-
-Strategies can access resampled bars from higher timeframes without lookahead bias. Enable in config:
-
-```json
-{"htf": ["4h", "1D"]}
-```
-
-Then use in `on_candle()`:
-
-```python
-htf = htf_candles(state, "4h", candle)
-if not htf.empty:
-    htf_ema = ta.ema(htf["close"], 20).iloc[-1]
-```
-
-Only completed HTF bars (timestamp ≤ current candle) are returned — no forward-looking.
-
-## Key Types
-
-### `StrategyConfig`
-
-```python
-@dataclass
-class StrategyConfig:
-    name: str                    # Strategy name
-    strategy_type: str           # Matches init_strat() key
-    symbols: list[str]           # Tickers to trade
-    stop_loss: float             # % stop loss
-    take_profit: float           # % take profit
-    initial_capital: float       # Starting capital
-    position_size: float         # % of capital per trade
-    commission: float            # Fixed commission per trade
-    training_start: str          # ISO date
-    training_end: str
-    trading_start: str
-    trading_end: str
-    bar: str                     # "1h", "1D", etc.
-    strategy_params: dict        # Passed to on_candle()
-    model_params: dict           # For model updaters
-    htf: list[str]               # Higher timeframes (["4h", "1D"])
-    rolling_window_size: int | None
-```
-
-### `PortfolioResult`
-
-```python
-@dataclass(frozen=True)
-class PortfolioResult:
-    total_return: float
-    sharpe_ratio: float
-    trades: tuple[Trade, ...]
-    equity_curve: pd.Series
-    annual_return: float
-    annual_volatility: float
-    calmar_ratio: float
-    sortino_ratio: float
-    max_drawdown: float
-    alpha: float
-    beta: float
-    skewness: float
-    kurtosis: float
-    stability: float
-    omega_ratio: float
-```
-
-### Programmatic API
-
-```python
-import asyncio
-from src.bt import load_strategy, Backtest, run, get_backtest_results_analysis
-from src.bt.data_feed import load_candles
-from src.bt.strategies import init_strat
-
-config = load_strategy("strats/trend.json")
-bt = Backtest(config)
-df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bar)
-strat_mod = init_strat(config.strategy_type)
-results = run(bt, df, strat_mod=strat_mod)
-print(get_backtest_results_analysis(results.pf))
+├── utils.py          ← Shared utilities
+└── main.py           ← CLI entry point (Click)
 ```
 
 ## CLI Reference
 
 ```bash
-# Run a backtest
-uv run py bt run <strategy.json> [--format jsonl]
-make run bt run <strategy.json>          # same, via Make shortcut
-make exec bt run <strategy.json>         # alias for make run
+# Backtesting
+uv run ibkr bt run <strategy.json> [--format jsonl]
+uv run ibkr bt analyze <strategy.json>
 
-# Analyze a strategy (detailed JSON metrics)
-uv run py bt analyze <strategy.json>
-make run bt analyze <strategy.json>      # same
-
-# Data commands
-uv run py data query AAPL --from 2024-01-01   # Fetch candles
-make run data query AAPL --from 2024-01-01     # same
+# Data
+uv run ibkr data query AAPL --from 2024-01-01
 
 # Pipe workflows
-uv run py data query AAPL --from 2024-01-01 | uv run py bt run strategy.json
+uv run ibkr data query AAPL --from 2024-01-01 | uv run ibkr bt run strategy.json
 ```
 
-> **Tip:** `make run` / `make exec` passes all extra words as args to the CLI. No `--` separator needed for most flags. If Make itself intercepts a flag (e.g. `-B`, `--debug`), use `make run help` to get Click's help instead. With no args, prints available commands.
+All commands usable via `make run <subcommand> <args>`.
 
 ## Toolchain
 
-- **Python 3.14+** required
-- **`uv`** — package management
-- **`ty`** — type checking
-- **`ruff format`** — formatting
-- **`pytest`** — testing (`uv run pytest`)
-
-## Testing
+| Tool                        | Purpose            |
+| --------------------------- | ------------------ |
+| Python 3.14+                | Runtime            |
+| `uv`                        | Package management |
+| `ty`                        | Type checking      |
+| `ruff format`               | Formatting         |
+| `pytest` + `pytest-asyncio` | Testing            |
+| `make`                      | Script runner      |
 
 ```bash
-make check                                    # lint + format + typecheck + tests
-make test                                     # all tests
-make test-fast                                # quick tests (no header noise)
-uv run pytest src/bt/engine/tests/ -v          # specific module
+make check       # lint + format + typecheck + tests
+make test        # all tests
+make test-fast   # quick tests
 ```
 
-Tests use `pytest-asyncio` for async and `respx` for HTTP mocking. Pure function tests are the norm — given fixed inputs, backtest results are deterministic.
+## Key Types
+
+```python
+# StrategyConfig — loaded from JSON via load_strategy()
+@dataclass
+class StrategyConfig:
+    name: str; strategy_type: str; symbols: list[str]
+    stop_loss: float; take_profit: float
+    initial_capital: float; position_size: float; commission: float
+    training_start: str; training_end: str
+    trading_start: str; trading_end: str
+    bars: list[str]; strategy_params: dict; model_params: dict
+    model_updater: dict | bool; rolling_window_size: int | None
+    hmm_floating_window: int | None; hmm_retrain_interval: int | None
+    benchmark_symbols: list[str]
+
+# BacktestResults — returned by run()
+@dataclass(frozen=True)
+class BacktestResults:
+    pf: PortfolioResult         # all metrics + trades + equity curve
+    data: dict                  # candles dict keyed by symbol
+    final_state: BacktestState  # full state at end of backtest
+    benchmark_curves: dict[str, pd.Series]
+```
+
+### Programmatic API
+
+```python
+from src.bt import load_strategy, Backtest, run, get_backtest_results_analysis
+from src.bt.data_feed import load_candles
+from src.bt.strategies import init_strat
+
+config = load_strategy("strats/momentum_regime.json")
+bt = Backtest(config)
+df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bars[0])
+results = run(bt, df, strat_mod=init_strat(config.strategy_type))
+print(get_backtest_results_analysis(results.pf))
+```
+
+## IBKR REST API Client
+
+The `ib-rest-api-client` package is a local dependency (`../ib-rest-api-client`), generated from `openapi.spec.json` (IBKR's OpenAPI spec).
+
+### Setup
+
+Run the Gateway login script before any data sync or API call:
+
+```bash
+export IBKR_USERNAME=...
+export IBKR_PASSWORD=...
+export TRADING_MODE=paper          # or "live"
+
+uv run python scripts/login_ibkr.py
+```
+
+This logs into IBKR Client Portal Gateway via Playwright. The Gateway must be running (see `../client-portal/`).
+
+### Regenerating the Client
+
+After an API spec update:
+
+```bash
+cd ../ib-rest-api-client
+uvx openapi-python-client generate --path ../py/openapi.spec.json --output-dir .
+cd ../py && uv sync
+```
 
 ## Resources
 
-- **IBKR REST API Client**: `../ib-rest-api-client` (local dependency, path-configured in `pyproject.toml`)
-- **Data sync**: `src/data/` — IBKR candle download, DB queries, resampling
-- **Indicators**: `src/indicators/` — Technical indicators (`ta.py`), Kalman filters (`kalman/`), Hidden Markov Models (`hmm/`)
+- **Strategy authoring & backtesting workflow**: [SKILL.md](SKILL.md)
+- **Coding standards for contributors**: [AGENTS.md](AGENTS.md)

@@ -14,9 +14,9 @@ help:
 	@echo "  make typecheck        — Ty check"
 	@echo ""
 	@echo "CLI commands via make run/exec:"
-	@echo "  make run bt run <yaml>           — Run backtest"
-	@echo "  make run bt run <yaml> --format jsonl  — JSON output"
-	@echo "  make run bt analyze <yaml>       — Analyze strategy"
+	@echo "  make run bt run <json>           — Run backtest"
+	@echo "  make run bt run <json> -- --format jsonl  — JSON output"
+	@echo "  make run bt analyze <json>       — Analyze strategy"
 	@echo "  make run data query <sym>        — Query candles"
 	@echo "  make run data dl <sym>...        — Download candles"
 	@echo "  make run bt --help               — Click-style help"
@@ -41,14 +41,14 @@ check: lint format typecheck test-fast
 
 run:
 	@if [ -n "$(ARGS)" ]; then \
-		uv run main.py $(ARGS); \
+		uv run ibkr $(ARGS); \
 	else \
-		uv run main.py $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS)); \
+		uv run ibkr $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS)); \
 	fi
 
 exec: run
 
 # Swallow extra words passed after make run so Make doesn't error.
-# e.g. make run bt run strat.yaml → args consumed by 'run'; 'bt'/'run'/'strat.yaml' matched here.
+# e.g. make run bt run strat.json → args consumed by 'run'; 'bt'/'run'/'strat.json' matched here.
 %::
 	@true

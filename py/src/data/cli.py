@@ -182,23 +182,13 @@ def query_cmd(
 
 # ── Universe file helpers ────────────────────────────────────
 
-_UNIVERSE_DIR = Path(__file__).resolve().parent.parent.parent / "universes"
-
-
-def _list_universes() -> list[str]:
-    """Return list of available universe names (stem of each .json file)."""
-    if not _UNIVERSE_DIR.is_dir():
-        return []
-    return sorted(p.stem for p in _UNIVERSE_DIR.glob("*.json") if p.is_file())
-
 
 def _resolve_symbol_list(
     symbols: tuple[str, ...], universe: Optional[str]
 ) -> list[str]:
     """Resolve CLI symbol args — universe name or inline list."""
     if universe:
-        path = _UNIVERSE_DIR / f"{universe}.json"
-        return load_universe_config(str(path)).symbols
+        return load_universe_config(universe).symbols
     if symbols:
         return list(symbols)
     raise click.UsageError("provide SYMBOLS or --universe/-U")

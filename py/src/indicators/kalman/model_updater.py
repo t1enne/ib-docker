@@ -142,9 +142,7 @@ def create_kalman_pairs_updater(
         closes1 = cast(pd.Series, df1["close"])
         closes2 = cast(pd.Series, df2["close"])
 
-        aligned = pd.concat(
-            [closes1.rename("a"), closes2.rename("b")], axis=1
-        ).dropna()
+        aligned = pd.concat([closes1.rename("a"), closes2.rename("b")], axis=1).dropna()
         if len(aligned) < warmup_bars:
             return state
 

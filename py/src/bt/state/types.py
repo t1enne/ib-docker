@@ -215,7 +215,9 @@ class ModelState:
 
     # Kalman pairs-trading model outputs
     kalman_spread: Optional[float] = None  # raw innovation (log-space mispricing)
-    kalman_z_score: Optional[float] = None  # rolling z-score of Kalman spread (tradable ~±2)
+    kalman_z_score: Optional[float] = (
+        None  # rolling z-score of Kalman spread (tradable ~±2)
+    )
     kalman_beta: Optional[float] = None  # current hedge ratio (log-space elasticity)
     kalman_alpha: Optional[float] = None  # current intercept
     kalman_n_steps: int = 0  # Kalman observations processed (for warmup gating)

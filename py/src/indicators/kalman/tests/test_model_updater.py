@@ -230,4 +230,6 @@ def test_updater_zscore_is_tradable():
     # Rolling z-score should be tradable magnitude, not raw t-stat (~0.005).
     # Synthetic cointegrated data is tight; real pairs produce > ±1 regularly.
     max_abs = max(abs(v) for v in z_vals)
-    assert max_abs > 0.5, f"max |z| = {max_abs:.4f}, expected > 0.5 (tradable, not tiny t-stat)"
+    assert max_abs > 0.5, (
+        f"max |z| = {max_abs:.4f}, expected > 0.5 (tradable, not tiny t-stat)"
+    )

@@ -15,8 +15,10 @@ tradable signal in the ±2–3 range.
 Entry: |z| > z_entry  → short overpriced (z>0) or long underpriced (z<0)
 Exit:  |z| < z_exit   → convergence, OR divergence stop at |z| > z_exit_stop
 
-Dollar-neutral pairs trading. Pair resolved via strategy_params.pair or
-auto-detected from first two symbols in state.candles.
+Beta-weighted pairs trading. Each leg is sized proportionally to the
+Kalman hedge ratio β so that notional exposure of leg2 ≈ β × leg1.
+Pair resolved via strategy_params.pair or auto-detected from first two
+symbols in state.candles.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from typing import cast
 
 import pandas as pd
 
+from src.bt.regime.types import TREND_INT_TO_LABEL
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 
@@ -82,13 +85,18 @@ def _resolve_pair(state: BacktestState, params: Params) -> tuple[str, str] | Non
     return None
 
 
-def _close_all(
-    state: BacktestState, candle: Candle, reason: str
+def _close_pair(
+    state: BacktestState,
+    candle: Candle,
+    s1: str,
+    s2: str,
+    reason: str,
+    z: float | None = None,
 ) -> list[TradeSignal]:
-    """Close all open positions."""
+    """Close any open positions for the pair, scoped to s1 and s2."""
     signals: list[TradeSignal] = []
-    for sym, pos_tup in state.portfolio.positions.items():
-        for pos in pos_tup:
+    for sym in (s1, s2):
+        for pos in state.portfolio.positions.get(sym, ()):
             signals.append(
                 TradeSignal(
                     action=ActionType.close,
@@ -98,6 +106,7 @@ def _close_all(
                     qty=abs(pos.qty),
                     position_id=pos.position_id,
                     reason=reason,
+                    z_score=z,
                 )
             )
     return signals
@@ -135,15 +144,13 @@ def on_candle(
     # ---- get prices for sizing ----
     df1 = state.candles.get((s1, interval))
     df2 = state.candles.get((s2, interval))
-    if df1 is None or df2 is None or len(df1) < 2 or len(df2) < 2:
+    if df1 is None or df2 is None:
         return []
 
     closes1 = cast(pd.Series, df1["close"])
     closes2 = cast(pd.Series, df2["close"])
-    aligned = pd.concat(
-        [closes1.rename("a"), closes2.rename("b")], axis=1
-    ).dropna()
-    if len(aligned) < params.warmup_bars:
+    aligned = pd.concat([closes1.rename("a"), closes2.rename("b")], axis=1).dropna()
+    if len(aligned) == 0:
         return []
 
     p1 = float(aligned["a"].iloc[-1])
@@ -153,11 +160,9 @@ def on_candle(
     if params.regime_gate:
         trend = state.model_state.current_trend
         if trend is not None:
-            from src.bt.regime.types import TREND_INT_TO_LABEL
-
             label = TREND_INT_TO_LABEL.get(trend)
             if label == "BEAR":
-                return _close_all(state, candle, "[BEAR] regime")
+                return _close_pair(state, candle, s1, s2, "[BEAR] regime", z)
 
     # ---- current positions ----
     pos1 = state.portfolio.positions.get(s1, ())
@@ -168,11 +173,13 @@ def on_candle(
     if has_pos:
         # Divergence stop
         if abs(z) > params.z_exit_stop:
-            return _close_all(
-                state, candle, f"kalman divergence stop z={z:.2f}"
+            return _close_pair(
+                state, candle, s1, s2, f"kalman divergence stop z={z:.2f}", z
             )
 
-        # Convergence exit
+        # Convergence exit.
+        # z_exit > 0  → absolute threshold: exit when |z| < z_exit
+        # z_exit <= 0 → zero-cross exit: exit when z crosses zero
         if params.z_exit > 0:
             exit_trigger = abs(z) < params.z_exit
             reason = f"kalman convergence z={z:.2f}"
@@ -183,7 +190,7 @@ def on_candle(
             reason = f"kalman zero-cross z={z:.2f}"
 
         if exit_trigger:
-            return _close_all(state, candle, reason)
+            return _close_pair(state, candle, s1, s2, reason, z)
 
     # ---- Entry ----
     if not has_pos and abs(z) > params.z_entry:
@@ -210,6 +217,8 @@ def on_candle(
                 price=p1,
                 qty=qty1,
                 reason=f"kalman({direction}) z={z:.1f} β={beta:.2f}",
+                z_score=z,
+                hedge_beta=beta,
             ),
             TradeSignal(
                 action=leg2_action,
@@ -218,6 +227,8 @@ def on_candle(
                 price=p2,
                 qty=qty2,
                 reason=f"kalman({direction}) z={z:.1f} β={beta:.2f}",
+                z_score=z,
+                hedge_beta=beta,
             ),
         ]
 

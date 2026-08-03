@@ -3,21 +3,25 @@
 Candle processing pipeline (per-candle stages, in order):
   _append_candle       – stash every candle (base + HTF) in accumulator
   _update_model        – run model_updater_fn if provided (base only)
-  _execute_pending     – fill any signals queued from prior candles
-  _generate_signals    – run strategy on the last symbol per timestamp
-  _execute_new         – immediately fill signals generated this tick
+  _execute_pending     – fill signals queued for current symbol from prior candles
+  _generate_signals    – run strategy on the last symbol per timestamp,
+                          bucket returned signals by symbol into pending dict
+  _execute_pending     – same-bar: fill same-symbol signals (skip fill_at_next_open)
   _check_risk          – evaluate stop-loss / take-profit
   _mark_to_market      – update position prices and equity curve
 
 Pipeline invariants:
   - Signals execute before risk on the same bar. A rebalance emitted in
-    Stage 6 is applied in Stage 6 before Stage 7 risk check runs, so
+    Stage 4 is filled in Stage 6 before Stage 7 risk check runs, so
     risk events always fire against the post-rebalance position state
     (no stale position_id crashes).
   - Strategies emitting multiple signals for the same symbol in one batch
     must avoid races (e.g. close+reopen): close signals fill at next bar's
     open (Stage 4), open/rebalance fill same-bar (Stage 6), so they never
     collide on the same pass.
+  - Signals are bucketed by symbol into a dict. _execute_pending reads
+    directly from the current symbol's bucket — no O(N) scan over all
+    pending signals.
 
 Usage:
     from src.bt.engine.backtest import Backtest, candle_generator, run_backtest
@@ -36,7 +40,7 @@ from src.bt.engine.candle_store import CandleStore, CandleRows
 from src.bt.engine.utils import candle_generator, merge_bt_state
 
 from dataclasses import dataclass, field, replace
-from typing import Generator, Tuple, Optional, Any, List, Callable
+from typing import Generator, Tuple, Optional, Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -291,6 +295,16 @@ def _get_bench_curves(config: StrategyConfig, bt: Backtest):
     return bm_curves
 
 
+def _bucket_signals(
+    signals: tuple[TradeSignal, ...],
+) -> dict[str, tuple[TradeSignal, ...]]:
+    """Bucket flat signal list by symbol."""
+    buckets: dict[str, list[TradeSignal]] = {}
+    for s in signals:
+        buckets.setdefault(s.symbol, []).append(s)
+    return {sym: tuple(v) for sym, v in buckets.items()}
+
+
 def _execute_pending(
     state: BacktestState,
     candle: Candle,
@@ -299,28 +313,33 @@ def _execute_pending(
     exec_params: ExecutionParams,
     skip_next_open: bool = False,
 ) -> BacktestState:
-    """Stage 5/7: Execute all pending signals for the current symbol.
+    """Stage 4/6: Execute pending signals for the current symbol.
 
-    When skip_next_open is True (Stage 7, same-bar), signals with
-    fill_at_next_open=True are deferred to the next bar's Stage 5 call.
+    Reads from state.pending_signals[symbol] directly — no filtering needed.
+    When skip_next_open is True (Stage 6, same-bar), signals with
+    fill_at_next_open=True are deferred to the next bar's Stage 4 call.
     """
-    if not state.pending_signals:
+    symbol = candle.symbol
+    queued = state.pending_signals.get(symbol, ())
+    if not queued:
         return state
 
     portfolio = state.portfolio
-    remaining: List[TradeSignal] = []
-    for signal in state.pending_signals:
-        if signal.symbol != candle.symbol:
-            remaining.append(signal)
-            continue
+    deferred: list[TradeSignal] = []
+    for signal in queued:
         if skip_next_open and signal.fill_at_next_open:
-            remaining.append(signal)
+            deferred.append(signal)
             continue
-
         fill = exec_handler.execute_signal(signal, candle, exec_params)
         portfolio = exec_handler.apply_fill(portfolio, fill)
 
-    return merge_bt_state(state, dict(portfolio=portfolio, pending_signals=remaining))
+    new_pending = dict(state.pending_signals)
+    if deferred:
+        new_pending[symbol] = tuple(deferred)
+    else:
+        new_pending.pop(symbol, None)
+
+    return merge_bt_state(state, dict(portfolio=portfolio, pending_signals=new_pending))
 
 
 def _generate_signals(
@@ -332,7 +351,7 @@ def _generate_signals(
     can_trade: bool,
     rows: CandleRows,
 ) -> BacktestState:
-    """Run strategy on last symbol per timestamp only."""
+    """Run strategy on last symbol per timestamp, bucket signals by symbol."""
     if not (can_trade and strategy_fn and candle.symbol == last_symbol):
         return state
 
@@ -343,7 +362,12 @@ def _generate_signals(
     if not new_signals:
         return state
 
-    pending = state.pending_signals + list(new_signals)
+    # Merge into existing pending dict — signals for same symbol accumulate
+    pending = dict(state.pending_signals)
+    for sym, sigs in _bucket_signals(tuple(new_signals)).items():
+        existing = pending.get(sym, ())
+        pending[sym] = existing + sigs
+
     return merge_bt_state(state, dict(pending_signals=pending))
 
 
@@ -492,7 +516,7 @@ def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestSta
         state,
         dict(
             portfolio=portfolio,
-            pending_signals=[],
+            pending_signals={},
             risk_events=(),
         ),
     )

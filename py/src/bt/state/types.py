@@ -231,7 +231,7 @@ class BacktestState:
 
     portfolio: PortfolioState
     timestamp: Optional[pd.Timestamp]
-    pending_signals: List[TradeSignal]
+    pending_signals: Dict[str, Tuple[TradeSignal, ...]]  # symbol -> queued signals
     model_state: ModelState
     risk_events: Tuple[Any, ...]  # RiskEvent tuple
     candles: CandleStore = field(default_factory=lambda: CandleStore({}))

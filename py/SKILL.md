@@ -60,10 +60,13 @@ def on_candle(
 
 - `state.portfolio` — `PortfolioState` with `.cash`, `.positions` (dict), `.trades`, `.equity_curve`
 - `state.portfolio.positions.get(symbol)` — check if already in a position
-- `state.candles[symbol]` — `pd.DataFrame` of OHLCV bars for the symbol
+- `state.candles` — `CandleStore` (Mapping keyed by `(symbol, interval)`), supports:
+  - `state.candles[(sym, interval)]` — `pd.DataFrame` of OHLCV bars (cursor-truncated, lookahead-safe)
+  - `state.candles.get((sym, interval))` — same, but returns `None` if missing
+  - `state.candles.latest(sym, interval)` — O(1) latest close (`float | None`)
+  - `state.candles.count(sym, interval)` — O(1) bar count (`int`)
 - `state.model_state.z_score` — current z-score (pairs strategies)
 - `state.model_state.price_buffers` — aligned `{sym: close}` dicts per tick
-- `state.htf_data` — dict of higher-timeframe DataFrames keyed by interval string (e.g., `"4h"`)
 - `state.timestamp` — current `pd.Timestamp`
 
 **Available indicators** (`from src.indicators.ta import ...`) :
@@ -79,7 +82,16 @@ htf_candles(state, "4h", candle)                        # → pd.DataFrame (look
 
 **HTF access pattern:**
 
+HTF candles accumulate in `state.candles` keyed by their interval. Use the same
+CandleStore interface — no separate `state.htf_data` dict:
+
 ```python
+# Direct CandleStore access (preferred — zero-function-call overhead)
+htf_df = state.candles.get((candle.symbol, "4h"))
+if htf_df is not None and len(htf_df) >= 2:
+    htf_ema = ta.ema(htf_df["close"], 20).iloc[-1]
+
+# Or via the helper (lookahead-safe wrapper)
 htf = htf_candles(state, "4h", candle)
 if not htf.empty:
     htf_close = htf["close"]
@@ -218,7 +230,7 @@ else:
 
 ### Use htf_candles() for multi-timeframe
 
-Don't access `state.htf_data` directly — use `htf_candles(state, freq, tick)` which filters completed buckets. Direct access risks lookahead bias.
+Don't access `state.model_state.resample_cache` directly — it's internal accumulator state, not lookahead-safe. Use `state.candles.get((sym, freq))` or `htf_candles(state, freq, tick)` instead.
 
 ## Testing a Strategy
 
@@ -234,8 +246,8 @@ uv run pytest src/bt/risk/tests/ -v
 
 - **Data availability**: not all symbols in `universes/*.json` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run ibkr data query <SYMBOL>` (or `make run data query <SYMBOL>`).
 - **Bar size**: strategies expect the bar size in config to match available data. Most data is `1h`.
-- **HTF lookahead**: `htf_candles()` is safe. Direct `state.htf_data[freq]` is not — it contains all bars including those after current tick.
-- **Multiple symbols**: the engine iterates all symbols per timestamp. The strategy runs on the last symbol. Entry signals for all symbols work; position management happens per-symbol.
+- **HTF lookahead**: `state.candles.get((sym, freq))` and `htf_candles()` are both safe (cursor-truncated). Direct `state.model_state.resample_cache[freq]` is not — it contains all bars including those after current tick.
+- **Multiple symbols**: the engine iterates all symbols per timestamp. `on_candle` fires only on the last symbol per timestamp (so `state.candles` has all symbols' data). Signals for any symbol are valid — engine routes fills by `signal.symbol`. Pending signals for non-current symbols fill when that symbol's own `_execute_pending` stage runs (same bar cycle, later in the timestamp iteration).
 - **Pairs strategy** (`pnd`): requires exactly 2 symbols. Uses `model_state.price_buffers` for aligned close prices.
 
 ## Module Reference

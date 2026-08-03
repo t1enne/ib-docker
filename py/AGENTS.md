@@ -207,6 +207,99 @@ Strategies are defined in JSON files loaded via `load_strategy()` → `StrategyC
 - Use `pytest-asyncio` for testing async code.
 - Use `respx` for mocking HTTP in async tests.
 
+### 9. Engine Data Flow to `on_candle`
+
+Understanding how the engine feeds data to strategies is critical for writing
+correct multi-symbol and multi-interval strategies.
+
+#### `on_candle` fires once per timestamp
+
+The engine calls `on_candle(state, candle, params)` **only when `candle.symbol`
+is the last symbol** in `config.symbols`. With `["AAPL", "GOOGL", "MSFT"]`,
+the generator yields → AAPL → GOOGL → MSFT per timestamp before moving to the
+next timestamp. `on_candle` fires on MSFT.
+
+**Why:** At that point `state.candles` contains all symbols' data up to the
+current timestamp. If the engine fired on every symbol, the first symbol's
+invocation would see incomplete data (later symbols haven't been appended yet).
+
+#### Parameter reference
+
+- **`state: BacktestState`** — full snapshot (portfolio, model_state, candles, pending_signals)
+- **`candle: Candle`** — the OHLCV bar for the last symbol at current timestamp. Has `.symbol`, `.interval` (`"1h"`, `"4h"`, etc.), `.open`, `.high`, `.low`, `.close`, `.volume`
+- **`params`** — typed dataclass (`StrategyParams` subclass) resolved by `resolve_params(config.strategy_type, config.strategy_params)`; or raw `dict` if no typed params registered
+
+#### CandleStore: `state.candles`
+
+The primary data interface. A `Mapping[(str, str), DataFrame]` keyed by
+`(symbol, interval)`. Backed by a cursor that ensures lookahead safety:
+
+```python
+# DataFrame access (cursor-truncated — safe, no future data)
+df = state.candles[("AAPL", "1h")]              # KeyError if missing
+df = state.candles.get(("AAPL", "4h"))          # None if missing
+
+# O(1) fast path — absolute latest, no DataFrame allocation
+close = state.candles.latest("AAPL", "1h")      # float | None
+n     = state.candles.count("AAPL", "4h")        # int
+```
+
+**Cursor semantics:** The engine calls `state.candles.advance(ts)` before each
+`on_candle` invocation. `__getitem__` and `get` build DataFrames truncated to
+rows ≤ cursor. `latest()` and `count()` ignore the cursor (absolute latest).
+
+**Do NOT** access `state.model_state.resample_cache` directly — it's internal
+accumulator state and not lookahead-safe.
+
+#### HTF (higher-timeframe) access pattern
+
+HTF candles accumulate in `state.candles` keyed by their interval string.
+The candle generator interleaves HTF candles (e.g. `"4h"`) at boundaries
+after all base candles for that timestamp. Use the same CandleStore interface:
+
+```python
+def on_candle(state, candle, params):
+    # Only act on signal-interval bars
+    if candle.interval != params.signal_interval:
+        return []
+
+    # Read HTF trend from the store
+    htf_df = state.candles.get((candle.symbol, "4h"))
+    if htf_df is not None and len(htf_df) >= 2:
+        htf_trend = htf_df["close"].iloc[-1] > htf_df["close"].iloc[-2]
+```
+
+HTF-only candles (where `candle.interval != base_interval`) **skip the
+pipeline** — they are appended to the accumulator but never trigger
+`on_candle`, model updates, signal execution, or risk checks.
+
+#### Multi-symbol strategy pattern
+
+Read cross-sectional data from `state.candles` and emit signals for any symbol.
+Returned signals are bucketed by `signal.symbol` into `state.pending_signals`
+(a `dict[str, tuple[TradeSignal, ...]]`). The engine drains each symbol's bucket
+when that symbol's candle iteration reaches Stage 4.
+
+Key rules:
+
+- Signals for any symbol are valid — the engine dispatches fills by `signal.symbol`.
+- Use `candle.interval` to gate logic when multiple intervals are configured.
+- `_execute_pending` (Stage 4/6) reads directly from `state.pending_signals[symbol]`.
+  No O(N) scan over all pending signals — routing is explicit and O(1).
+- **Same-bar execution:** Signals emitted during `on_candle` for non-current
+  symbols will fill in the same bar cycle — the corresponding symbol's
+  `_execute_pending` stage runs immediately before its `_generate_signals`.
+
+#### `qty` in TradeSignal — two modes
+
+- **`qty = 0` (default):** For `ActionType.long`/`short`, quantity is computed
+  from `config.position_size * portfolio.cash / candle.close`. For `close`,
+  the full position is closed.
+- **`qty > 0`:** When set explicitly (e.g. from `config.position_size` in
+  `sector_mean_reversion`), the execution handler scales it:
+  `qty * portfolio.cash / candle.close`. This is the **base position size**
+  (0.0–1.0), not an absolute share count.
+
 ## Quick Checklist Before Committing Code
 
 - [ ] Run `make check` for formatting, lintin, typechecking and testing

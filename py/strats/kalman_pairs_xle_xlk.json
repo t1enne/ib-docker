@@ -1,0 +1,39 @@
+{
+  "name": "kalman-pairs-xle-xlk",
+  "training_start": "2015-01-01",
+  "training_end": "2016-01-01",
+  "trading_start": "2016-01-02",
+  "trading_end": "2025-01-01",
+  "commission": 0.05,
+  "initial_capital": 100000,
+  "position_size": 0.95,
+  "strategy_type": "kalman_pairs",
+  "stop_loss": 0.05,
+  "take_profit": 0.06,
+  "bars": ["1d"],
+  "model_params": {},
+  "model_updater": {
+    "type": "kalman_pairs",
+    "kalman_pairs": {
+      "process_noise": 0.001,
+      "measurement_noise": 0.01,
+      "ols_warmup": 50,
+      "adaptive": true,
+      "vol_window": 20,
+      "z_window": 80,
+      "warmup_bars": 150
+    }
+  },
+  "benchmark_symbols": ["SPY"],
+  "strategy_params": {
+    "z_entry": 1.2,
+    "z_exit": 0,
+    "z_exit_stop": 2.0,
+    "position_size_pct": 0.50,
+    "stop_loss_pct": 0.05,
+    "take_profit_pct": 0.06,
+    "regime_gate": false,
+    "warmup_bars": 150
+  },
+  "symbols": ["XLE", "XLK"]
+}

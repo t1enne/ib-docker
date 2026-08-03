@@ -1,0 +1,36 @@
+{
+  "name": "kalman-pairs-xle-tlt",
+  "training_start": "2017-11-12",
+  "training_end": "2018-11-12",
+  "trading_start": "2018-11-12",
+  "trading_end": "2025-01-01",
+  "commission": 0.05,
+  "initial_capital": 100000,
+  "position_size": 0.95,
+  "strategy_type": "kalman_pairs",
+  "stop_loss": 0.5,
+  "take_profit": 1.0,
+  "bars": ["1d"],
+  "model_params": {},
+  "model_updater": {
+    "type": "kalman_pairs",
+    "kalman_pairs": {
+      "process_noise": 0.0001,
+      "measurement_noise": 0.001,
+      "ols_warmup": 50,
+      "adaptive": true,
+      "vol_window": 20,
+      "z_window": 60,
+      "warmup_bars": 150
+    }
+  },
+  "benchmark_symbols": ["XLE", "TLT"],
+  "strategy_params": {
+    "z_entry": 2.0,
+    "z_exit": 0.5,
+    "position_size_pct": 0.50,
+    "regime_gate": false,
+    "warmup_bars": 150
+  },
+  "symbols": ["XLE", "TLT"]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "trend-pullback-atr-enhanced",
+  "training_start": "2022-01-02",
+  "training_end": "2022-01-03",
+  "trading_start": "2022-01-03",
+  "trading_end": "2025-01-01",
+  "commission": 0.1,
+  "initial_capital": 50000,
+  "position_size": 0.30,
+  "strategy_type": "trend_pullback_atr_enhanced",
+  "stop_loss": 0.08,
+  "take_profit": 0.20,
+  "bars": ["1d"],
+  "model_params": {},
+  "strategy_params": {
+    "atr_period": 14,
+    "atr_mult": 0.75,
+    "ma_period": 20,
+    "weekly_ma_period": 50,
+    "weekly_return_threshold": -99.0,
+    "risk_pct": 0.02,
+    "warmup_bars": 60,
+    "cooldown_bars": 3,
+    "partial_exit_pct": 0.50,
+    "trail_ma_period": 10
+  },
+  "symbols": ["SPY", "GLD", "QQQ"]
+}

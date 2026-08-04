@@ -10,7 +10,7 @@ from src.bt.engine.handlers import (  # noqa: F401
     default_execution_handler,
     default_risk_handler,
 )
-from src.bt.metrics import get_backtest_results_analysis
+from src.bt.metrics import get_backtest_results_analysis, build_symbol_attribution
 from src.bt.types import StrategyConfig, PortfolioResult
 
 import json
@@ -56,6 +56,7 @@ __all__ = [
     "backtest",
     "backtest_async",
     "get_backtest_results_analysis",
+    "build_symbol_attribution",
     "StrategyConfig",
     "PortfolioResult",
     "init_strat",

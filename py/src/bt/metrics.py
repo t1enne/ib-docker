@@ -328,6 +328,61 @@ def calculate_portfolio_result(
     )
 
 
+@dataclass(frozen=True)
+class SymbolAttribution:
+    """Per-symbol return driver stats."""
+
+    symbol: str
+    total_pnl: float
+    trade_count: int
+    win_rate: float
+    avg_pnl_per_trade: float
+
+
+def build_symbol_attribution(
+    trades: tuple[Any, ...],
+) -> tuple[SymbolAttribution, ...]:
+    """Compute per-symbol P&L attribution from closed trades.
+
+    Returns tuple sorted by absolute P&L contribution descending.
+    """
+    from collections import defaultdict
+
+    closed = [t for t in trades if getattr(t.status, "value", None) == "closed"]
+    if not closed:
+        return ()
+
+    by_sym: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"pnl": 0.0, "costs": 0.0, "wins": 0.0, "losses": 0.0, "count": 0.0}
+    )
+
+    for t in closed:
+        s = by_sym[t.symbol]
+        s["pnl"] += t.pnl
+        s["costs"] += (t.commission or 0.0) + (t.slippage or 0.0)
+        s["count"] += 1
+        if t.pnl > 0:
+            s["wins"] += 1
+        elif t.pnl < 0:
+            s["losses"] += 1
+
+    results: list[SymbolAttribution] = []
+    for sym, s in by_sym.items():
+        n = int(s["count"])
+        w = int(s["wins"])
+        results.append(
+            SymbolAttribution(
+                symbol=sym,
+                total_pnl=s["pnl"],
+                trade_count=n,
+                win_rate=w / n if n > 0 else 0.0,
+                avg_pnl_per_trade=s["pnl"] / n if n > 0 else 0.0,
+            )
+        )
+
+    return tuple(sorted(results, key=lambda x: abs(x.total_pnl), reverse=True))
+
+
 def _safe_date_str(date: object | None) -> str:
     if date is None:
         return "NaT"
@@ -456,6 +511,32 @@ def get_backtest_results_analysis(
         ("Total Costs", f"{total_costs:,.2f}"),
     )
     lines.extend(render(Table(columns=stat_cols, rows=stat_rows)))
+
+    # --- Symbol Attribution (Return Drivers) ---
+    attribution = build_symbol_attribution(trades)
+    if len(attribution) > 1:  # only interesting for multi-symbol
+        lines.append("\nReturn Drivers (per Symbol)")
+        attr_cols = (
+            Col("Symbol", "<"),
+            Col("P&L", ">"),
+            Col("Trades", ">"),
+            Col("Win Rate", ">"),
+            Col("% of Total", ">"),
+        )
+        total_pnl = sum(a.total_pnl for a in attribution)
+        attr_rows: list[tuple[str, ...]] = []
+        for a in attribution:
+            pct = (a.total_pnl / total_pnl * 100) if abs(total_pnl) > 1e-9 else 0.0
+            attr_rows.append(
+                (
+                    a.symbol,
+                    f"{a.total_pnl:,.2f}",
+                    str(a.trade_count),
+                    f"{a.win_rate:.0%}",
+                    f"{pct:.1f}%",
+                )
+            )
+        lines.extend(render(Table(columns=attr_cols, rows=tuple(attr_rows))))
 
     # --- Date Range ---
     first_str = _safe_date_str(equity_curve.index[0])

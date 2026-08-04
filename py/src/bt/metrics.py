@@ -339,6 +339,63 @@ class SymbolAttribution:
     avg_pnl_per_trade: float
 
 
+@dataclass(frozen=True)
+class PeriodAttribution:
+    """Per-period (e.g. yearly) return driver stats."""
+
+    period: str
+    total_pnl: float
+    trade_count: int
+    win_rate: float
+    avg_pnl_per_trade: float
+
+
+def build_period_attribution(
+    trades: tuple[Any, ...],
+    equity_curve: pd.Series,
+) -> tuple[PeriodAttribution, ...]:
+    """Compute yearly P&L attribution from closed trades, bucketed by exit time.
+
+    Returns tuple sorted chronologically.
+    """
+    closed = [t for t in trades if getattr(t.status, "value", None) == "closed"]
+    if not closed:
+        return ()
+
+    by_year: dict[str, dict[str, float]] = {}
+    for t in closed:
+        exit_time = getattr(t, "exit_time", None)
+        if exit_time is None:
+            continue
+        year = str(exit_time.year)
+        if year not in by_year:
+            by_year[year] = {"pnl": 0.0, "count": 0.0, "wins": 0.0, "losses": 0.0}
+        s = by_year[year]
+        s["pnl"] += t.pnl
+        s["count"] += 1
+        if t.pnl > 0:
+            s["wins"] += 1
+        elif t.pnl < 0:
+            s["losses"] += 1
+
+    results: list[PeriodAttribution] = []
+    for year in sorted(by_year.keys()):
+        s = by_year[year]
+        n = int(s["count"])
+        w = int(s["wins"])
+        results.append(
+            PeriodAttribution(
+                period=year,
+                total_pnl=s["pnl"],
+                trade_count=n,
+                win_rate=w / n if n > 0 else 0.0,
+                avg_pnl_per_trade=s["pnl"] / n if n > 0 else 0.0,
+            )
+        )
+
+    return tuple(results)
+
+
 def build_symbol_attribution(
     trades: tuple[Any, ...],
 ) -> tuple[SymbolAttribution, ...]:
@@ -537,6 +594,36 @@ def get_backtest_results_analysis(
                 )
             )
         lines.extend(render(Table(columns=attr_cols, rows=tuple(attr_rows))))
+
+    # --- Period Attribution (Return Drivers by Year) ---
+    period_attr = build_period_attribution(trades, equity_curve)
+    if len(period_attr) > 1:
+        lines.append("\nReturn Drivers (per Year)")
+        period_cols = (
+            Col("Year", "<"),
+            Col("P&L", ">"),
+            Col("Trades", ">"),
+            Col("Win Rate", ">"),
+            Col("% of Total", ">"),
+        )
+        total_pnl_period = sum(a.total_pnl for a in period_attr)
+        period_rows: list[tuple[str, ...]] = []
+        for a in period_attr:
+            pct = (
+                (a.total_pnl / total_pnl_period * 100)
+                if abs(total_pnl_period) > 1e-9
+                else 0.0
+            )
+            period_rows.append(
+                (
+                    a.period,
+                    f"{a.total_pnl:,.2f}",
+                    str(a.trade_count),
+                    f"{a.win_rate:.0%}",
+                    f"{pct:.1f}%",
+                )
+            )
+        lines.extend(render(Table(columns=period_cols, rows=tuple(period_rows))))
 
     # --- Date Range ---
     first_str = _safe_date_str(equity_curve.index[0])

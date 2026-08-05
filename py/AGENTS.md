@@ -150,6 +150,37 @@ def apply_fill(portfolio: PortfolioState, fill: FillEvent) -> None:
 - **No side effects in pure functions.** I/O (DB, HTTP, file) belongs at the edges.
 - **Use `merge_bt_state`** for partial state updates — it's the established pattern.
 
+##### Mutable strategy state: the `GLOBAL` + `reset_global()` convention
+
+Strategies are modules, so any cross-call mutable state (cooldowns, trails,
+cache dicts, sets, bar counters, last-timestamp markers) is module scope and
+persists across runs. The backtest engine never resets it, so state bleeds
+between walks/windows unless the strategy opts into a reset. Use this
+convention everywhere strategy runtime state exists:
+
+```python
+GLOBAL: dict = {"cooldown": {}, "regime_ts": None}
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {"cooldown": {}, "regime_ts": None}
+```
+
+- Keep **all** cross-call state in one module-level `GLOBAL: dict` — no
+  scattered `_COOLDOWNS`/`_TRAILS`/`_last` module globals.
+- `GLOBAL` may hold non-dict members (`set`, `int`, `Timestamp | None`, ...).
+  That's fine — reset **rebinds** `GLOBAL` to a fresh dict rather than
+  clearing members with heuristics.
+- Mutate members in place inside strategy logic (`GLOBAL["cooldown"][sym] = x`,  
+  `GLOBAL["bar_idx"] += 1`); no `global` statement is needed unless you rebind  
+  `GLOBAL` itself (only `reset_global` does).
+- Provide `reset_global()` that rebuilds `GLOBAL` with correct defaults. The  
+  split engine calls it via `_reset_strategy_state()` before every IS/OOS  
+  window. Stateless strategies simply omit it.
+- Don't hand-roll a heuristic reset (e.g. clearing only uppercase dict-like  
+  globals) — it silently misses non-dict state and lowercase names and is a  
+  source of cross-fold bleed (see `split.py` history).
+
 #### Size constraints (from README)
 
 - Functions: **≤ 50 LOC**

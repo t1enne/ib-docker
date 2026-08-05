@@ -257,4 +257,22 @@ All CLI groups under the `py` root command — also callable via `make run <subc
 | Group  | Commands                 | Description                                   |
 | ------ | ------------------------ | --------------------------------------------- |
 | `data` | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
-| `bt`   | `run`, `analyze`         | Backtesting engine                            |
+| `bt`   | `run`, `analyze`, `split` | Backtesting engine + IS/OOS validation       |
+
+### `bt split` — IS/OOS walk-forward validation
+
+Evaluates a strategy's **fixed** params across in-sample/out-of-sample windows
+(does **not** re-tune per fold). Two modes:
+
+- `--is-end <date>` — single anchor split: IS=`[trading_start, is_end]`.
+- `--folds <n>` — expansion-window walk-forward (IS grows from `trading_start`).
+
+```bash
+uv run ibkr bt split strats/trend.json --folds 4
+uv run ibkr bt split strats/trend.json --is-end 2020-12-31 --format json
+```
+
+Reports per-fold IS/OOS ann-return, Sharpe, maxDD, calmar, win-rate, plus a
+summary of mean/min OOS Sharpe and OOS→IS degradation. Useful to check whether
+a strategy's edge survives out-of-sample rather than being curve-fit to the
+training window.

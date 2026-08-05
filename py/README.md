@@ -156,6 +156,8 @@ src/
 # Backtesting
 uv run ibkr bt run <strategy.json> [--format jsonl]
 uv run ibkr bt analyze <strategy.json>
+uv run ibkr bt split <strategy.json> --folds 4          # IS/OOS walk-forward
+uv run ibkr bt split <strategy.json> --is-end 2020-12-31  # single anchor split
 
 # Data
 uv run ibkr data query AAPL --from 2024-01-01
@@ -163,6 +165,23 @@ uv run ibkr data query AAPL --from 2024-01-01
 # Pipe workflows
 uv run ibkr data query AAPL --from 2024-01-01 | uv run ibkr bt run strategy.json
 ```
+
+### `bt split` — in-sample vs out-of-sample validation
+
+Evaluates a strategy's **fixed** parameter set across IS/OOS windows. Two modes:
+
+- `--is-end <date>` — single anchor split: IS=`[trading_start, is_end]`, OOS=`[is_end+1d, trading_end]`.
+- `--folds <n>` — expansion-window walk-forward: IS always starts at `trading_start` and grows, producing `n` non-empty folds.
+
+```bash
+uv run ibkr bt split strats/trend.json --folds 4
+uv run ibkr bt split strats/trend.json --is-end 2020-12-31 --format json
+```
+
+Options: `--min-is-years` (walk-forward first-fold history floor, default 5.0),
+`--train-start` (warmup override), `--format text|json`. Does **not** re-tune
+params per fold — it answers *"given these locked params, how does performance
+hold up out-of-sample?"*
 
 All commands usable via `make run <subcommand> <args>`.
 

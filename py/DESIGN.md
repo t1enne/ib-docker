@@ -34,6 +34,10 @@ py hmm fit AAPL --from 2024-01-01 --n-regimes 3
 # Backtest
 py bt run strategy.json
 
+# IS/OOS walk-forward validation
+py bt split strategy.json --folds 4
+py bt split strategy.json --is-end 2020-12-31
+
 # Screen
 py screen run breakout_screen universe.json --param fast=50
 ```

@@ -1,9 +1,9 @@
 {
   "name": "sector-mean-reversion-full",
-  "training_start": "2020-01-01",
-  "training_end": "2024-02-29",
-  "trading_start": "2024-03-01",
-  "trading_end": "2025-01-14",
+  "training_start": "2015-01-01",
+  "training_end": "2015-01-02",
+  "trading_start": "2015-01-02",
+  "trading_end": "2025-12-31",
   "commission": 0.1,
   "initial_capital": 50000,
   "position_size": 0.45,
@@ -24,15 +24,6 @@
     "regime_filter": "SPY",
     "regime_sma": 200
   },
-  "symbols": [
-    "XLE",
-    "XLV",
-    "XLF",
-    "XLB",
-    "XLU",
-    "XLP",
-    "XLY",
-    "XBI",
-    "XLK"
-  ]
+  "symbols": ["XLE", "XLV", "XLF", "XLB", "XLU", "XLP", "XLY", "XBI", "XLK"]
 }
+

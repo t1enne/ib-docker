@@ -6,10 +6,10 @@
   "trading_end": "2025-12-31",
   "commission": 0.1,
   "initial_capital": 50000,
-  "position_size": 0.30,
+  "position_size": 0.3,
   "strategy_type": "trend_pullback_atr_trail",
   "stop_loss": 0.08,
-  "take_profit": 0.20,
+  "take_profit": 0.2,
   "bars": ["1d"],
   "model_params": {},
   "strategy_params": {

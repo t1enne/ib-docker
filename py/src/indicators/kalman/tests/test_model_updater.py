@@ -10,6 +10,7 @@ from src.bt.state.factories import create_initial_backtest_state
 from src.bt.engine.candle_store import CandleStore, CandleRows
 from src.bt.engine.utils import merge_bt_state
 from src.bt.state import Candle
+from src.utils import get_ts
 
 
 def _make_candle_rows(
@@ -43,9 +44,7 @@ def _make_candle_rows(
 def test_updater_populates_kalman_fields():
     """After warmup, model_state.kalman_* fields are set."""
     rows, idx = _make_candle_rows("A", "B", n=300)
-    state = create_initial_backtest_state(
-        ["A", "B"], 100000.0, pd.Timestamp("2024-01-01")
-    )
+    state = create_initial_backtest_state(["A", "B"], 100000.0, get_ts("2024-01-01"))
     store = CandleStore(rows)
     state = merge_bt_state(state, dict(candles=store))
 
@@ -81,9 +80,7 @@ def test_updater_populates_kalman_fields():
 def test_updater_respects_warmup():
     """Before warmup_bars, kalman_z_score stays None."""
     rows, idx = _make_candle_rows("A", "B", n=10)
-    state = create_initial_backtest_state(
-        ["A", "B"], 100000.0, pd.Timestamp("2024-01-01")
-    )
+    state = create_initial_backtest_state(["A", "B"], 100000.0, get_ts("2024-01-01"))
     store = CandleStore(rows)
     state = merge_bt_state(state, dict(candles=store))
 
@@ -117,7 +114,7 @@ def test_updater_deterministic():
 
     def run_once() -> float | None:
         state = create_initial_backtest_state(
-            ["A", "B"], 100000.0, pd.Timestamp("2024-01-01")
+            ["A", "B"], 100000.0, get_ts("2024-01-01")
         )
         store = CandleStore(rows)
         state = merge_bt_state(state, dict(candles=store))
@@ -154,9 +151,7 @@ def test_updater_deterministic():
 def test_updater_beta_reasonable():
     """Kalman beta should be close to the true 0.8 hedge ratio."""
     rows, idx = _make_candle_rows("A", "B", n=300)
-    state = create_initial_backtest_state(
-        ["A", "B"], 100000.0, pd.Timestamp("2024-01-01")
-    )
+    state = create_initial_backtest_state(["A", "B"], 100000.0, get_ts("2024-01-01"))
     store = CandleStore(rows)
     state = merge_bt_state(state, dict(candles=store))
 
@@ -191,9 +186,7 @@ def test_updater_beta_reasonable():
 def test_updater_zscore_is_tradable():
     """Rolling z-score of spread should be in tradable ±range (not tiny t-stat)."""
     rows, idx = _make_candle_rows("A", "B", n=300, seed=99)
-    state = create_initial_backtest_state(
-        ["A", "B"], 100000.0, pd.Timestamp("2024-01-01")
-    )
+    state = create_initial_backtest_state(["A", "B"], 100000.0, get_ts("2024-01-01"))
     store = CandleStore(rows)
     state = merge_bt_state(state, dict(candles=store))
 

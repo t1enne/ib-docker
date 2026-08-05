@@ -188,7 +188,7 @@ def on_candle(
                 if _trail_broken(lows, params.trail_lookback):
                     _IN_TRAIL.discard(pid)
                     start_cooldown(symbol, params.cooldown_bars)
-                    trail_val = float(lows.iloc[-params.trail_lookback:-1].min())
+                    trail_val = float(lows.iloc[-params.trail_lookback : -1].min())
                     signals.append(
                         TradeSignal(
                             action=ActionType.close,

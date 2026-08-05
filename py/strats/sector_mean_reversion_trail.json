@@ -1,0 +1,40 @@
+{
+  "name": "sector-mean-reversion-trail",
+  "training_start": "2015-01-01",
+  "training_end": "2015-01-02",
+  "trading_start": "2015-01-02",
+  "trading_end": "2025-12-31",
+  "commission": 0.1,
+  "initial_capital": 50000,
+  "position_size": 0.45,
+  "strategy_type": "sector_mean_reversion_trail",
+  "stop_loss": 0.15,
+  "take_profit": 0.3,
+  "bars": [
+    "1d"
+  ],
+  "model_params": {},
+  "strategy_params": {
+    "momentum_lookback": 30,
+    "skip_recent": 3,
+    "top_n": 1,
+    "max_positions": 4,
+    "warmup_bars": 150,
+    "cooldown_bars": 3,
+    "exit_rank_threshold": 1,
+    "regime_symbol": "SPY",
+    "regime_sma": 200,
+    "regime_fast_sma": 50,
+    "atr_period": 14,
+    "atr_mult": 2.0,
+    "risk_pct": 0.01,
+    "trail_lookback": 5
+  },
+  "symbols": [
+    "XLB",
+    "XLV",
+    "XLY",
+    "XLU",
+    "SPY"
+  ]
+}

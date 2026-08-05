@@ -321,57 +321,57 @@ def _win_rate(result: PortfolioResult) -> float:
     return sum(1.0 for t in closed if t.pnl > 0) / len(closed)
 
 
-def _metrics_row(
-    row: tuple[PortfolioResult, PortfolioResult],
-) -> tuple[str, ...]:
-    cells: list[str] = []
-    for r in row:
-        cells.append(f"{getattr(r, 'annual_return'):.2%}")
-        cells.append(f"{getattr(r, 'sharpe_ratio'):.2f}")
-        cells.append(f"{getattr(r, 'max_drawdown'):.2%}")
-        cells.append(f"{getattr(r, 'calmar_ratio'):.2f}")
-        win = _win_rate(r)
-        cells.append(f"{win:.1%}")
-    return tuple(cells)
+def _render_fold(fm: FoldMetrics) -> list[str]:
+    """Render one fold as an IS|OOS metric block with a from→to header."""
+    from src.bt.table import Col, Table, render
+
+    rows = (
+        (
+            "Annual",
+            f"{fm.in_sample.annual_return:.2%}",
+            f"{fm.out_of_sample.annual_return:.2%}",
+        ),
+        (
+            "Sharpe",
+            f"{fm.in_sample.sharpe_ratio:.2f}",
+            f"{fm.out_of_sample.sharpe_ratio:.2f}",
+        ),
+        (
+            "MaxDD",
+            f"{fm.in_sample.max_drawdown:.2%}",
+            f"{fm.out_of_sample.max_drawdown:.2%}",
+        ),
+        (
+            "Calmar",
+            f"{fm.in_sample.calmar_ratio:.2f}",
+            f"{fm.out_of_sample.calmar_ratio:.2f}",
+        ),
+        ("WinRate", f"{_win_rate(fm.in_sample):.1%}", f"{_win_rate(fm.out_of_sample):.1%}"),
+    )
+    cols = (Col("Metric", "<"), Col("IS", ">"), Col("OOS", ">"))
+    header = (
+        f"Fold {fm.fold.index + 1}:  "
+        f"IS {fm.fold.is_start.date()}→{fm.fold.is_end.date()}  |  "
+        f"OOS {fm.fold.oos_start.date()}→{fm.fold.oos_end.date()}"
+    )
+    return [header] + render(Table(columns=cols, rows=rows))
 
 
 def render_split_report(report: SplitReport) -> str:
-    """Render IS vs OOS table per fold + summary row."""
-    from src.bt.table import Col, Table, render
-
-    cols: tuple[Col, ...] = (Col("Fold", ">"),)
-    for side in ("IS", "OOS"):
-        cols += (
-            Col(f"{side} Ann", ">"),
-            Col(f"{side} Sharpe", ">"),
-            Col(f"{side} MaxDD", ">"),
-            Col(f"{side} Calmar", ">"),
-            Col(f"{side} WinRate", ">"),
-        )
-
-    rows: list[tuple[str, ...]] = []
-    for fm in report.folds:
-        label = (
-            f"{fm.fold.is_end.date()}→{fm.fold.oos_end.date()}"
-            if fm.fold.index == 0
-            else f"f{fm.fold.index}"
-        )
-        rows.append((label,) + _metrics_row((fm.in_sample, fm.out_of_sample)))
-
-    if not report.folds:
-        rows = [("(no folds)", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—")]
-
-    table = Table(columns=cols, rows=tuple(rows))
+    """Render IS vs OOS metrics per fold, one structured block per fold."""
     lines: list[str] = [f"\nSplit: {report.config_name}"]
 
-    summary = (
-        f"Mean OOS Sharpe {report.mean_oos_sharpe():.2f} · "
-        f"Min OOS Sharpe {report.min_oos_sharpe():.2f} · "
-        f"OOS/IS degradation {report.oos_vs_is_degradation():.2f}"
-    )
-    lines.append(summary)
-    lines.extend(render(table))
-    return "\n".join(lines)
+    if report.folds:
+        summary = (
+            f"Mean OOS Sharpe {report.mean_oos_sharpe():.2f} · "
+            f"Min OOS Sharpe {report.min_oos_sharpe():.2f} · "
+            f"OOS/IS degradation {report.oos_vs_is_degradation():.2f}"
+        )
+        lines.append(summary)
+        for fm in report.folds:
+            lines.extend(_render_fold(fm))
+            lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def split_report_to_dict(report: SplitReport) -> dict:

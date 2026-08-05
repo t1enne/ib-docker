@@ -230,6 +230,7 @@ def run_backtest(
         state.portfolio.trades,
         state.portfolio.initial_capital,
         benchmark_curve=first_bm,
+        equity_points=state.portfolio.equity_curve,
     )
 
     return (

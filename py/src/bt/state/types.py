@@ -10,7 +10,7 @@ All state is immutable (frozen dataclasses) to enable:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Tuple, Dict, Optional, Any, List
+from typing import Tuple, Dict, Optional, Any
 from enum import Enum
 
 import pandas as pd
@@ -256,6 +256,7 @@ class PortfolioResult:
     kurtosis: float = 0.0
     stability: float = 0.0
     omega_ratio: float = 0.0
+    capital_utilization: float = 0.0
 
 
 @dataclass(frozen=True)

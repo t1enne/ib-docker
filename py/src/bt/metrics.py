@@ -281,11 +281,34 @@ def analyze_portfolio(result: PortfolioResult) -> PerformanceMetrics:
     )
 
 
+def capital_utilization(
+    equity_points: tuple[Any, ...] | None,
+) -> float:
+    """Average fraction of equity deployed in positions.
+
+    Computed from per-candle EquityPoint(equity, cash, positions_value)
+    snapshots: mean(positions_value / equity) over the window.
+    Returns 0.0 when no points are provided or equity <= 0.
+    """
+    if not equity_points:
+        return 0.0
+    ratios: list[float] = []
+    for p in equity_points:
+        equity = float(p.equity)
+        if equity <= 0:
+            continue
+        ratios.append(float(p.positions_value) / equity)
+    if not ratios:
+        return 0.0
+    return float(np.mean(ratios))
+
+
 def calculate_portfolio_result(
     equity_curve: pd.Series,
     trades,
     initial_capital: float,
     benchmark_curve: pd.Series | None = None,
+    equity_points: tuple[Any, ...] | None = None,
 ) -> PortfolioResult:
     """Calculate portfolio result from equity curve and trades.
 
@@ -325,6 +348,7 @@ def calculate_portfolio_result(
         stability=stability(equity_curve),
         alpha=alpha,
         beta=beta,
+        capital_utilization=capital_utilization(equity_points),
     )
 
 
@@ -563,6 +587,7 @@ def get_backtest_results_analysis(
         ("Closed Trades", str(len(closed_trades))),
         ("Win Rate", f"{win_rate:.2%}"),
         ("Total P&L", f"{total_pnl:,.2f}"),
+        ("Capital Utilization", f"{result.capital_utilization:.1%}"),
         ("Commission Costs", f"{total_commission:,.2f}"),
         ("Slippage Costs", f"{total_slippage:,.2f}"),
         ("Total Costs", f"{total_costs:,.2f}"),

@@ -62,12 +62,26 @@ class Params(StrategyParams):
 
 # ---------------------------------------------------------------------------
 # module-level state
+# Converts every cross-call variable to the repo GLOBAL-dict convention and
+# adds reset_global() so the split engine can cleanly reset between windows.
 # ---------------------------------------------------------------------------
 
-_COOLDOWNS: dict[str, int] = {}
-_REGIME_CACHE: dict[str, bool] = {}
-_REGIME_TS: pd.Timestamp | None = None
-_REGIME_CANDLES_CACHE: dict[str, pd.DataFrame | None] = {}
+GLOBAL: dict = {
+    "cooldown": {},
+    "regime_cache": {},
+    "regime_ts": None,
+    "regime_candles_cache": {},
+}
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {
+        "cooldown": {},
+        "regime_cache": {},
+        "regime_ts": None,
+        "regime_candles_cache": {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -127,11 +141,9 @@ def _is_bear_regime(
     bar: str,
     sma_window: int,
 ) -> bool:
-    global _REGIME_CACHE, _REGIME_TS
-
     ts = state.timestamp
-    if ts is not None and _REGIME_TS == ts:
-        return _REGIME_CACHE.get(regime_symbol, False)
+    if ts is not None and GLOBAL["regime_ts"] == ts:
+        return GLOBAL["regime_cache"].get(regime_symbol, False)
 
     candles = state.candles.get((regime_symbol, bar))
     if candles is None:
@@ -144,23 +156,23 @@ def _is_bear_regime(
         candles = candles.loc[:ts]
 
     if candles is None or len(candles) < sma_window:
-        _REGIME_CACHE[regime_symbol] = False
-        _REGIME_TS = ts
+        GLOBAL["regime_cache"][regime_symbol] = False
+        GLOBAL["regime_ts"] = ts
         return False
 
     closes = cast(pd.Series, candles["close"])
     current = float(closes.iloc[-1])
     sma = float(closes.iloc[-sma_window:].mean())
     result = current < sma
-    _REGIME_CACHE[regime_symbol] = result
-    _REGIME_TS = ts
+    GLOBAL["regime_cache"][regime_symbol] = result
+    GLOBAL["regime_ts"] = ts
     return result
 
 
 def _load_regime_candles(symbol: str, bar: str) -> pd.DataFrame | None:
     cache_key = f"{symbol}:{bar}"
-    if cache_key in _REGIME_CANDLES_CACHE:
-        return _REGIME_CANDLES_CACHE[cache_key]
+    if cache_key in GLOBAL["regime_candles_cache"]:
+        return GLOBAL["regime_candles_cache"][cache_key]
 
     try:
         from src.bt.data_feed import load_candles
@@ -176,13 +188,13 @@ def _load_regime_candles(symbol: str, bar: str) -> pd.DataFrame | None:
             bar,
         )
         if df.empty:
-            _REGIME_CANDLES_CACHE[cache_key] = None
+            GLOBAL["regime_candles_cache"][cache_key] = None
             return None
         result = df.xs(symbol, axis=1, level=0)
-        _REGIME_CANDLES_CACHE[cache_key] = result
+        GLOBAL["regime_candles_cache"][cache_key] = result
         return result
     except Exception:
-        _REGIME_CANDLES_CACHE[cache_key] = None
+        GLOBAL["regime_candles_cache"][cache_key] = None
         return None
 
 
@@ -218,7 +230,7 @@ def on_candle(
             sym_price = float(sym_closes.iloc[-1])
             if np.isnan(sym_price):
                 continue
-            _COOLDOWNS[sym] = params.cooldown_bars
+            GLOBAL["cooldown"][sym] = params.cooldown_bars
             exiting.add(sym)
             for position in pos_tup:
                 signals.append(
@@ -266,9 +278,9 @@ def on_candle(
         # Allow entry even when score >= 0 — cross-sectional relative value matters more
         # than absolute sign. The worst sector among all-positive is still the worst.
 
-        cd = _COOLDOWNS.get(sym, 0)
+        cd = GLOBAL["cooldown"].get(sym, 0)
         if cd > 0:
-            _COOLDOWNS[sym] = cd - 1
+            GLOBAL["cooldown"][sym] = cd - 1
             continue
 
         closes = cast(pd.Series, state.candles[(sym, candle.interval or "1h")]["close"])
@@ -279,7 +291,7 @@ def on_candle(
         if np.isnan(entry_price):
             continue
 
-        _COOLDOWNS[sym] = params.cooldown_bars
+        GLOBAL["cooldown"][sym] = params.cooldown_bars
         qty = (state.portfolio.cash * params.position_size_pct) / entry_price
         signals.append(
             TradeSignal(

@@ -57,10 +57,18 @@ class Params(StrategyParams):
 
 # ---------------------------------------------------------------------------
 # state
+# Repo GLOBAL-dict convention + reset_global() for the split engine.
 # ---------------------------------------------------------------------------
 
-_COOLDOWNS: dict[str, int] = {}
-_WEEKLY_CACHE: dict[str, tuple[pd.Timestamp, bool]] = {}
+GLOBAL: dict = {
+    "cooldowns": {},
+    "weekly_cache": {},
+}
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {"cooldowns": {}, "weekly_cache": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +90,7 @@ def _weekly_bullish(
         return False
 
     last_weekly_ts = weekly.index[-1]
-    cache_key = _WEEKLY_CACHE.get(symbol)
+    cache_key = GLOBAL["weekly_cache"].get(symbol)
     if cache_key is not None and cache_key[0] == last_weekly_ts:
         return cache_key[1]
 
@@ -96,7 +104,7 @@ def _weekly_bullish(
         ret_ok = True
 
     result = price_ok and ret_ok
-    _WEEKLY_CACHE[symbol] = (last_weekly_ts, result)
+    GLOBAL["weekly_cache"][symbol] = (last_weekly_ts, result)
     return result
 
 
@@ -201,9 +209,9 @@ def on_candle(
                         )
             continue
 
-        cd = _COOLDOWNS.get(symbol, 0)
+        cd = GLOBAL["cooldowns"].get(symbol, 0)
         if cd > 0:
-            _COOLDOWNS[symbol] = cd - 1
+            GLOBAL["cooldowns"][symbol] = cd - 1
             continue
 
         df = state.candles.get((symbol, "1d"))
@@ -265,4 +273,4 @@ def on_candle(
 
 
 def start_cooldown(symbol: str, bars: int) -> None:
-    _COOLDOWNS[symbol] = bars
+    GLOBAL["cooldowns"][symbol] = bars

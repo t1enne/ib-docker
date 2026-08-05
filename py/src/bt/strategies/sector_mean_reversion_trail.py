@@ -73,15 +73,22 @@ class Params(StrategyParams):
 
 # ---------------------------------------------------------------------------
 # module-level state — per-position trail tracking
+# Repo GLOBAL-dict convention + reset_global() for the split engine.
 # ---------------------------------------------------------------------------
 
-_COOLDOWNS: dict[str, int] = {}
-# position_id -> trail level (float). Set when position switches to trail mode.
-_TRAILS: dict[str, float] = {}
+GLOBAL: dict = {
+    "cooldown": {},
+    "trails": {},
+}
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {"cooldown": {}, "trails": {}}
 
 
 def start_cooldown(symbol: str, bars: int) -> None:
-    _COOLDOWNS[symbol] = bars
+    GLOBAL["cooldown"][symbol] = bars
 
 
 # ---------------------------------------------------------------------------
@@ -184,23 +191,23 @@ def on_candle(
         for position in pos_tup:
             pid = position.position_id
 
-            trail = _TRAILS.get(pid)
+            trail = GLOBAL["trails"].get(pid)
 
             if trail is None:
                 # Loser phase — hold while rank is unfavorable.
                 if not recovered:
                     continue
                 # Recovery confirmed — arm the trail at the recent low.
-                _TRAILS[pid] = float(lows.iloc[-params.trail_lookback :].min())
+                GLOBAL["trails"][pid] = float(lows.iloc[-params.trail_lookback :].min())
                 continue
 
             # Trail mode: ratchet the low up, exit on a break.
             recent_low = float(lows.iloc[-params.trail_lookback :].min())
             if recent_low > trail:
-                _TRAILS[pid] = recent_low
+                GLOBAL["trails"][pid] = recent_low
                 continue
             if close <= trail:
-                _TRAILS.pop(pid, None)
+                GLOBAL["trails"].pop(pid, None)
                 start_cooldown(sym, params.cooldown_bars)
                 signals.append(
                     TradeSignal(
@@ -242,9 +249,9 @@ def on_candle(
         if rank <= n_total - params.top_n:
             continue  # not beaten-down enough
 
-        cd = _COOLDOWNS.get(sym, 0)
+        cd = GLOBAL["cooldown"].get(sym, 0)
         if cd > 0:
-            _COOLDOWNS[sym] = cd - 1
+            GLOBAL["cooldown"][sym] = cd - 1
             continue
 
         df = state.candles.get((sym, interval))
@@ -265,7 +272,7 @@ def on_candle(
             continue  # ATR sizing only — no silent fallback
         qty = (state.portfolio.cash * params.risk_pct) / (atr_val * params.atr_mult)
 
-        _COOLDOWNS[sym] = params.cooldown_bars
+        GLOBAL["cooldown"][sym] = params.cooldown_bars
         signals.append(
             TradeSignal(
                 action=ActionType.long,

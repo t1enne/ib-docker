@@ -16,16 +16,21 @@ class SignalPhase:
     CLOSED = "CLOSED"
 
 
-_signal_state: Dict[str, dict] = {}
+GLOBAL: Dict[str, dict] = {}
 
 
 def get_signal_state() -> Dict[str, dict]:
-    return _signal_state
+    return GLOBAL
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {}
 
 
 def reset_signal_state():
-    global _signal_state
-    _signal_state = {}
+    """Legacy alias for reset_global()."""
+    reset_global()
 
 
 def on_candle(

@@ -327,18 +327,26 @@ def _slsqp_optimise(
 # ---------------------------------------------------------------------------
 # Rebalance gate — fires on first trading day of each calendar month.
 # Detects month transitions via module-level memory of last-seen month.
+# Repo GLOBAL-dict convention + reset_global() for the split engine.
 # ---------------------------------------------------------------------------
 
-_last: dict[str, pd.Timestamp] = {}
-_last_month: dict[str, tuple[int, int]] = {}  # (year, month)
+GLOBAL: dict = {
+    "last": {},  # cache_key → last fire timestamp
+    "last_month": {},  # cache_key → (year, month)
+}
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {"last": {}, "last_month": {}}
 
 
 def _is_monthly_signal(ts: pd.Timestamp) -> bool:
     """True on the first trading day of a new calendar month."""
     cache_key = "aegis"
     current = (ts.year, ts.month)
-    prev = _last_month.get(cache_key)
-    _last_month[cache_key] = current
+    prev = GLOBAL["last_month"].get(cache_key)
+    GLOBAL["last_month"][cache_key] = current
     return prev is not None and current != prev
 
 
@@ -362,9 +370,9 @@ def on_candle(
     ts = candle.timestamp
     if not _is_monthly_signal(ts):
         return []
-    if _last.get(cache_key) is not None and _last[cache_key] == ts:  # type: ignore[union-attr]
+    if GLOBAL["last"].get(cache_key) is not None and GLOBAL["last"][cache_key] == ts:
         return []
-    _last[cache_key] = ts
+    GLOBAL["last"][cache_key] = ts
 
     interval = candle.interval or "1h"
     symbols = sorted({s for s, _ in state.candles})

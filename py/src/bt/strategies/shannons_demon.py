@@ -74,11 +74,19 @@ class Params(StrategyParams):
 
 # ---------------------------------------------------------------------------
 # module-level state
+# Repo GLOBAL-dict convention + reset_global() for the split engine.
 # ---------------------------------------------------------------------------
 
-_last_rebalance: dict[str, int] = {}  # cache_key → signal bar index
-_bar_idx: int = 0  # count of signal-interval bars seen
-_last_signal_close: dict[str, float] = {}  # symbol → last seen signal close
+GLOBAL: dict = {
+    "last_rebalance": {},  # cache_key → signal bar index
+    "bar_idx": 0,  # count of signal-interval bars seen
+    "last_signal_close": {},  # symbol → last seen signal close
+}
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {"last_rebalance": {}, "bar_idx": 0, "last_signal_close": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +235,6 @@ def on_candle(
     candle: Candle,
     params: Params,
 ) -> list[TradeSignal]:
-    global _bar_idx, _last_signal_close
-
     signal_interval, entry_interval = _pick_intervals(state)
     symbols = sorted({s for s, _ in state.candles})
 
@@ -245,13 +251,14 @@ def on_candle(
     if not sig_closes:
         return []
 
-    new_signal_bar = not _last_signal_close or any(
-        sig_closes.get(sym) != _last_signal_close.get(sym) for sym in risk_symbols
+    new_signal_bar = not GLOBAL["last_signal_close"] or any(
+        sig_closes.get(sym) != GLOBAL["last_signal_close"].get(sym)
+        for sym in risk_symbols
     )
-    _last_signal_close = dict(sig_closes)
+    GLOBAL["last_signal_close"] = dict(sig_closes)
 
     if new_signal_bar:
-        _bar_idx += 1
+        GLOBAL["bar_idx"] += 1
 
     # Warmup on signal interval
     if state.candles.count(risk_symbols[0], signal_interval) < params.warmup_bars:
@@ -273,7 +280,9 @@ def on_candle(
     cache_key = "shannons"
     interval_bars = _interval_bars(params)
 
-    bars_since = _bar_idx - _last_rebalance.get(cache_key, -interval_bars)
+    bars_since = GLOBAL["bar_idx"] - GLOBAL["last_rebalance"].get(
+        cache_key, -interval_bars
+    )
     if bars_since < interval_bars:
         return []
 
@@ -291,7 +300,7 @@ def on_candle(
 
     # First deployment: buy both legs at target weights
     if not current_weights:
-        _last_rebalance[cache_key] = _bar_idx
+        GLOBAL["last_rebalance"][cache_key] = GLOBAL["bar_idx"]
         return _deploy_initial(
             candle, risk_symbols, all_legs, target, entry_closes, total
         )
@@ -305,7 +314,7 @@ def on_candle(
         return []
 
     # Rebalance: close all positions, then reopen at target weights
-    _last_rebalance[cache_key] = _bar_idx
+    GLOBAL["last_rebalance"][cache_key] = GLOBAL["bar_idx"]
     return _full_rebalance(
         state,
         candle,

@@ -15,8 +15,8 @@
   "model_updater": false,
   "benchmark_symbols": ["QQQ", "GLD"],
   "strategy_params": {
-    "rebalance_frequency": "monthly",
-    "rebalance_days": 21,
+    "position_size": 0.95,
+    "rebalance_frequency": 21,
     "target_weights": [0.6, 0.4],
     "drift_tolerance": 0.05,
     "warmup_bars": 63,

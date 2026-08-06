@@ -40,12 +40,15 @@ STRATEGY_TYPE = "shannons_demon"
 
 @dataclass(frozen=True)
 class Params(StrategyParams):
-    # Rebalance frequency: "daily", "weekly" (5 trading days), "monthly" (21 days)
-    rebalance_frequency: str = "monthly"
-    rebalance_days: int = 21
+    # Rebalance interval in signal-interval bars (e.g. 21 = monthly on 1d, 5 = weekly).
+    rebalance_frequency: int = 21
 
     # Target weights — must sum to 1.0. [0.5, 0.5] = equal weight.
     target_weights: tuple[float, ...] = (0.5, 0.5)
+
+    # Fraction of portfolio value deployed into risky assets (buffer = 1 - this).
+    # Applied to each risky leg's target value: total * position_size * weight.
+    position_size: float = 1.0
 
     # Tolerance — don't rebalance if drift < this fraction of portfolio
     drift_tolerance: float = 0.05
@@ -95,10 +98,20 @@ def reset_global() -> None:
 
 
 def _interval_bars(params: Params) -> int:
-    if params.rebalance_days > 0:
-        return params.rebalance_days
-    mapping = {"daily": 1, "weekly": 5, "monthly": 21, "quarterly": 63}
-    return mapping.get(params.rebalance_frequency, 21)
+    return max(1, params.rebalance_frequency)
+
+
+_IV_UNIT_MIN: dict[str, int] = {"m": 1, "h": 60, "d": 1440, "w": 10080}
+
+
+def _interval_minutes(iv: str) -> int:
+    """Parse interval string ("1h", "30m", "1d") into minutes for resolution sort."""
+    try:
+        n = int("".join(c for c in iv if c.isdigit()))
+        unit = "".join(c for c in iv if not c.isdigit())[:1]
+        return n * _IV_UNIT_MIN.get(unit, 60)
+    except ValueError:
+        return 1_000_000
 
 
 def _read_closes(
@@ -221,13 +234,13 @@ def _pick_intervals(state: BacktestState) -> tuple[str, str]:
     """
     intervals = sorted(
         {i for _, i in state.candles},
-        key=lambda x: (0 if x.endswith("d") else 1 if x.endswith("h") else 2, x),
+        key=_interval_minutes,
     )
     if len(intervals) <= 1:
         iv = intervals[0] if intervals else "1d"
         return iv, iv
-    # Sorted: daily first, then hourly — so [0] is signal (longest), [-1] is entry (shortest)
-    return intervals[0], intervals[-1]
+    # Signal = longest resolution, entry = shortest resolution
+    return intervals[-1], intervals[0]
 
 
 def on_candle(
@@ -270,11 +283,16 @@ def on_candle(
 
     all_legs = risk_symbols + (["__cash__"] if params.cash_leg else [])
 
-    # Build target weight dict
+    # Build target weight dict, scaling risky-leg weights by position_size so
+    # drift compares against the effective deployed weights. The cash leg
+    # (when present) absorbs the unallocated buffer.
     tw = params.target_weights
     if len(tw) != len(all_legs):
         tw = (0.5, 0.5) if len(all_legs) == 2 else (1.0,)
-    target = dict(zip(all_legs, tw))
+    raw_target = dict(zip(all_legs, tw))
+    target = {k: v * params.position_size for k, v in raw_target.items()}
+    if "__cash__" in target:
+        target["__cash__"] = 1.0 - sum(v for k, v in target.items() if k != "__cash__")
 
     # --- Rebalance gate ---
     cache_key = "shannons"

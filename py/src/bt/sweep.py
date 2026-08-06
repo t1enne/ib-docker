@@ -7,8 +7,7 @@ that is a list is swept (cartesian product over all list-valued leaves).
 
 Example (mirrors the config shape, no extra routing keys):
 
-    {"position_size": [0.7, 0.85, 1.0],
-     "strategy_params": {"rebalance_frequency": [2, 5]}}
+    {"position_size": [0.7, 0.85, 1.0], "strategy_params": {"rebalance_frequency": [2, 5]}}
 
 Pure grid/expand logic lives here (test-friendly); engine wiring is
 ``run_sweep``. Mirrors the repo's ``pure.py`` convention.

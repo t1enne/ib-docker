@@ -46,9 +46,11 @@ import numpy as np
 import pandas as pd
 
 from src.bt.metrics import calculate_portfolio_result
+from src.bt.strategies import resolve_params
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
+
 from src.bt.state import (
     ActionType,
     BacktestState,
@@ -128,11 +130,10 @@ def run_backtest(
     last_symbol = symbols[-1] if symbols else None
 
     # Resolve typed params once if strategy defines them; inject the top-level
-    # config.position_size so it reaches strategies that declare it as a param.
-    from src.bt.strategies import resolve_params
 
     resolved_params = resolve_params(
-        config.strategy_type, config.strategy_params, config.position_size
+        config.strategy_type,
+        config.strategy_params,
     )
 
     def get_initial_state():

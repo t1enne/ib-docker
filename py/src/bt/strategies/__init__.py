@@ -84,7 +84,8 @@ def init_strat(strat_name: str) -> _StrategyModule:
 
 
 def resolve_params(
-    strat_name: str, raw_params: dict, position_size: float = 1.0
+    strat_name: str,
+    raw_params: dict,
 ) -> object:
     """Instantiate typed Params if strategy defines them, else return raw dict.
 
@@ -97,8 +98,6 @@ def resolve_params(
     if params_cls is None:
         return raw_params
     params = {**raw_params}
-    if "position_size" in params_cls.__dataclass_fields__:
-        params["position_size"] = position_size
     return params_cls.from_dict(params)
 
 

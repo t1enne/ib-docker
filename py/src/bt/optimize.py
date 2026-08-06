@@ -21,7 +21,7 @@ from `sweep.py`. Mirrors the repo's `pure.py` convention.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 from typing import Any
 
 import pandas as pd
@@ -29,6 +29,7 @@ import pandas as pd
 from src.bt.split import TestFold
 from src.bt.sweep import build_config, grid_combos
 from src.bt.types import StrategyConfig, PortfolioResult
+from src.bt.window import run_window, window_has_data
 
 
 @dataclass(frozen=True)
@@ -50,46 +51,21 @@ def _metric_names() -> set[str]:
     return {f.name for f in fields(PortfolioResult)}
 
 
-def _run_window(
-    cfg: StrategyConfig,
-    strat_mod,
-    data: pd.DataFrame,
-    trading_start: pd.Timestamp,
-    trading_end: pd.Timestamp,
-) -> PortfolioResult:
-    """Run one backtest restricted to [trading_start, trading_end].
-
-    Overrides the config's trading window (the engine gates `can_trade` on
-    it). Data is loaded once over the full span and reused — no reload per
-    window. Strategy module state resets before the run.
-    """
-    from src.bt.engine.backtest import Backtest, run
-
-    window_cfg = replace(
-        cfg,
-        trading_start=trading_start.isoformat(),
-        trading_end=trading_end.isoformat(),
-    )
-    reset = getattr(strat_mod, "reset_global", None)
-    if reset is not None:
-        reset()
-    bt = Backtest(window_cfg)
-    results = run(bt, data, strat_mod=strat_mod)
-    return results.pf
-
-
 def _best_combo_on_window(
     cfg: StrategyConfig,
     merged_patches: list[dict[str, Any]],
     strat_mod,
     data: pd.DataFrame,
+    bm_df: pd.DataFrame | None,
     is_start: pd.Timestamp,
     is_end: pd.Timestamp,
     sort_metric: str,
 ) -> tuple[dict[str, Any], PortfolioResult]:
     """Run every patch combo on the IS window; return (best_patch, is_pf).
 
-    The best combo is the one maximizing ``sort_metric`` on the IS window.
+    The best combo is the one maximizing ``sort_metric`` on the IS window. All
+    combos share the window-sliced feed and pre-loaded benchmark candles via
+    ``run_window`` — no per-combo data or benchmark reload.
     """
     best_patch: dict[str, Any] = merged_patches[0]
     best_pf: PortfolioResult | None = None
@@ -97,7 +73,7 @@ def _best_combo_on_window(
 
     for patch in merged_patches:
         conf = build_config(cfg, patch)
-        pf = _run_window(conf, strat_mod, data, is_start, is_end)
+        pf = run_window(conf, strat_mod, data, bm_df, is_start, is_end)
         val = getattr(pf, sort_metric)
         if val > best_val:
             best_val = val
@@ -156,7 +132,7 @@ def run_optimize(
     strat_mod = init_strat(cfg.strategy_type)
     merged_patches = grid_combos(merge)
 
-    # Load once over the full span — per-window runs gate on the trading window.
+    # Load once over the full span — per-window runs slice it, no per-run reload.
     probe = Backtest(cfg)
     load_start = min(fold.is_start for fold in folds)
     data = load_candles(
@@ -166,6 +142,31 @@ def run_optimize(
         cfg.bars[0],
     )
 
+    # Benchmark candles are stateless — load once, slice per window. Even a
+    # single IS sweep runs `combos` window backtests, so this avoids a DB
+    # read per combo.
+    bm_df: pd.DataFrame | None = None
+    if cfg.benchmark_symbols:
+        bm_df = load_candles(
+            cfg.benchmark_symbols,
+            load_start,
+            probe.window.test_end,
+            cfg.bars[0],
+        )
+
+    # Fail fast on windows that fall in a data gap instead of sweeping an
+    # empty window (which would silently produce degenerate IS scores).
+    for fold in folds:
+        for label, start, end in (
+            ("IS", fold.is_start, fold.is_end),
+            ("OOS", fold.oos_start, fold.oos_end),
+        ):
+            if not window_has_data(data, start, end):
+                raise ValueError(
+                    f"Fold {fold.index + 1}: no candles in {label} [{start}→{end}] "
+                    "— the split may fall in a data gap or past the loaded range."
+                )
+
     results: list[OptimizeResult] = []
     for fold in folds:
         best_patch, is_pf = _best_combo_on_window(
@@ -173,12 +174,15 @@ def run_optimize(
             merged_patches,
             strat_mod,
             data,
+            bm_df,
             fold.is_start,
             fold.is_end,
             sort_metric,
         )
         best_conf = build_config(cfg, best_patch)
-        oos_pf = _run_window(best_conf, strat_mod, data, fold.oos_start, fold.oos_end)
+        oos_pf = run_window(
+            best_conf, strat_mod, data, bm_df, fold.oos_start, fold.oos_end
+        )
 
         # Best combo's IS metrics (not rebuilt — reuse to avoid a 3rd run).
         best_is: dict[str, float] = {

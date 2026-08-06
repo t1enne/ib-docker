@@ -5,16 +5,17 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 import src.bt.split as split_mod
+import src.bt.window as window_mod
 
 from src.bt.split import (
     FoldMetrics,
     SplitReport,
     anchor_split,
     walk_forward_folds,
-    _reset_strategy_state,
 )
 from src.bt.state import PortfolioResult
 from src.bt.types import StrategyConfig
+from src.bt.window import reset_strategy_state
 from src.utils import parse_timestamp
 
 
@@ -220,8 +221,8 @@ def test_metrics_projected() -> None:
     report = SplitReport(config_name="t", params={"momentum_lookback": 30}, folds=folds)
     assert report.mean_oos_sharpe() == pytest.approx((1.5 + 0.5 + 1.0) / 3)
     assert report.min_oos_sharpe() == pytest.approx(0.5)
-    # oos/is degradation = mean(oos) / mean(is)
-    assert report.oos_vs_is_degradation() == pytest.approx(1.0 / 2.0)
+    # is→oos degradation = mean(is) − mean(oos)  (decay; positive = worse OOS)
+    assert report.oos_vs_is_degradation() == pytest.approx(2.0 - 1.0)
     assert list(report.oos_sharpe_series()) == pytest.approx([1.5, 0.5, 1.0])
 
 
@@ -230,6 +231,21 @@ def test_metrics_empty_folds() -> None:
     assert report.mean_oos_sharpe() == 0.0
     assert report.min_oos_sharpe() == 0.0
     assert report.oos_vs_is_degradation() == 0.0
+
+
+def test_degradation_robust_to_negative_is() -> None:
+    """A ratio of signed Sharpes is meaningless when IS is negative; the delta
+    form must stay interpretable."""
+    folds = (
+        FoldMetrics(
+            fold=_fold(0),
+            in_sample=_fake_result(-1.0),
+            out_of_sample=_fake_result(0.5),
+        ),
+    )
+    report = SplitReport(config_name="t", params={}, folds=folds)
+    # IS − OOS = -1.0 − 0.5 = -1.5 → negative decay = OOS improved on IS
+    assert report.oos_vs_is_degradation() == pytest.approx(-1.5)
 
 
 def test_split_report_to_dict_counts_only_closed_trades() -> None:
@@ -304,7 +320,7 @@ def test_reset_strategy_state_clears_module_dicts() -> None:
 
     trail_mod.GLOBAL["cooldown"]["XLB"] = 3
     trail_mod.GLOBAL["trails"]["pos-1"] = 42.0
-    _reset_strategy_state(trail_mod)
+    reset_strategy_state(trail_mod)
     assert trail_mod.GLOBAL == {"cooldown": {}, "trails": {}}
 
 
@@ -315,7 +331,7 @@ def test_reset_strategy_state_rebinds_non_dict_state() -> None:
 
     smr_mod.GLOBAL["cooldown"]["XLB"] = 3
     smr_mod.GLOBAL["regime_ts"] = parse_timestamp("2020-01-02")
-    _reset_strategy_state(smr_mod)
+    reset_strategy_state(smr_mod)
     assert smr_mod.GLOBAL == {
         "cooldown": {},
         "regime_cache": {},
@@ -328,7 +344,7 @@ def test_reset_strategy_state_clears_set_state() -> None:
     import src.bt.strategies.trend_pullback_atr_trail as trail_variant
 
     trail_variant.GLOBAL["in_trail"].add("pos-1")
-    _reset_strategy_state(trail_variant)
+    reset_strategy_state(trail_variant)
     assert trail_variant.GLOBAL["in_trail"] == set()
     assert trail_variant.GLOBAL["cooldowns"] == {}
     assert trail_variant.GLOBAL["weekly_cache"] == {}
@@ -338,4 +354,63 @@ def test_reset_strategy_state_noop_without_hook() -> None:
     import types as types_mod
 
     stateless = types_mod.ModuleType("fake")  # no reset_global attr
-    _reset_strategy_state(stateless)  # should not raise
+    reset_strategy_state(stateless)  # should not raise
+
+
+def _candle_df(
+    start: str, end: str, freq: str = "D", symbols: tuple[str, ...] = ("A",)
+) -> pd.DataFrame:
+    idx = pd.date_range(start, end, freq=freq)
+    syms = {
+        s: pd.DataFrame({"open": range(1, len(idx) + 1)}, index=idx) for s in symbols
+    }
+    return pd.concat(list(syms.values()), axis=1, keys=list(symbols))
+
+
+def test_window_df_keeps_head_drops_future() -> None:
+    """Slicing must keep the warmup head but truncate past trading_end so the
+    engine can't process future data (the look-ahead close/model/update leak)."""
+    df = _candle_df("2020-01-01", "2020-01-10")
+    sliced = window_mod.window_df(df, parse_timestamp("2020-01-05"))
+    assert list(sliced.index) == list(
+        pd.date_range("2020-01-01", "2020-01-05", freq="D")
+    )
+
+
+def test_window_df_keeps_model_warmup_head() -> None:
+    """The pre-window head must survive slicing so the model warms up on prior
+    history (trading_start is NOT the slice boundary)."""
+    df = _candle_df("2015-01-01", "2020-01-10")
+    sliced = window_mod.window_df(df, parse_timestamp("2020-01-05"))
+    assert sliced.index[0] == pd.Timestamp("2015-01-01")  # warmup head intact
+    assert sliced.index[-1] == pd.Timestamp("2020-01-05")
+    assert len(sliced.index) == (len(df.index) - 5)
+
+
+def test_window_df_multi_symbol_columns_preserved() -> None:
+    """Multi-symbol MultiIndex columns must be unchanged after slicing."""
+    df = _candle_df("2020-01-01", "2020-01-10", symbols=("A", "B"))
+    sliced = window_mod.window_df(df, parse_timestamp("2020-01-05"))
+    assert sliced.columns.equals(df.columns)
+    assert list(sliced.index) == list(
+        pd.date_range("2020-01-01", "2020-01-05", freq="D")
+    )
+
+
+def test_window_has_data_true_within_range() -> None:
+    df = _candle_df("2020-01-01", "2020-01-10")
+    assert window_mod.window_has_data(
+        df, parse_timestamp("2020-01-03"), parse_timestamp("2020-01-05")
+    )
+
+
+def test_window_has_data_false_in_gap() -> None:
+    df = _candle_df("2020-01-01", "2020-01-05")
+    # window entirely after the data ends
+    assert not window_mod.window_has_data(
+        df, parse_timestamp("2020-02-01"), parse_timestamp("2020-03-01")
+    )
+    # empty frame
+    assert not window_mod.window_has_data(
+        pd.DataFrame(), parse_timestamp("2020-01-01"), parse_timestamp("2020-01-05")
+    )

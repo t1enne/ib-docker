@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+from src.utils import parse_timestamp
 
 from src.bt.optimize import (
     OptimizeResult,
@@ -50,17 +51,17 @@ def _folds() -> list[TestFold]:
     return [
         TestFold(
             index=0,
-            is_start=pd.Timestamp("2020-01-02"),
-            is_end=pd.Timestamp("2021-01-01"),
-            oos_start=pd.Timestamp("2021-01-04"),
-            oos_end=pd.Timestamp("2022-01-01"),
+            is_start=parse_timestamp("2020-01-02"),
+            is_end=parse_timestamp("2021-01-01"),
+            oos_start=parse_timestamp("2021-01-04"),
+            oos_end=parse_timestamp("2022-01-01"),
         ),
         TestFold(
             index=1,
-            is_start=pd.Timestamp("2020-01-02"),
-            is_end=pd.Timestamp("2022-01-01"),
-            oos_start=pd.Timestamp("2022-01-03"),
-            oos_end=pd.Timestamp("2023-01-01"),
+            is_start=parse_timestamp("2020-01-02"),
+            is_end=parse_timestamp("2022-01-01"),
+            oos_start=parse_timestamp("2022-01-03"),
+            oos_end=parse_timestamp("2023-01-01"),
         ),
     ]
 
@@ -79,7 +80,7 @@ def test_flat_overrides_empty_merge():
 def test_run_optimize_tunes_on_oos_bounded_by_scoped_windows(monkeypatch):
     """IS tuning picks the max-sharpe combo per fold; OOS validates the winner.
 
-    `_run_window` is stubbed so a combo's sharpe equals its ``x`` param on the
+    `run_window` is stubbed so a combo's sharpe equals its ``x`` param on the
     IS window, and the OOS window returns the ``x`` of whatever config it is
     handed (the IS-best combo). The runner must therefore: run every combo per
     fold IS, pick the largest x, and pass that exact config to the OOS run.
@@ -92,7 +93,7 @@ def test_run_optimize_tunes_on_oos_bounded_by_scoped_windows(monkeypatch):
 
     seen: dict[str, list] = {"oos_x": []}
 
-    def fake_run_window(cfg, strat_mod, data, t_start, t_end):
+    def fake_run_window(cfg, strat_mod, data, bm_df, t_start, t_end):
         x = cfg.strategy_params["x"]
         # A tuning window is one whose END equals a fold's IS end. We detect
         # it by comparing to the fold set — but simpler: OOS runs pass a
@@ -102,8 +103,13 @@ def test_run_optimize_tunes_on_oos_bounded_by_scoped_windows(monkeypatch):
             return _fake_pf(float(x), float(x) / 10.0)
         return _fake_pf(float(x), float(x) / 100.0)
 
-    monkeypatch.setattr(opt, "_run_window", fake_run_window)
-    monkeypatch.setattr("src.bt.data_feed.load_candles", lambda *a, **k: None)
+    monkeypatch.setattr(opt, "run_window", fake_run_window)
+    monkeypatch.setattr(
+        "src.bt.data_feed.load_candles",
+        lambda *a, **k: pd.DataFrame(
+            index=pd.date_range("2020-01-02", "2023-01-01", freq="D")
+        ),
+    )
     monkeypatch.setattr(
         "src.bt.strategies.init_strat",
         lambda name: type(

@@ -11,13 +11,14 @@ Mirrors the repo's `pure.py` convention.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Mapping
 
 import pandas as pd
 
 from src.bt.strategies import init_strat
 from src.bt.types import StrategyConfig, PortfolioResult
+from src.bt.window import run_window, window_has_data
 from src.utils import parse_timestamp
 
 DAY = pd.offsets.BDay(1)
@@ -75,13 +76,16 @@ class SplitReport:
         return float(self.oos_sharpe_series().min())
 
     def oos_vs_is_degradation(self) -> float:
-        """mean(oos Sharpe) / mean(is Sharpe). 1.0 = no degradation."""
+        """mean(IS Sharpe) − mean(OOS Sharpe) — IS→OOS Sharpe decay.
+
+        Positive = performance degraded out-of-sample; negative = OOS beat IS.
+        Reported as a delta (not a ratio) because a ratio of two signed Sharpes
+        is meaningless when IS is negative or near zero.
+        """
         if not self.folds:
             return 0.0
         is_avg = sum(f.in_sample.sharpe_ratio for f in self.folds) / len(self.folds)
-        if abs(is_avg) < 1e-12:
-            return 0.0
-        return self.mean_oos_sharpe() / is_avg
+        return is_avg - self.mean_oos_sharpe()
 
 
 def anchor_split(
@@ -224,46 +228,6 @@ def walk_forward_folds(
 # ---------------------------------------------------------------------------
 
 
-def _reset_strategy_state(strat_mod) -> None:
-    """Reset a strategy's cross-run mutable state via its reset_global() hook.
-
-    Convention: every strategy with runtime state holds it in one module-level
-    `GLOBAL: dict` and exposes `reset_global()` which rebinds `GLOBAL` to a
-    fresh dict with correct defaults. The engine never resets these, so without
-    an explicit reset (re-importing won't restore the original empty dicts)
-    state bleeds silently across folds — a real bug in prior sweeps. Stateless
-    strategies do not need the hook; this is a no-op for them.
-    """
-    reset = getattr(strat_mod, "reset_global", None)
-    if reset is not None:
-        reset()
-
-
-def _run_window(
-    cfg: StrategyConfig,
-    strat_mod,
-    data: pd.DataFrame,
-    trading_start: pd.Timestamp,
-    trading_end: pd.Timestamp,
-) -> PortfolioResult:
-    """Run one IS or OOS window by overriding the config's trading window.
-
-    Data is loaded once per split, so this only slices the `can_trade` gate —
-    no per-window data reload.
-    """
-    from src.bt.engine.backtest import Backtest, run
-
-    window_cfg = replace(
-        cfg,
-        trading_start=trading_start.isoformat(),
-        trading_end=trading_end.isoformat(),
-    )
-    bt = Backtest(window_cfg)
-    _reset_strategy_state(strat_mod)
-    results = run(bt, data, strat_mod=strat_mod)
-    return results.pf
-
-
 def run_split(
     cfg: StrategyConfig,
     folds: list[TestFold],
@@ -292,12 +256,34 @@ def run_split(
         cfg.bars[0],
     )
 
+    # Benchmark candles are stateless — load once, slice per window.
+    bm_df: pd.DataFrame | None = None
+    if cfg.benchmark_symbols:
+        bm_df = load_candles(
+            cfg.benchmark_symbols,
+            load_start,
+            parse_timestamp(cfg.trading_end),
+            cfg.bars[0],
+        )
+
     fold_metrics: list[FoldMetrics] = []
     for fold in folds:
         is_end, is_start = fold.is_end, fold.is_start
         oos_start, oos_end = fold.oos_start, fold.oos_end
-        is_result = _run_window(cfg, strat_mod, data, is_start, is_end)
-        oos_result = _run_window(cfg, strat_mod, data, oos_start, oos_end)
+        windows = [("IS", is_start, is_end), ("OOS", oos_start, oos_end)]
+        missing = [
+            f"{label} [{start}→{end}]"
+            for label, start, end in windows
+            if not window_has_data(data, start, end)
+        ]
+        if missing:
+            raise ValueError(
+                f"Fold {fold.index + 1}: no candles in "
+                + ", ".join(missing)
+                + " — the split may fall in a data gap or past the loaded range."
+            )
+        is_result = run_window(cfg, strat_mod, data, bm_df, is_start, is_end)
+        oos_result = run_window(cfg, strat_mod, data, bm_df, oos_start, oos_end)
         fold_metrics.append(
             FoldMetrics(fold=fold, in_sample=is_result, out_of_sample=oos_result)
         )
@@ -369,7 +355,7 @@ def render_split_report(report: SplitReport) -> str:
         summary = (
             f"Mean OOS Sharpe {report.mean_oos_sharpe():.2f} · "
             f"Min OOS Sharpe {report.min_oos_sharpe():.2f} · "
-            f"OOS/IS degradation {report.oos_vs_is_degradation():.2f}"
+            f"IS→OOS Sharpe decay {report.oos_vs_is_degradation():+.2f}"
         )
         lines.append(summary)
         for fm in report.folds:

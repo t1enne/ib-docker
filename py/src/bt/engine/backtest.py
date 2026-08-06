@@ -40,7 +40,7 @@ from src.bt.engine.candle_store import CandleStore, CandleRows
 from src.bt.engine.utils import candle_generator, merge_bt_state
 
 from dataclasses import dataclass, field, replace
-from typing import Generator, Tuple, Optional, Any, Callable
+from typing import Generator, Tuple, Optional, Any, Callable, Mapping
 
 import numpy as np
 import pandas as pd
@@ -106,6 +106,7 @@ def run_backtest(
     initial_state: Optional[BacktestState] = None,
     model_updater_fn: Any = None,
     strategy_mod: Any = None,
+    benchmark_curves: Optional[Mapping[str, pd.Series]] = None,
 ) -> Tuple[BacktestResults, BacktestState]:
     """Run backtest with the given candle generator and handlers.
 
@@ -120,6 +121,9 @@ def run_backtest(
         initial_state: Optional initial state (default: create from config)
         model_updater_fn: Optional function to update model state
         strategy_mod: Optional strategy module (must have on_candle(state, candle, params))
+        benchmark_curves: Optional pre-sliced benchmark curves to reuse across
+            windows (avoids a per-window benchmark DB reload). When omitted,
+            benchmarks are loaded+drawn here from config.
 
     Returns:
         Tuple of (BacktestResults, final BacktestState)
@@ -225,7 +229,10 @@ def run_backtest(
         & (equity_series.index <= bt.window.test_end)
     ]
 
-    bm_curves: dict[str, pd.Series] = _get_bench_curves(config, bt)
+    if benchmark_curves is not None:
+        bm_curves = dict(benchmark_curves)
+    else:
+        bm_curves = _get_bench_curves(config, bt)
     # Use first benchmark curve for alpha/beta (typically the primary equity index).
     # If no benchmark symbols configured, alpha/beta will be 0.0/1.0.
     first_bm = next(iter(bm_curves.values()), None) if bm_curves else None
@@ -248,13 +255,56 @@ def run_backtest(
     )
 
 
+def build_benchmark_curves(
+    bm_df: pd.DataFrame,
+    config: StrategyConfig,
+    test_start: pd.Timestamp,
+    test_end: pd.Timestamp,
+) -> dict[str, pd.Series]:
+    """Build benchmark curves from an already-loaded benchmark DataFrame.
+
+    Pure and window-parameterised so a caller can load benchmark candles once
+    and slice per window (avoids a DB reload every window).
+    """
+    bm_curves: dict[str, pd.Series] = {}
+    closes: dict[str, pd.Series] = {}
+    for bm_sym in config.benchmark_symbols:
+        try:
+            bm_close = bm_df.xs(bm_sym, axis=1, level=0)["close"]
+            # Slice to trading window for comparison
+            bm_close = bm_close[
+                (bm_close.index >= test_start) & (bm_close.index <= test_end)
+            ]
+            if len(bm_close) < 2:
+                continue
+            # Normalize to same initial capital as strategy
+            bm_eq = bm_close / bm_close.iloc[0] * config.initial_capital
+            bm_curves[bm_sym] = bm_eq
+            closes[bm_sym] = bm_eq
+        except KeyError:
+            pass
+
+    # Composite 50/50 buy-and-hold rebalanced: half capital in each symbol
+    if len(closes) == 2:
+        sym_a, sym_b = list(closes.keys())
+        aligned = pd.concat(
+            [closes[sym_a].rename("a"), closes[sym_b].rename("b")],
+            axis=1,
+        ).dropna()
+        if len(aligned) > 1:
+            ret_a = aligned["a"].pct_change().fillna(0.0)
+            ret_b = aligned["b"].pct_change().fillna(0.0)
+            avg_ret = (ret_a + ret_b) / 2.0
+            cum = (1.0 + avg_ret).cumprod()
+            bm_curves["50/50"] = cum * config.initial_capital
+    return bm_curves
+
+
 def _get_bench_curves(config: StrategyConfig, bt: Backtest):
     from src.bt.data_feed import load_candles
 
     if not config.benchmark_symbols:
         return {}
-
-    bm_curves: dict[str, pd.Series] = {}
 
     try:
         bm_df = load_candles(
@@ -263,41 +313,11 @@ def _get_bench_curves(config: StrategyConfig, bt: Backtest):
             bt.window.test_end,
             config.bars[0],
         )
-        closes: dict[str, pd.Series] = {}
-        for bm_sym in config.benchmark_symbols:
-            try:
-                bm_close = bm_df.xs(bm_sym, axis=1, level=0)["close"]
-                # Slice to trading window for comparison
-                bm_close = bm_close[
-                    (bm_close.index >= bt.window.test_start)
-                    & (bm_close.index <= bt.window.test_end)
-                ]
-                if len(bm_close) < 2:
-                    continue
-                # Normalize to same initial capital as strategy
-                bm_eq = bm_close / bm_close.iloc[0] * config.initial_capital
-                bm_curves[bm_sym] = bm_eq
-                closes[bm_sym] = bm_eq
-            except KeyError:
-                pass
-
-        # Composite 50/50 buy-and-hold rebalanced: half capital in each symbol
-        if len(closes) == 2:
-            sym_a, sym_b = list(closes.keys())
-            aligned = pd.concat(
-                [closes[sym_a].rename("a"), closes[sym_b].rename("b")],
-                axis=1,
-            ).dropna()
-            if len(aligned) > 1:
-                ret_a = aligned["a"].pct_change().fillna(0.0)
-                ret_b = aligned["b"].pct_change().fillna(0.0)
-                avg_ret = (ret_a + ret_b) / 2.0
-                cum = (1.0 + avg_ret).cumprod()
-                bm_curves["50/50"] = cum * config.initial_capital
+        return build_benchmark_curves(
+            bm_df, config, bt.window.test_start, bt.window.test_end
+        )
     except Exception:
-        pass
-
-    return bm_curves
+        return {}
 
 
 def _bucket_signals(
@@ -611,7 +631,12 @@ def _resolve_model_updater(config: "StrategyConfig") -> Any | None:
     return None
 
 
-def run(bt: Backtest, data: pd.DataFrame, strat_mod) -> BacktestResults:
+def run(
+    bt: Backtest,
+    data: pd.DataFrame,
+    strat_mod,
+    benchmark_curves: Optional[Mapping[str, pd.Series]] = None,
+) -> BacktestResults:
     """Convenience function for running backtest with defaults.
 
     This creates default handlers, resolves model_updater from config,
@@ -631,5 +656,6 @@ def run(bt: Backtest, data: pd.DataFrame, strat_mod) -> BacktestResults:
         risk_handler,
         model_updater_fn=model_updater_fn,
         strategy_mod=strat_mod,
+        benchmark_curves=benchmark_curves,
     )
     return results

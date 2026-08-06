@@ -1,0 +1,101 @@
+"""`bt split` command."""
+
+from __future__ import annotations
+
+import json
+
+import click
+import pandas as pd
+
+from src.bt.cmds._shared import cli_ts
+
+
+@click.command(name="split")
+@click.argument("strategy_file", type=click.Path(exists=True))
+@click.option(
+    "--is-end",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=None,
+    help="Anchor IS/OOS split date (single-split mode).",
+)
+@click.option(
+    "--folds",
+    type=int,
+    default=None,
+    help="Walk-forward fold count (overrides --is-end).",
+)
+@click.option(
+    "--min-is-years",
+    type=float,
+    default=5.0,
+    help="Min IS window length for walk-forward.",
+)
+@click.option(
+    "--train-start",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=None,
+    help="Override warmup start before IS.",
+)
+@click.option(
+    "--format",
+    "-F",
+    "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Report format.",
+)
+def split(
+    strategy_file: str,
+    is_end,
+    folds,
+    min_is_years,
+    train_start,
+    fmt: str,
+):
+    """Walk-forward / single-split in-sample vs out-of-sample validation.
+
+    Evaluates the strategy's FIXED params across IS/OOS windows. Reports
+    out-of-sample Sharpe and IS to OOS degradation. Does NOT re-tune params.
+    """
+    from src.bt import load_strategy
+    from src.bt.split import (
+        anchor_split,
+        render_split_report,
+        run_split,
+        split_report_to_dict,
+        walk_forward_folds,
+    )
+
+    cfg = load_strategy(strategy_file)
+    train_start_ts: pd.Timestamp | None = (
+        cli_ts(train_start) if train_start is not None else None
+    )
+
+    try:
+        if folds is not None:
+            folds_list = walk_forward_folds(
+                cfg,
+                folds,
+                min_is_years=min_is_years,
+                train_start=train_start_ts,
+            )
+        elif is_end is not None:
+            folds_list = anchor_split(cfg, cli_ts(is_end), train_start=train_start_ts)
+        else:
+            raise click.UsageError(
+                "Provide one of --is-end (single split) or --folds (walk-forward)."
+            )
+
+        report = run_split(cfg, folds_list)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    if fmt == "json":
+        click.echo(json.dumps(split_report_to_dict(report), indent=2))
+    else:
+        click.echo(render_split_report(report))
+
+
+def register(group: click.Group) -> None:
+    """Register this command onto the bt group."""
+    group.add_command(split)

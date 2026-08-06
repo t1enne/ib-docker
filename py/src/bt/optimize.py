@@ -1,0 +1,306 @@
+"""Walk-forward parameter optimization.
+
+Bridges `bt sweep` (tune params, whole window) and `bt split` (validate
+locked params across IS/OOS). Per fold:
+
+1. Sweep the param grid ON the fold's in-sample window — pick the combo
+   with the best IS score (default: Sharpe).
+2. Lock those params and run the fold's out-of-sample window with them.
+3. Record both. OOS metrics are genuinely out-of-sample — they were never
+   optimized against.
+
+Answers the question `bt sweep` can't: "given I overfit a little per fold,
+does the edge survive the next unseen window?" Mean OOS Sharpe + degradation
+across folds summarise robustness. Tuning happens per fold (each fold's IS
+ends before its OOS), so no lookahead: a fold's params never see its OOS.
+
+Pure optimization logic lives here (test-friendly); engine wiring is
+`run_optimize`. Reuses fold builders from `split.py` and grid/patch helpers
+from `sweep.py`. Mirrors the repo's `pure.py` convention.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, fields, replace
+from typing import Any
+
+import pandas as pd
+
+from src.bt.split import TestFold
+from src.bt.sweep import build_config, grid_combos
+from src.bt.types import StrategyConfig, PortfolioResult
+
+
+@dataclass(frozen=True)
+class OptimizeResult:
+    """One fold's IS-tuned params and their OOS outcome."""
+
+    fold: TestFold
+    best_params: dict[
+        str, Any
+    ]  # swept leaf values chosen on IS (dot-joined path -> value)
+    is_metrics: dict[str, float]  # IS PortfolioResult of the best combo
+    oos: PortfolioResult
+
+    def oos_metric(self, name: str) -> float:
+        return float(getattr(self.oos, name))
+
+
+def _metric_names() -> set[str]:
+    return {f.name for f in fields(PortfolioResult)}
+
+
+def _run_window(
+    cfg: StrategyConfig,
+    strat_mod,
+    data: pd.DataFrame,
+    trading_start: pd.Timestamp,
+    trading_end: pd.Timestamp,
+) -> PortfolioResult:
+    """Run one backtest restricted to [trading_start, trading_end].
+
+    Overrides the config's trading window (the engine gates `can_trade` on
+    it). Data is loaded once over the full span and reused — no reload per
+    window. Strategy module state resets before the run.
+    """
+    from src.bt.engine.backtest import Backtest, run
+
+    window_cfg = replace(
+        cfg,
+        trading_start=trading_start.isoformat(),
+        trading_end=trading_end.isoformat(),
+    )
+    reset = getattr(strat_mod, "reset_global", None)
+    if reset is not None:
+        reset()
+    bt = Backtest(window_cfg)
+    results = run(bt, data, strat_mod=strat_mod)
+    return results.pf
+
+
+def _best_combo_on_window(
+    cfg: StrategyConfig,
+    merged_patches: list[dict[str, Any]],
+    strat_mod,
+    data: pd.DataFrame,
+    is_start: pd.Timestamp,
+    is_end: pd.Timestamp,
+    sort_metric: str,
+) -> tuple[dict[str, Any], PortfolioResult]:
+    """Run every patch combo on the IS window; return (best_patch, is_pf).
+
+    The best combo is the one maximizing ``sort_metric`` on the IS window.
+    """
+    best_patch: dict[str, Any] = merged_patches[0]
+    best_pf: PortfolioResult | None = None
+    best_val: float = float("-inf")
+
+    for patch in merged_patches:
+        conf = build_config(cfg, patch)
+        pf = _run_window(conf, strat_mod, data, is_start, is_end)
+        val = getattr(pf, sort_metric)
+        if val > best_val:
+            best_val = val
+            best_patch = patch
+            best_pf = pf
+
+    assert best_pf is not None  # merged_patches is non-empty
+    return best_patch, best_pf
+
+
+def _flat_overrides(merge: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a patch's swept leaf values to {dot-joined-path: value}."""
+    from src.bt.sweep import _expand_leaves
+
+    overrides: dict[str, Any] = {}
+    for path, _ in _expand_leaves(merge):
+        node: Any = patch
+        for segment in path:
+            node = node[segment]
+        overrides[".".join(path)] = node
+    return overrides
+
+
+def run_optimize(
+    cfg: StrategyConfig,
+    folds: list[TestFold],
+    merge: dict[str, Any],
+    sort_metric: str = "sharpe_ratio",
+) -> tuple[list[OptimizeResult], dict[str, float]]:
+    """Walk-forward optimize: tune params per fold's IS, validate on its OOS.
+
+    Args:
+        cfg: base strategy config.
+        folds: IS/OOS fold windows (from split.walk_forward_folds/anchor_split).
+        merge: partial config JSON; list-valued leaves are swept (cartesian).
+        sort_metric: PortfolioResult metric maximized on each fold's IS.
+
+    Returns:
+        (per-fold OptimizeResult, aggregate summary dict).
+        Candles load once over the full window; every IS sweep and OOS run
+        reuses them. Strategy module state resets before each window run.
+    """
+    if sort_metric not in _metric_names():
+        raise ValueError(
+            f"Unknown sort metric {sort_metric!r}; available: "
+            f"{', '.join(sorted(_metric_names()))}"
+        )
+
+    from src.bt.engine.backtest import Backtest
+    from src.bt.data_feed import load_candles
+    from src.bt.strategies import init_strat
+
+    if not folds:
+        raise ValueError("No folds to run — check the split windows")
+
+    strat_mod = init_strat(cfg.strategy_type)
+    merged_patches = grid_combos(merge)
+
+    # Load once over the full span — per-window runs gate on the trading window.
+    probe = Backtest(cfg)
+    load_start = min(fold.is_start for fold in folds)
+    data = load_candles(
+        cfg.symbols,
+        load_start,
+        probe.window.test_end,
+        cfg.bars[0],
+    )
+
+    results: list[OptimizeResult] = []
+    for fold in folds:
+        best_patch, is_pf = _best_combo_on_window(
+            cfg,
+            merged_patches,
+            strat_mod,
+            data,
+            fold.is_start,
+            fold.is_end,
+            sort_metric,
+        )
+        best_conf = build_config(cfg, best_patch)
+        oos_pf = _run_window(best_conf, strat_mod, data, fold.oos_start, fold.oos_end)
+
+        # Best combo's IS metrics (not rebuilt — reuse to avoid a 3rd run).
+        best_is: dict[str, float] = {
+            f.name: float(getattr(is_pf, f.name))
+            for f in fields(PortfolioResult)
+            if isinstance(getattr(is_pf, f.name), (int, float))
+            and not isinstance(getattr(is_pf, f.name), bool)
+        }
+
+        results.append(
+            OptimizeResult(
+                fold=fold,
+                best_params=_flat_overrides(merge, best_patch),
+                is_metrics=best_is,
+                oos=oos_pf,
+            )
+        )
+
+    agg = {
+        "mean_oos_sharpe": (
+            sum(float(r.oos.sharpe_ratio) for r in results) / len(results)
+        ),
+        "min_oos_sharpe": min(float(r.oos.sharpe_ratio) for r in results),
+        "folds": len(results),
+    }
+    return results, agg
+
+
+def render_optimize_report(results: list[OptimizeResult], agg: dict[str, float]) -> str:
+    """Render per-fold IS-tuned/OOS-validated metrics as aligned blocks."""
+    from src.bt.table import Col, Table, render
+
+    lines: list[str] = []
+    for r in results:
+        f = r.fold
+        lines.append(
+            f"Fold {f.index + 1}:  "
+            f"IS {f.is_start.date()}→{f.is_end.date()}  |  "
+            f"OOS {f.oos_start.date()}→{f.oos_end.date()}"
+        )
+        params = (
+            " ".join(f"{k}={v}" for k, v in r.best_params.items())
+            or "(no swept params)"
+        )
+        lines.append(f"  chosen params: {params}")
+        table = render(
+            Table(
+                columns=(
+                    Col("Metric", "<"),
+                    Col("IS (tuned)", ">"),
+                    Col("OOS (unseen)", ">"),
+                ),
+                rows=(
+                    (
+                        "Annual",
+                        f"{r.is_metrics['annual_return']:.2%}",
+                        f"{r.oos.annual_return:.2%}",
+                    ),
+                    (
+                        "Sharpe",
+                        f"{r.is_metrics['sharpe_ratio']:.2f}",
+                        f"{r.oos.sharpe_ratio:.2f}",
+                    ),
+                    (
+                        "MaxDD",
+                        f"{r.is_metrics['max_drawdown']:.2%}",
+                        f"{r.oos.max_drawdown:.2%}",
+                    ),
+                    (
+                        "Calmar",
+                        f"{r.is_metrics['calmar_ratio']:.2f}",
+                        f"{r.oos.calmar_ratio:.2f}",
+                    ),
+                    ("Trades", f"{len(r.oos.trades)}", ""),
+                ),
+            )
+        )
+        lines.extend("  " + line for line in table)
+
+    lines.append(
+        f"AGGREGATE: mean OOS Sharpe {agg['mean_oos_sharpe']:.2f} · "
+        f"min OOS Sharpe {agg['min_oos_sharpe']:.2f} · "
+        f"{agg['folds']} fold(s)"
+    )
+    return "\n".join(lines)
+
+
+def optimize_report_to_json(
+    results: list[OptimizeResult], agg: dict[str, float]
+) -> dict:
+    """Serialize per-fold optimization results into a JSON-ready dict."""
+    float_fields = (
+        "total_return",
+        "annual_return",
+        "sharpe_ratio",
+        "max_drawdown",
+        "calmar_ratio",
+        "sortino_ratio",
+    )
+
+    def _result_dict(oos: PortfolioResult) -> dict:
+        return {f: float(getattr(oos, f)) for f in float_fields}
+
+    return {
+        "folds": [
+            {
+                "index": r.fold.index,
+                "is_window": f"{r.fold.is_start.date()}→{r.fold.is_end.date()}",
+                "oos_window": (f"{r.fold.oos_start.date()}→{r.fold.oos_end.date()}"),
+                "chosen_params": r.best_params,
+                "is": r.is_metrics,
+                "oos": _result_dict(r.oos),
+            }
+            for r in results
+        ],
+        "agg": agg,
+    }
+
+
+__all__ = [
+    "OptimizeResult",
+    "run_optimize",
+    "render_optimize_report",
+    "optimize_report_to_json",
+]

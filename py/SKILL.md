@@ -264,7 +264,7 @@ All CLI groups under the `py` root command — also callable via `make run <subc
 | Group  | Commands                 | Description                                   |
 | ------ | ------------------------ | --------------------------------------------- |
 | `data` | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
-| `bt`   | `run`, `analyze`, `split` | Backtesting engine + IS/OOS validation       |
+| `bt`   | `run`, `analyze`, `split`, `optimize` | Backtesting engine + IS/OOS validation + walk-forward param tuning |
 
 ### `bt split` — IS/OOS walk-forward validation
 
@@ -283,3 +283,21 @@ Reports per-fold IS/OOS ann-return, Sharpe, maxDD, calmar, win-rate, plus a
 summary of mean/min OOS Sharpe and OOS→IS degradation. Useful to check whether
 a strategy's edge survives out-of-sample rather than being curve-fit to the
 training window.
+
+### `bt optimize` — per-fold IS tune → OOS validate
+
+Bridges `bt sweep` (tune params, whole window) and `bt split` (locked params).
+Per fold it sweeps a param grid **on the in-sample window**, locks the best
+combo, and validates it on the out-of-sample window.
+
+```bash
+uv run ibkr bt optimize strats/trend_pullback_atr_enhanced.json \
+  '{"strategy_params":{"atr_mult":[1.5,2.0,2.5]}}' --folds 4
+uv run ibkr bt optimize strats/trend_pullback_atr_enhanced.json \
+  '{"strategy_params":{"ma_slow":[50,100,200]}}' --is-end 2020-12-31 --format json
+```
+
+Honest about overfitting: per-fold tuning curve-fits the IS window, and the OOS
+result prices that cost. If mean OOS Sharpe holds up across folds the edge is
+likely real; if IS is strong but OOS collapses, the grid is fitting noise.
+Reports perf-fold chosen params + IS/OOS metrics, plus mean/min OOS Sharpe.

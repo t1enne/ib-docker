@@ -167,6 +167,7 @@ uv run ibkr bt run <strategy.json> [--format jsonl]
 uv run ibkr bt analyze <strategy.json>
 uv run ibkr bt split <strategy.json> --folds 4          # IS/OOS walk-forward
 uv run ibkr bt split <strategy.json> --is-end 2020-12-31  # single anchor split
+uv run ibkr bt optimize <strategy.json> '{...grid...}' --folds 4  # per-fold IS tune → OOS validate
 
 # Data
 uv run ibkr data query AAPL --from 2024-01-01
@@ -191,6 +192,26 @@ Options: `--min-is-years` (walk-forward first-fold history floor, default 5.0),
 `--train-start` (warmup override), `--format text|json`. Does **not** re-tune
 params per fold — it answers *"given these locked params, how does performance
 hold up out-of-sample?"*
+
+### `bt optimize` — walk-forward parameter optimization
+
+Bridges `bt sweep` and `bt split`. Per fold: sweep the param grid **on the
+fold's in-sample window**, pick the best combo (by `--sort-by`, default
+`sharpe_ratio`), lock it, and run the **out-of-sample** window with those
+params. OOS metrics are never optimized against.
+
+```bash
+uv run ibkr bt optimize strats/trend_pullback_atr_enhanced.json \
+  '{"strategy_params":{"atr_mult":[1.5,2.0,2.5]}}' --folds 4
+uv run ibkr bt optimize strat.json '{...grid...}' --is-end 2020-12-31 --format json
+```
+
+Param grid shape matches `bt sweep` (list-valued leaves swept, scalars
+override once). **Honest about overfitting:** tuning per fold curve-fits the IS
+window, and the OOS result prices that cost. If mean OOS Sharpe holds up across
+folds, the edge is likely real; if IS is strong but OOS collapses, the grid is
+fitting noise. Reports per-fold chosen params + IS/OOS metrics and an aggregate
+of mean/min OOS Sharpe.
 
 All commands usable via `make run <subcommand> <args>`.
 

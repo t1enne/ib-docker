@@ -44,6 +44,9 @@ py bt run strategy.json
 py bt split strategy.json --folds 4
 py bt split strategy.json --is-end 2020-12-31
 
+# Walk-forward param optimization (IS-tune → OOS-validate per fold)
+py bt optimize strategy.json '{"strategy_params":{"ma_slow":[50,100,200]}}' --folds 4
+
 # Screen
 py screen run breakout_screen universe.json --param fast=50
 ```

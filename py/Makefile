@@ -20,6 +20,7 @@ help:
 	@echo "Cli flags (-F, --help, etc.) must be separated from make args by '--':"
 	@echo "  make run bt run strat.json -- --format jsonl"
 	@echo "  make run bt analyze <json>       — Analyze strategy"
+	@echo "  make run bt optimize <json> '<grid>' --folds 4  — IS-tune → OOS validate"
 	@echo "  make run data query <sym>        — Query candles"
 	@echo "  make run data dl <sym>...        — Download candles"
 	@echo "  make run bt --help               — Click-style help"

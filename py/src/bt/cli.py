@@ -7,7 +7,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import click
@@ -25,28 +24,43 @@ def bt_group():
     "--format",
     "-F",
     "fmt",
-    type=click.Choice(["jsonl", "text"]),
+    type=click.Choice(["jsonl", "json", "text"]),
     default="text",
-    help="Output format: jsonl (equity curve + trades) or text (summary)",
+    help="Output format: jsonl (equity curve lines), json (full result), "
+    "or text (summary)",
 )
 def bt_run(strategy_file: str, fmt: str):
     """Run a backtest from a strategy JSON config file.
 
     STRATEGY_FILE: JSON config with symbols, dates, strategy params.
 
-    Output (text mode): human-readable summary table.
-    Output (jsonl mode): equity curve + trades as JSON lines.
+    Output:
+      text  — human-readable summary table.
+      json  — full structured result as one JSON document (metrics, trades,
+              equity curve, benchmarks).
+      jsonl — equity curve points as JSON lines, then a final metrics+trades
+              record.
     """
-    from src.bt import load_strategy, backtest_async
+    from src.bt import load_strategy, run_backtest_results
+    from src.bt import get_backtest_results_analysis
+    from src.bt.output import render_result_json, render_result_jsonl
 
     config = load_strategy(strategy_file)
-    output = asyncio.run(backtest_async(config))
+    results = run_backtest_results(config)
 
-    if fmt == "jsonl":
-        # Parse the text output and produce JSON
-        _output_jsonl_from_text(output)
+    if fmt == "json":
+        click.echo(
+            json.dumps(render_result_json(results), indent=2, default=_json_default)
+        )
+    elif fmt == "jsonl":
+        for line in render_result_jsonl(results):
+            click.echo(json.dumps(line, default=_json_default))
     else:
-        click.echo(output)
+        click.echo(
+            get_backtest_results_analysis(
+                results.pf, benchmark_curves=results.benchmark_curves
+            )
+        )
 
 
 @bt_group.command(name="split")
@@ -163,13 +177,15 @@ def bt_sweep(
 ):
     """Sweep a strategy's params over a grid and rank backtest results.
 
-    PARAM_GRID: JSON object mapping param name -> list of values to try.
-    The full cartesian product is run. Keys matching top-level config fields
-    (e.g. stop_loss, take_profit, position_size) override the config; all
-    other keys override the strategy's own params.
+    PARAM_GRID: a partial config JSON that deep-merges into the strategy
+    config. Top-level keys override StrategyConfig fields; a nested
+    "strategy_params" object merges into the strategy's own params. Any value
+    that is a list is swept (cartesian product over all sweepable leaves);
+    scalars override once.
 
     Example:
-      ibkr bt sweep mystrat.json '{"rebalance_days":[5,10,21], "drift_tolerance":[0.01,0.05]}'
+      ibkr bt sweep mystrat.json '{"position_size":[0.8,0.95],
+                                  "strategy_params":{"drift_tolerance":[0.01,0.05]}}'
     """
     from src.bt import load_strategy
     from src.bt.sweep import (
@@ -194,30 +210,57 @@ def bt_sweep(
 
 @bt_group.command(name="analyze")
 @click.argument("strategy_file", type=click.Path(exists=True))
-def bt_analyze(strategy_file: str):
-    """Analyze a backtest result (load from last run or config).
+@click.option(
+    "--format",
+    "-F",
+    "fmt",
+    type=click.Choice(["json", "text"]),
+    default="json",
+    help="Output format: json (full metrics/trades, default) or text (summary).",
+)
+def bt_analyze(strategy_file: str, fmt: str):
+    """Analyze a backtest result from a strategy config.
 
-    Output: JSON with detailed metrics.
+    Runs the backtest once, then reports the actual PortfolioResult metrics -
+    never re-parsed from rendered text.
+
+    Output: JSON with metrics, trades, and equity curve (default), or the
+    human-readable summary (text).
     """
-    from src.bt import load_strategy, backtest_async
+    from src.bt import (
+        load_strategy,
+        run_backtest_results,
+        get_backtest_results_analysis,
+    )
+    from src.bt.output import render_result_json
 
     config = load_strategy(strategy_file)
-    output = asyncio.run(backtest_async(config))
+    results = run_backtest_results(config)
 
-    # Parse metrics from text output
+    if fmt == "text":
+        click.echo(
+            get_backtest_results_analysis(
+                results.pf, benchmark_curves=results.benchmark_curves
+            )
+        )
+    else:
+        click.echo(
+            json.dumps(render_result_json(results), indent=2, default=_json_default)
+        )
 
-    metrics: dict = {}
-    for line in output.split("\n"):
-        if ":" in line:
-            key, _, val = line.partition(":")
-            key = key.strip().lower().replace(" ", "_")
-            val = val.strip().rstrip("%")
-            try:
-                metrics[key] = float(val.replace(",", ""))
-            except ValueError:
-                metrics[key] = val
 
-    click.echo(json.dumps(metrics, indent=2))
+def _json_default(o):
+    """JSON fallback encoder for non-native objects at the output edge.
+
+    Converts pandas Timestamps (equity/z-score) and Enum members to plain
+    values. Used only when serializing CLI output — never inside engine logic.
+    """
+    if isinstance(o, pd.Timestamp):
+        return str(o)
+    value = getattr(o, "value", None)
+    if value is not None:
+        return value
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
 
 
 def _parse_param_grid(raw: str) -> dict:
@@ -244,13 +287,8 @@ def _parse_param_grid(raw: str) -> dict:
         parsed = json.loads(quoted, parse_int=int, parse_float=float)
     except json.JSONDecodeError as exc:
         raise ValueError(f"param_grid is not valid JSON: {exc}")
-    if not isinstance(parsed, dict) or not all(
-        isinstance(v, list) for v in parsed.values()
-    ):
-        raise ValueError(
-            "param_grid must be a JSON object of param -> [values]: "
-            "'{ \"ma_slow\": [9,14,21] }'"
-        )
+    if not isinstance(parsed, dict):
+        raise ValueError("param_grid must be a JSON object.")
     return parsed
 
 
@@ -261,54 +299,3 @@ def _cli_ts(dt) -> pd.Timestamp:
         raise click.UsageError(f"Invalid datetime: {dt}")
     assert isinstance(ts, pd.Timestamp)
     return ts
-
-
-def _output_jsonl_from_text(text: str) -> None:
-    """Parse text backtest output and emit JSON lines.
-
-    This is a bridge until the backtest engine natively outputs structured data.
-    """
-    lines = text.split("\n")
-    metrics: dict = {}
-    trades: list[dict] = []
-
-    in_trades = False
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        if "TRADE LOG" in line or "TRADE" in line.upper() and "---" in line:
-            in_trades = True
-            continue
-        if in_trades and ("---" in line or "===" in line):
-            in_trades = False
-            continue
-
-        if in_trades:
-            # Parse trade row
-            parts = line.split()
-            if len(parts) >= 5:
-                try:
-                    trades.append(
-                        {
-                            "symbol": parts[0],
-                            "entry": parts[1],
-                            "exit": parts[2],
-                            "pnl": parts[3],
-                            "reason": " ".join(parts[4:]) if len(parts) > 4 else "",
-                        }
-                    )
-                except (ValueError, IndexError):
-                    pass
-        else:
-            if ":" in line and not line.startswith(" "):
-                key, _, val = line.partition(":")
-                key = key.strip().lower().replace(" ", "_")
-                val = val.strip().rstrip("%")
-                try:
-                    metrics[key] = float(val.replace(",", ""))
-                except ValueError:
-                    metrics[key] = val
-
-    click.echo(json.dumps({"metrics": metrics, "trades": trades}, indent=2))

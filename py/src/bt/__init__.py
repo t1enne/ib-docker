@@ -23,8 +23,13 @@ def load_strategy(path: str) -> StrategyConfig:
     return StrategyConfig(**data)
 
 
-async def backtest_async(strategy_conf: StrategyConfig) -> str:
-    """Backtest a trading strategy (async version). Returns text report."""
+def run_backtest_results(strategy_conf: StrategyConfig):
+    """Run a strategy backtest and return the structured BacktestResults.
+
+    Returns the full ``BacktestResults`` (metrics, trades, equity curve,
+    benchmark curves) — not a rendered string. The CLI renders text from
+    this; structured output uses it directly with no text round-trip.
+    """
     from src.bt.data_feed import load_candles
 
     bt = Backtest(strategy_conf)
@@ -35,7 +40,12 @@ async def backtest_async(strategy_conf: StrategyConfig) -> str:
         strategy_conf.bars[0],
     )
     strat_mod = init_strat(strategy_conf.strategy_type)
-    results = run(bt, df, strat_mod=strat_mod)
+    return run(bt, df, strat_mod=strat_mod)
+
+
+async def backtest_async(strategy_conf: StrategyConfig) -> str:
+    """Backtest a trading strategy (async version). Returns text report."""
+    results = run_backtest_results(strategy_conf)
     return get_backtest_results_analysis(
         results.pf, benchmark_curves=results.benchmark_curves
     )
@@ -55,6 +65,7 @@ __all__ = [
     "load_strategy",
     "backtest",
     "backtest_async",
+    "run_backtest_results",
     "get_backtest_results_analysis",
     "build_symbol_attribution",
     "StrategyConfig",

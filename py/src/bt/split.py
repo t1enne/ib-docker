@@ -346,7 +346,11 @@ def _render_fold(fm: FoldMetrics) -> list[str]:
             f"{fm.in_sample.calmar_ratio:.2f}",
             f"{fm.out_of_sample.calmar_ratio:.2f}",
         ),
-        ("WinRate", f"{_win_rate(fm.in_sample):.1%}", f"{_win_rate(fm.out_of_sample):.1%}"),
+        (
+            "WinRate",
+            f"{_win_rate(fm.in_sample):.1%}",
+            f"{_win_rate(fm.out_of_sample):.1%}",
+        ),
     )
     cols = (Col("Metric", "<"), Col("IS", ">"), Col("OOS", ">"))
     header = (

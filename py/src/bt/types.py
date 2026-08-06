@@ -4,7 +4,6 @@ import pandas as pd
 
 from src.bt.state import (  # noqa: F401
     Candle,
-    Trade,
     TradeSignal,
     FillEvent,
     StopLossEvent,
@@ -67,31 +66,6 @@ class StrategyConfig:
     hmm_floating_window: Optional[int] = None
     hmm_retrain_interval: Optional[int] = None
     benchmark_symbols: list[str] = field(default_factory=lambda: ["SPY"])
-
-
-class StrategyProtocol(Protocol):
-    """Protocol for strategy classes.
-
-    Strategies receive a model object at construction that provides access to
-    features and historical data. Use self.model.z_score, self.model.market_data,
-    etc. from within your strategy.
-    """
-
-    def on_candle(
-        self, candle: Candle, open_trade: Optional[Trade]
-    ) -> List[TradeSignal]:
-        """Process a candle (OHLCV bar) and return trading signals.
-
-        Access computed features via self.model:
-            - self.model.z_score          # Current z-score
-            - self.model.current_regime   # Current HMM regime
-            - self.model.market_data      # Historical OHLCV
-
-        Apply indicators to market data:
-            from src.indicators.ta import ema
-            ema_9 = ema(self.model.market_data[-14:].close, 9)
-        """
-        ...
 
 
 RiskEvent = Union[StopLossEvent, TakeProfitEvent]

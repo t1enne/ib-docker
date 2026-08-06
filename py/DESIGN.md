@@ -1,6 +1,12 @@
 # IBKR Library — Agent-Friendly CLI
 
-## Status: IMPLEMENTED
+> **Historical design note.** This file describes an earlier architecture (a `py`
+> binary with `kalman`/`hmm`/`spread`/`mx`/`screen`/`ind` modules and a pipe-based
+> JSON-lines CLI). That layout is superseded. The current CLI is `ibkr` with two
+> groups, `bt` and `data` — see **README.md** for the live quickstart and command
+> reference.
+
+## Status: SUPERSEDED
 
 All 8 modules have CLI groups. Piped JSON lines composition works.
 

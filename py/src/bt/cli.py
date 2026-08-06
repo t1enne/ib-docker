@@ -299,7 +299,7 @@ def _output_jsonl_from_text(text: str) -> None:
                             "reason": " ".join(parts[4:]) if len(parts) > 4 else "",
                         }
                     )
-                except ValueError, IndexError:
+                except (ValueError, IndexError):
                     pass
         else:
             if ":" in line and not line.startswith(" "):

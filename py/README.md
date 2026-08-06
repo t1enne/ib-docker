@@ -6,8 +6,8 @@ Modular CLI toolkit for quantitative trading: data synchronization, indicator co
 
 ```bash
 uv sync
-uv run ibkr bt run strats/trend.json
-make run bt run strats/trend.json   # same, via Make shortcut
+uv run ibkr bt run strats/trend_pullback_atr_enhanced.json
+make run bt run strats/trend_pullback_atr_enhanced.json   # same, via Make shortcut
 ```
 
 `make run` with no args shows available commands:
@@ -15,6 +15,15 @@ make run bt run strats/trend.json   # same, via Make shortcut
 ```bash
 make run bt -- --help              # Click help for backtesting subgroup
 ```
+
+**Make eats its own flags.** To pass CLI options through to `ibkr` (`--format`, `--help`, `-F`)
+you must separate them with `--`:
+
+```bash
+make run bt run strats/trend_pullback_atr_enhanced.json -- --format jsonl
+```
+
+Run `make run <args>` for zero extra typing; use `uv run ibkr <args>` directly to avoid the `--` syntax.
 
 ## Architecture
 
@@ -174,8 +183,8 @@ Evaluates a strategy's **fixed** parameter set across IS/OOS windows. Two modes:
 - `--folds <n>` — expansion-window walk-forward: IS always starts at `trading_start` and grows, producing `n` non-empty folds.
 
 ```bash
-uv run ibkr bt split strats/trend.json --folds 4
-uv run ibkr bt split strats/trend.json --is-end 2020-12-31 --format json
+uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --folds 4
+uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --is-end 2020-12-31 --format json
 ```
 
 Options: `--min-is-years` (walk-forward first-fold history floor, default 5.0),

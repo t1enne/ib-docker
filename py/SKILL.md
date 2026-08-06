@@ -101,24 +101,31 @@ if not htf.empty:
 **Existing strategies** (in `src/bt/strategies/`):
 | File | `strategy_type` key | Description |
 |---|---|---|
-| `ema_cross.py` | `ema_cross` | EMA fast/slow cross with ranging detection |
-| `trend_following.py` | `trend_following` | LSMA+EMA with DMI/MFI/volume/HTF |
-| `breakout_ema.py` | `breakout_ema` | Squeeze → breakout → trend ride |
-| `pairs_trading_functional.py` | `pnd` | Z-score mean reversion, hedge ratio |
-| `vol_extension_pullback.py` | `volatility_expansion_pullback_continuation` | ATR compression → breakout → pullback |
-| `yesterday_high_breakout.py` | `yesterday_high_breakout` | Daily breakout with trailing stop |
+| `aegis.py` | `aegis` | Multi-asset adaptive equity generation (momentum/correlation/risk-free rotation) |
+| `kalman_pairs.py` | `kalman_pairs` | Kalman-filter pairs trading (mean-reversion, z-score of filtered spread) |
+| `momentum_regime.py` | `momentum_regime` | Momentum strategy filtered by regime (HMM/trend detection) |
+| `sector_mean_reversion.py` | `sector_mean_reversion` | Sector rotation: buy worst 6-month performers, sell when they recover |
+| `sector_mean_reversion_trail.py` | `sector_mean_reversion_trail` | Sector mean reversion + regime gating, ATR sizing, trail exit |
+| `shannons_demon.py` | `shannons_demon` | Volatility harvesting via periodic rebalancing |
+| `trend_pullback_atr_enhanced.py` | `trend_pullback_atr_enhanced` | Weekly-trend-confirmed mean reversion, dual-position entry |
+| `trend_pullback_atr_size.py` | `trend_pullback_atr_size` | Weekly-trend mean reversion with ATR position sizing |
+| `trend_pullback_atr_trail.py` | `trend_pullback_atr_trail` | Weekly-trend mean reversion with progressive trail exit |
+| `vol_extension_pullback.py` | `volatility_expansion_pullback_continuation` | ATR compression → breakout → pullback continuation |
 
-**To register a new strategy**, add it to the match in `src/bt/strategies/__init__.py`:
+**To register a new strategy**, drop a `.py` file in `src/bt/strategies/` that declares
+`STRATEGY_TYPE` and `on_candle()` — it's auto-discovered, no manual wiring:
 
 ```python
-import src.bt.strategies.my_strategy  # add import at top
+# src/bt/strategies/my_strategy.py
+STRATEGY_TYPE = "my_strategy"
 
-def init_strat(strat_name: str):
-    match strat_name:
-        # ... existing cases ...
-        case "my_strategy":
-            return src.bt.strategies.my_strategy
+def on_candle(state, candle, params) -> list[TradeSignal]:
+    """Called on every base-interval candle. Return signals to open/close."""
+    ...
 ```
+
+Optional: define a typed `Params` dataclass (see `src/bt/strategies/types.py`) and the
+engine instantiates it from `strategy_params` instead of passing a raw dict.
 
 ### Step 2: Write the JSON Config
 
@@ -134,11 +141,10 @@ Create `strats/<name>.json`:
   "commission": 0.1,
   "initial_capital": 10000,
   "position_size": 0.2,
-  "strategy_type": "ema_cross",
+  "strategy_type": "momentum_regime",
   "stop_loss": 0.2,
   "take_profit": 0.5,
-  "bars": ["1h"],
-  "htf": ["4h", "1D"],
+  "bars": ["1h", "4h"],
   "model_params": {},
   "strategy_params": {
     "fast": 9,
@@ -152,11 +158,12 @@ Create `strats/<name>.json`:
 
 - `training_start`/`training_end` — model training window (currently unused by most strategies)
 - `trading_start`/`trading_end` — actual backtest window
-- `bars` — list of bar sizes, e.g. `["1h"]`; primary is `bars[0]`
+- `bars` — list of bar sizes; `bars[0]` is the base signal interval, additional
+  entries (e.g. `["1h", "4h"]`) are higher-timeframe bars injected alongside
+  (lookahead-safe). There is no separate `htf` field.
 - `commission` — fixed commission per trade
 - `position_size` — fraction of capital deployed per trade
 - `stop_loss`/`take_profit` — percentage levels; engine enforces them globally
-- `htf` — resampled higher-timeframe bars injected alongside base bars (lookahead-safe)
 - `strategy_params` — arbitrary dict forwarded verbatim to `on_candle(state, candle, params)`
 
 **Available tickers** — see `/home/nasrt/Documents/code/dev/ibkr/py/universes/*.json` for symbols with local data.
@@ -179,7 +186,7 @@ from src.bt import load_strategy, Backtest, run
 from src.bt.data_feed import load_candles
 from src.bt.strategies import init_strat
 
-config = load_strategy("strats/trend.json")
+config = load_strategy("strats/trend_pullback_atr_enhanced.json")
 bt = Backtest(config)
 df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bars[0])
 strat_mod = init_strat(config.strategy_type)
@@ -208,15 +215,15 @@ One function, no classes. Read state, compute indicators, return signals. The en
 
 ### Volume filtering
 
-Volume confirmation is a common guard — see `trend_following.py` and `breakout_ema.py` for `volume_confirmed()` / `volume_spike()` patterns.
+Volume confirmation is a common guard — see `vol_extension_pullback.py` for volume-confirmation patterns.
 
 ### Ranging/squeeze detection
 
-Use EMA convergence + ATR contraction. See `ema_cross.py:is_ranging()` and `breakout_ema.py:is_squeeze()`.
+Use EMA convergence + ATR contraction. See `vol_extension_pullback.py` for ATR-compression/squeeze detection.
 
 ### Statefulness within strategy
 
-For multi-phase strategies (compression → breakout → pullback → entry), use a module-level dict keyed by symbol. See `vol_extension_pullback.py` and `yesterday_high_breakout.py` for the `_signal_state` pattern. Note: call `reset_signal_state()` between backtests if state persists.
+For multi-phase strategies (compression → breakout → pullback → entry), hold cross-call state in one module-level `GLOBAL: dict` keyed by symbol. See `vol_extension_pullback.py` and `trend_pullback_atr_*` for examples. Implement `reset_global()` that rebinds `GLOBAL` to a fresh dict — the engine calls it between split/sweep windows so state doesn't bleed across folds.
 
 ### Always handle "no position" and "in position" paths
 
@@ -248,7 +255,7 @@ uv run pytest src/bt/risk/tests/ -v
 - **Bar size**: strategies expect the bar size in config to match available data. Most data is `1h`.
 - **HTF lookahead**: `state.candles.get((sym, freq))` and `htf_candles()` are both safe (cursor-truncated). Direct `state.model_state.resample_cache[freq]` is not — it contains all bars including those after current tick.
 - **Multiple symbols**: the engine iterates all symbols per timestamp. `on_candle` fires only on the last symbol per timestamp (so `state.candles` has all symbols' data). Signals for any symbol are valid — engine routes fills by `signal.symbol`. Pending signals for non-current symbols fill when that symbol's own `_execute_pending` stage runs (same bar cycle, later in the timestamp iteration).
-- **Pairs strategy** (`pnd`): requires exactly 2 symbols. Uses `model_state.price_buffers` for aligned close prices.
+- **Pairs strategy** (`kalman_pairs`): requires exactly 2 symbols. Uses `model_state.price_buffers` for aligned close prices.
 
 ## Module Reference
 
@@ -268,8 +275,8 @@ Evaluates a strategy's **fixed** params across in-sample/out-of-sample windows
 - `--folds <n>` — expansion-window walk-forward (IS grows from `trading_start`).
 
 ```bash
-uv run ibkr bt split strats/trend.json --folds 4
-uv run ibkr bt split strats/trend.json --is-end 2020-12-31 --format json
+uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --folds 4
+uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --is-end 2020-12-31 --format json
 ```
 
 Reports per-fold IS/OOS ann-return, Sharpe, maxDD, calmar, win-rate, plus a

@@ -1,26 +1,27 @@
-"""Hyperparameter sweep for a strategy's params.
+"""Hyperparameter sweep for a strategy.
 
-Runs the full cartesian product of a param grid, each combination as its own
-backtest, and ranks results by a chosen metric. Params that collide with
-top-level ``StrategyConfig`` fields (e.g. ``stop_loss``, ``take_profit``,
-``position_size``) override the config directly; everything else overrides
-``strategy_params`` (the strategy's own typed params).
+The sweep input is a partial config JSON that deep-merges into the strategy
+config: top-level keys override ``StrategyConfig`` fields and a nested
+``strategy_params`` object merges into the strategy's own params. Any value
+that is a list is swept (cartesian product over all list-valued leaves).
 
-Pure grid/ranking logic lives here (test-friendly); engine wiring is
+Example (mirrors the config shape, no extra routing keys):
+
+    {"position_size": [0.7, 0.85, 1.0],
+     "strategy_params": {"rebalance_frequency": [2, 5]}}
+
+Pure grid/expand logic lives here (test-friendly); engine wiring is
 ``run_sweep``. Mirrors the repo's ``pure.py`` convention.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from copy import deepcopy
+from dataclasses import dataclass, fields
 from itertools import product
 from typing import Any, Callable
 
 from src.bt.types import StrategyConfig, PortfolioResult
-
-# Top-level StrategyConfig fields a sweep may override directly; all other
-# keys override the strategy's own params via strategy_params.
-_CONFIG_FIELDS: frozenset[str] = frozenset(f.name for f in fields(StrategyConfig))
 
 
 @dataclass(frozen=True)
@@ -31,50 +32,83 @@ class SweepResult:
     params: dict[str, Any]  # merged strategy_params (for reporting)
     pf: PortfolioResult
 
-    @property
-    def param_values(self) -> dict[str, Any]:
-        """Flat view of all swept params actually applied (overrides only)."""
-        return dict(self.overrides)
+
+# ---------------------------------------------------------------------------
+# deep merge + grid expansion
+# ---------------------------------------------------------------------------
 
 
-def product_grid(param_lists: dict[str, list]) -> list[dict[str, Any]]:
-    """Cartesian product of param lists -> list of param-combination dicts.
-
-    Returns ``[{}]`` for an empty grid (single baseline run).
-    """
-    if not param_lists:
-        return [{}]
-    keys = list(param_lists)
-    combos = product(*(param_lists[k] for k in keys))
-    return [dict(zip(keys, combo)) for combo in combos]
-
-
-def _build_config(cfg: StrategyConfig, overrides: dict[str, Any]) -> StrategyConfig:
-    """Return a copy of cfg with overrides applied (config fields or strategy params)."""
-    cfg_kwargs: dict[str, Any] = {}
-    strat_kwargs: dict[str, Any] = {}
-    for key, value in overrides.items():
-        if key in _CONFIG_FIELDS:
-            cfg_kwargs[key] = value
+def _deep_merge(base: dict, update: dict) -> dict:
+    """Recursively merge ``update`` into ``base`` (nested dicts merged in place)."""
+    out = dict(base)
+    for key, value in update.items():
+        cur = out.get(key)
+        if isinstance(value, dict) and isinstance(cur, dict):
+            out[key] = _deep_merge(cur, value)
         else:
-            strat_kwargs[key] = value
-    return replace(
-        cfg,
-        **cfg_kwargs,
-        strategy_params={**cfg.strategy_params, **strat_kwargs},
-    )
+            out[key] = value
+    return out
+
+
+def _expand_leaves(node: dict) -> list[tuple[tuple[str, ...], Any]]:
+    """Collect every (path, candidate values) leaf that is a list."""
+    leaves: list[tuple[tuple[str, ...], Any]] = []
+
+    def walk(sub: dict, path: tuple[str, ...]) -> None:
+        for key, value in sub.items():
+            child = path + (key,)
+            if isinstance(value, list):
+                leaves.append((child, value))
+            elif isinstance(value, dict):
+                walk(value, child)
+
+    walk(node, ())
+    return leaves
+
+
+def grid_combos(merge: dict) -> list[dict[str, Any]]:
+    """Expand list-valued leaves in a deep-merge override into combos.
+
+    Scalar values are fixed; every list-valued leaf is swept. Returns one
+    merged override dict per cartesian combination (empty ``merge`` -> ``[{}]``).
+    """
+    leaves = _expand_leaves(merge)
+    if not leaves:
+        return [merge]
+    keys, value_lists = zip(*leaves)
+    combos: list[dict[str, Any]] = []
+    for values in product(*value_lists):
+        out = deepcopy(merge)
+        for path, val in zip(keys, values):
+            cursor = out
+            for segment in path[:-1]:
+                cursor = cursor[segment]
+            cursor[path[-1]] = val
+        combos.append(out)
+    return combos
+
+
+def build_config(cfg: StrategyConfig, merge: dict) -> StrategyConfig:
+    """Deep-merge ``merge`` into ``cfg`` and rebuild the config.
+
+    Top-level keys override ``StrategyConfig`` fields; ``strategy_params``
+    merges into the config's strategy params dict.
+    """
+    config_dict = {f.name: getattr(cfg, f.name) for f in fields(StrategyConfig)}
+    merged = _deep_merge(config_dict, merge)
+    return StrategyConfig(**merged)
 
 
 def run_sweep(
     cfg: StrategyConfig,
-    param_lists: dict[str, list],
+    merge: dict,
     sort_metric: str = "annual_return",
 ) -> list[SweepResult]:
-    """Run every grid combination and return results ranked by sort_metric.
+    """Sweep ``merge`` (partial config JSON) over ``cfg``, ranked by sort_metric.
 
-    Candles are loaded once over the config's full window and reused across
-    combinations (only params vary). Strategy module state is reset before
-    every run so combinations don't bleed into each other.
+    List-valued leaves in ``merge`` are swept (cartesian). Scalar leaves
+    override once. Candles load once over the window and are reused across
+    combos; strategy module state resets between runs.
     """
     metric_names = {f.name for f in fields(PortfolioResult)}
     if sort_metric not in metric_names:
@@ -90,12 +124,12 @@ def run_sweep(
     strat_mod = init_strat(cfg.strategy_type)
     reset = getattr(strat_mod, "reset_global", None)
 
-    grid = product_grid(param_lists)
+    combos = grid_combos(merge)
     data = None
     results: list[SweepResult] = []
 
-    for overrides in grid:
-        conf = _build_config(cfg, overrides)
+    for patch in combos:
+        conf = build_config(cfg, patch)
         if data is None:
             bt_probe = Backtest(conf)
             data = load_candles(
@@ -108,6 +142,15 @@ def run_sweep(
             reset()
         bt = Backtest(conf)
         res = run(bt, data, strat_mod=strat_mod)
+
+        # Flatten swept leaf values for reporting (dot-joined path = value).
+        overrides: dict[str, Any] = {}
+        for path, _ in _expand_leaves(merge):
+            node: Any = patch
+            for segment in path:
+                node = node[segment]
+            overrides[".".join(path)] = node
+
         results.append(
             SweepResult(
                 overrides=overrides,
@@ -196,7 +239,8 @@ def sweep_report_to_json(results: list[SweepResult]) -> dict:
 
 __all__ = [
     "SweepResult",
-    "product_grid",
+    "grid_combos",
+    "build_config",
     "run_sweep",
     "render_sweep_report",
     "sweep_report_to_json",

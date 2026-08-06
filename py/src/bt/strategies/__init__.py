@@ -83,13 +83,23 @@ def init_strat(strat_name: str) -> _StrategyModule:
         ) from None
 
 
-def resolve_params(strat_name: str, raw_params: dict) -> object:
-    """Instantiate typed Params if strategy defines them, else return raw dict."""
+def resolve_params(
+    strat_name: str, raw_params: dict, position_size: float = 1.0
+) -> object:
+    """Instantiate typed Params if strategy defines them, else return raw dict.
+
+    ``position_size`` (top-level ``StrategyConfig`` field) is injected into the
+    strategy's ``Params`` when the strategy declares a ``position_size`` field,
+    so sweeping the config field actually reaches the strategy.
+    """
     mod = init_strat(strat_name)
     params_cls = getattr(mod, "Params", None)
     if params_cls is None:
         return raw_params
-    return params_cls.from_dict(raw_params)
+    params = {**raw_params}
+    if "position_size" in params_cls.__dataclass_fields__:
+        params["position_size"] = position_size
+    return params_cls.from_dict(params)
 
 
 __all__ = ["init_strat", "resolve_params"]

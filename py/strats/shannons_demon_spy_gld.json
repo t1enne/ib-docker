@@ -15,7 +15,6 @@
   "model_updater": false,
   "benchmark_symbols": ["SPY", "GLD"],
   "strategy_params": {
-    "position_size": 0.95,
     "rebalance_frequency": 2,
     "target_weights": [0.5, 0.5],
     "drift_tolerance": 0.01,

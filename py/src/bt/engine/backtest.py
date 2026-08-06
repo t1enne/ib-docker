@@ -127,10 +127,13 @@ def run_backtest(
     strategy_fn = strategy_mod.on_candle if strategy_mod else None
     last_symbol = symbols[-1] if symbols else None
 
-    # Resolve typed params once if strategy defines them
+    # Resolve typed params once if strategy defines them; inject the top-level
+    # config.position_size so it reaches strategies that declare it as a param.
     from src.bt.strategies import resolve_params
 
-    resolved_params = resolve_params(config.strategy_type, config.strategy_params)
+    resolved_params = resolve_params(
+        config.strategy_type, config.strategy_params, config.position_size
+    )
 
     def get_initial_state():
         start_date = parse_timestamp(config.trading_start)

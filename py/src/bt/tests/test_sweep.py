@@ -1,9 +1,6 @@
-"""Tests for the param sweep module (grid math, config building, ranking)."""
+"""Tests for the param sweep module (deep merge, grid expansion, ranking)."""
 
-from src.bt.sweep import (
-    _build_config,
-    product_grid,
-)
+from src.bt.sweep import build_config, grid_combos
 from src.bt.types import StrategyConfig
 
 
@@ -27,46 +24,74 @@ def _cfg(**strategy_params) -> StrategyConfig:
     )
 
 
-def test_product_grid_empty():
-    assert product_grid({}) == [{}]
+def test_grid_combos_empty():
+    assert grid_combos({}) == [{}]
 
 
-def test_product_grid_single():
-    assert product_grid({"a": [1, 2]}) == [{"a": 1}, {"a": 2}]
+def test_grid_combos_scalar_only_single():
+    assert grid_combos({"position_size": 0.8}) == [{"position_size": 0.8}]
 
 
-def test_product_grid_cartesian():
-    grid = product_grid({"a": [1], "b": [10, 20]})
-    assert grid == [{"a": 1, "b": 10}, {"a": 1, "b": 20}]
+def test_grid_combos_cartesian_across_levels():
+    merge = {
+        "position_size": [0.8, 0.9],
+        "strategy_params": {"sma_slow": [100, 200]},
+    }
+    combos = grid_combos(merge)
+    assert len(combos) == 4
+    assert {c["position_size"] for c in combos} == {0.8, 0.9}
+    assert {c["strategy_params"]["sma_slow"] for c in combos} == {100, 200}
+    # nested overrides preserved together per combo
+    assert all(
+        c["position_size"] == c0 and c["strategy_params"]["sma_slow"] == c1
+        for c, (c0, c1) in zip(
+            combos,
+            [(0.8, 100), (0.8, 200), (0.9, 100), (0.9, 200)],
+        )
+    )
 
 
-def test_product_grid_order_stable():
-    grid = product_grid({"x": [1, 2], "y": [3, 4]})
-    assert grid[0] == {"x": 1, "y": 3}
-    assert grid[-1] == {"x": 2, "y": 4}
+def test_grid_combos_deep_merge_scalar_and_sweep():
+    merge = {
+        "stop_loss": 0.0,  # scalar -> fixed override
+        "strategy_params": {"ma_slow": [9, 14]},  # list -> sweep
+    }
+    combos = grid_combos(merge)
+    assert len(combos) == 2
+    # scalar constant across all combos
+    assert all(c["stop_loss"] == 0.0 for c in combos)
 
 
-def test_build_config_overrides_strategy_params():
+def test_build_config_deep_merges_top_level():
     cfg = _cfg()
-    out = _build_config(cfg, {"base": 99, "extra": "new"})
-    assert out.strategy_params["base"] == 99
-    assert out.strategy_params["extra"] == "new"
-    assert out.strategy_params["base"] != cfg.strategy_params["base"]
-
-
-def test_build_config_overrides_config_fields():
-    cfg = _cfg()
-    out = _build_config(cfg, {"stop_loss": 0, "take_profit": 0})
-    assert out.stop_loss == 0
-    assert out.take_profit == 0
-    assert out is not cfg  # returns a fresh copy, no mutation
-
-
-def test_build_config_mixed():
-    cfg = _cfg()
-    out = _build_config(cfg, {"position_size": 0.5, "drift_tolerance": 0.1})
-    assert out.position_size == 0.5
-    assert out.strategy_params["drift_tolerance"] == 0.1
-    # untouched fields preserved
+    out = build_config(cfg, {"position_size": 0.8})
+    assert out.position_size == 0.8
+    # untouched config fields preserved
     assert out.stop_loss == cfg.stop_loss
+    assert out is not cfg
+
+
+def test_build_config_merges_strategy_params():
+    cfg = _cfg()
+    out = build_config(cfg, {"strategy_params": {"sma_slow": 150, "base": 99}})
+    assert out.strategy_params["sma_slow"] == 150
+    assert out.strategy_params["base"] == 99
+    # untouched strategy params preserved
+    assert out.strategy_params != cfg.strategy_params
+    assert out.symbols == cfg.symbols
+
+
+def test_build_config_mixed_levels():
+    cfg = _cfg()
+    out = build_config(cfg, {"position_size": 0.8, "strategy_params": {"x": 5}})
+    assert out.position_size == 0.8
+    assert out.strategy_params["x"] == 5
     assert out.strategy_params["base"] == 1
+    assert out.stop_loss == cfg.stop_loss
+
+
+def test_build_config_target_weights_list_roundtrips():
+    # A list-valued config field dumps/rebuilds as a list (was a tuple via params).
+    cfg = _cfg()
+    out = build_config(cfg, {"strategy_params": {"target_weights": [0.6, 0.4]}})
+    assert out.strategy_params["target_weights"] == [0.6, 0.4]

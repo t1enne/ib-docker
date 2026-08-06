@@ -15,7 +15,6 @@
   "model_updater": false,
   "benchmark_symbols": ["QQQ", "GLD"],
   "strategy_params": {
-    "position_size": 0.95,
     "rebalance_frequency": 21,
     "target_weights": [0.6, 0.4],
     "drift_tolerance": 0.05,

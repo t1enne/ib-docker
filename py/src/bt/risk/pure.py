@@ -131,13 +131,15 @@ def _ensure_sl_tp(position: Position, config: RiskConfig) -> Position:
     new_sl = position.stop_loss
     new_tp = position.take_profit
 
-    if needs_sl:
+    # A pct of 0 disables that leg (no initial SL/TP). Guard against 0 so a
+    # 0 pct leaves the level as None instead of pinning it to entry_price.
+    if needs_sl and config.stop_loss_pct > 0:
         if is_long:
             new_sl = position.entry_price * (1 - config.stop_loss_pct)
         else:
             new_sl = position.entry_price * (1 + config.stop_loss_pct)
 
-    if needs_tp:
+    if needs_tp and config.take_profit_pct > 0:
         if is_long:
             new_tp = position.entry_price * (1 + config.take_profit_pct)
         else:
@@ -164,6 +166,9 @@ def _ensure_sl_tp(position: Position, config: RiskConfig) -> Position:
 def _trail_stop(position: Position, tick: Candle, config: RiskConfig) -> Position:
     """Move trailing stop if favourable price movement warrants it."""
     is_long = position.type == ActionType.long
+
+    if config.stop_loss_pct <= 0:
+        return position  # trailing stop disabled
 
     if is_long:
         new_stop = tick.high * (1 - config.stop_loss_pct)

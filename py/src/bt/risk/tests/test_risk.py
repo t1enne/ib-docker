@@ -172,6 +172,70 @@ def test_auto_sl_set_from_config_long():
     assert new_pos.take_profit == pytest.approx(115.0)  # 100 * (1 + 0.15)
 
 
+def test_zero_pct_disables_sl_tp_legs():
+    """A 0 pct disables that leg (no SL/TP), never pinning to entry price.
+
+    Guards the shannon's-demon regression: stop_loss=0 + take_profit=0 used to
+    set SL = entry_price, so every rebalance stopped out the next bar.
+    """
+    config = RiskConfig(stop_loss_pct=0.0, take_profit_pct=0.0, trailing_stop=False)
+    position = Position(
+        symbol="AAPL",
+        qty=10.0,
+        entry_price=100.0,
+        entry_time=get_ts("2025-01-01"),
+        stop_loss=None,
+        take_profit=None,
+        last_price=100.0,
+        type=ActionType.long,
+        sl_explicit=False,
+        tp_explicit=False,
+    )
+    # Even a bar gapping far below entry must NOT trigger a stop when SL is 0.
+    tick = Candle(
+        timestamp=get_ts("2025-01-02"),
+        symbol="AAPL",
+        open=92.0,
+        high=93.0,
+        low=85.0,
+        close=86.0,
+        volume=1000,
+    )
+    new_pos, event = check_position_risk(position, tick, config)
+    assert event is None
+    assert new_pos.stop_loss is None
+    assert new_pos.take_profit is None
+
+
+def test_trailing_stop_disabled_at_zero_pct():
+    """Trailing stop is skipped entirely when stop_loss_pct is 0."""
+    config = RiskConfig(stop_loss_pct=0.0, take_profit_pct=0.1, trailing_stop=True)
+    position = Position(
+        symbol="AAPL",
+        qty=10.0,
+        entry_price=100.0,
+        entry_time=get_ts("2025-01-01"),
+        stop_loss=None,
+        take_profit=None,
+        last_price=100.0,
+        type=ActionType.long,
+        sl_explicit=False,
+        tp_explicit=False,
+    )
+    tick = Candle(
+        timestamp=get_ts("2025-01-02"),
+        symbol="AAPL",
+        open=110.0,
+        high=115.0,
+        low=109.0,
+        close=114.0,
+        volume=1000,
+    )
+    new_pos, _ = check_position_risk(position, tick, config)
+    assert new_pos.stop_loss is None
+    assert new_pos.take_profit == pytest.approx(110.0)  # TP leg still set
+
+
 def test_auto_sl_set_from_config_short():
     """Risk module sets initial SL/TP for shorts."""
     config = RiskConfig(stop_loss_pct=0.05, take_profit_pct=0.15, trailing_stop=False)

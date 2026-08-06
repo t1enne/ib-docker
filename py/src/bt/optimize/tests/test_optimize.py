@@ -7,11 +7,11 @@ from src.utils import parse_timestamp
 
 from src.bt.optimize import (
     OptimizeResult,
-    _flat_overrides,
     run_optimize,
     render_optimize_report,
     optimize_report_to_json,
 )
+import src.bt.optimize as _impl
 from src.bt.split import TestFold
 from src.bt.state import PortfolioResult
 from src.bt.types import StrategyConfig
@@ -69,12 +69,12 @@ def _folds() -> list[TestFold]:
 def test_flat_overrides_flattens_swept_leaves():
     merge = {"strategy_params": {"ma_slow": [50], "nested": {"x": [1.5]}}}
     patch = {"strategy_params": {"ma_slow": 200, "nested": {"x": 2.0}}}
-    out = _flat_overrides(merge, patch)
+    out = _impl._flat_overrides(merge, patch)
     assert out == {"strategy_params.ma_slow": 200, "strategy_params.nested.x": 2.0}
 
 
 def test_flat_overrides_empty_merge():
-    assert _flat_overrides({}, {}) == {}
+    assert _impl._flat_overrides({}, {}) == {}
 
 
 def test_run_optimize_tunes_on_oos_bounded_by_scoped_windows(monkeypatch):
@@ -85,7 +85,7 @@ def test_run_optimize_tunes_on_oos_bounded_by_scoped_windows(monkeypatch):
     handed (the IS-best combo). The runner must therefore: run every combo per
     fold IS, pick the largest x, and pass that exact config to the OOS run.
     """
-    import src.bt.optimize as opt
+    opt = _impl
 
     cfg = _cfg()
     # Grid: x in [1, 2, 3] → combos x=1,x=2,x=3. IS-best per fold = x=3.
@@ -132,7 +132,8 @@ def test_run_optimize_tunes_on_oos_bounded_by_scoped_windows(monkeypatch):
 
 def test_run_optimize_rejects_unknown_sort_metric():
     import pytest
-    import src.bt.optimize as opt
+
+    opt = _impl
 
     cfg = _cfg()
     with pytest.raises(ValueError):

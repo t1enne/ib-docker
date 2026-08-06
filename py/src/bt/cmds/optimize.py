@@ -73,6 +73,7 @@ def optimize(
     """
     from src.bt import load_strategy
     from src.bt.optimize import (
+        _flat_overrides,
         optimize_report_to_json,
         render_optimize_report,
         run_optimize,
@@ -80,6 +81,21 @@ def optimize(
     from src.bt.split import anchor_split, walk_forward_folds
 
     cfg = load_strategy(strategy_file)
+
+    def _stream_fold(fold, best_patch: dict, is_metrics: dict, oos) -> None:
+        params_desc = " ".join(
+            f"{k}={v}" for k, v in _flat_overrides(grid, best_patch).items()
+        )
+        click.echo(
+            f"[fold {fold.index + 1}]  "
+            f"IS {fold.is_start.date()}→{fold.is_end.date()} | "
+            f"OOS {fold.oos_start.date()}→{fold.oos_end.date()}\n"
+            f"  params: {params_desc or '(none)'}\n"
+            f"  IS sharpe={is_metrics['sharpe_ratio']:.2f}  "
+            f"OOS sharpe={oos.sharpe_ratio:.2f}  "
+            f"OOS ann={oos.annual_return:.2%}  "
+            f"OOS maxdd={oos.max_drawdown:.2%}"
+        )
 
     try:
         grid: dict = parse_param_grid(param_grid)
@@ -96,7 +112,13 @@ def optimize(
                 "Provide one of --is-end (single split) or --folds (walk-forward)."
             )
 
-        results, agg = run_optimize(cfg, folds_list, grid, sort_metric=sort_by)
+        results, agg = run_optimize(
+            cfg,
+            folds_list,
+            grid,
+            sort_metric=sort_by,
+            on_result=_stream_fold,
+        )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 

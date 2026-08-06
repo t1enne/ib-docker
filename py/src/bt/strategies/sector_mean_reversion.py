@@ -16,6 +16,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
+from src.bt.regime.gates import series_above_sma
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 
@@ -161,9 +162,8 @@ def _is_bear_regime(
         return False
 
     closes = cast(pd.Series, candles["close"])
-    current = float(closes.iloc[-1])
-    sma = float(closes.iloc[-sma_window:].mean())
-    result = current < sma
+    # Bear = NOT above SMA — shared SMA-math via the regime gate module.
+    result = not series_above_sma(closes, sma_window)
     GLOBAL["regime_cache"][regime_symbol] = result
     GLOBAL["regime_ts"] = ts
     return result

@@ -71,6 +71,16 @@ def split(
         cli_ts(train_start) if train_start is not None else None
     )
 
+    def _stream_fold(fold, is_result, oos_result) -> None:
+        click.echo(
+            f"[fold {fold.index + 1}]  "
+            f"IS {fold.is_start.date()}→{fold.is_end.date()} | "
+            f"OOS {fold.oos_start.date()}→{fold.oos_end.date()}\n"
+            f"  IS sharpe={is_result.sharpe_ratio:.2f}  ann={is_result.annual_return:.2%}\n"
+            f"  OOS sharpe={oos_result.sharpe_ratio:.2f}  ann={oos_result.annual_return:.2%}  "
+            f"maxdd={oos_result.max_drawdown:.2%}"
+        )
+
     try:
         if folds is not None:
             folds_list = walk_forward_folds(
@@ -86,7 +96,7 @@ def split(
                 "Provide one of --is-end (single split) or --folds (walk-forward)."
             )
 
-        report = run_split(cfg, folds_list)
+        report = run_split(cfg, folds_list, on_result=_stream_fold)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 

@@ -102,12 +102,18 @@ def run_sweep(
     cfg: StrategyConfig,
     merge: dict,
     sort_metric: str = "annual_return",
+    on_result: Callable[[int, int, dict[str, Any], PortfolioResult], None]
+    | None = None,
 ) -> list[SweepResult]:
     """Sweep ``merge`` (partial config JSON) over ``cfg``, ranked by sort_metric.
 
     List-valued leaves in ``merge`` are swept (cartesian). Scalar leaves
     override once. Candles load once over the window and are reused across
     combos; strategy module state resets between runs.
+
+    ``on_result`` (optional) is called with (index, total, flat_overrides, pf)
+    as each combo finishes, letting callers stream results live instead of
+    waiting for the full ranking.
     """
     metric_names = {f.name for f in fields(PortfolioResult)}
     if sort_metric not in metric_names:
@@ -149,6 +155,9 @@ def run_sweep(
             for segment in path:
                 node = node[segment]
             overrides[".".join(path)] = node
+
+        if on_result is not None:
+            on_result(len(results), len(combos), overrides, res.pf)
 
         results.append(
             SweepResult(

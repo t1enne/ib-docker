@@ -19,6 +19,7 @@ Beta-weighted pairs trading. Each leg is sized proportionally to the
 Kalman hedge ratio β so that notional exposure of leg2 ≈ β × leg1.
 Pair resolved via strategy_params.pair or auto-detected from first two
 symbols in state.candles.
+
 """
 
 from __future__ import annotations
@@ -28,11 +29,24 @@ from typing import cast
 
 import pandas as pd
 
-from src.bt.regime.types import TREND_INT_TO_LABEL
+from src.bt.regime.gates import current_trend
+from src.indicators.kalman.strategy import OnlinePairs
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 
 STRATEGY_TYPE = "kalman_pairs"
+
+
+# ---------------------------------------------------------------------------
+# module-level state — repo GLOBAL-dict convention + reset_global().
+# ---------------------------------------------------------------------------
+
+GLOBAL: dict = {"kf": None}  # OnlinePairs when use_strategy_model=True
+
+
+def reset_global() -> None:
+    global GLOBAL
+    GLOBAL = {"kf": None}
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +82,12 @@ class Params(StrategyParams):
 
     # Pairs — auto-detected from symbols[0], symbols[1] if None
     pair: tuple[str, str] | None = None
+
+    # Model source: when True, run the Kalman filter inside this strategy
+    # (own OnlinePairs instance in GLOBAL) instead of reading the engine
+    # model_updater's kalman_* fields. Enabled strategies need reset_global()
+    # for clean IS/OOS splits.
+    use_strategy_model: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -122,17 +142,6 @@ def on_candle(
     candle: Candle,
     params: Params,
 ) -> list[TradeSignal]:
-    ms = state.model_state
-
-    # ---- warmup guard ----
-    z = ms.kalman_z_score
-    if z is None:
-        return []
-
-    beta = ms.kalman_beta
-    if beta is None:
-        return []
-
     # ---- pair resolution ----
     pair = _resolve_pair(state, params)
     if pair is None:
@@ -156,13 +165,29 @@ def on_candle(
     p1 = float(aligned["a"].iloc[-1])
     p2 = float(aligned["b"].iloc[-1])
 
+    # ---- model source: strategy-owned filter OR engine model_updater ----
+    if params.use_strategy_model:
+        kf = GLOBAL["kf"]
+        if kf is None:
+            kf = OnlinePairs(warmup_bars=params.warmup_bars)
+            GLOBAL["kf"] = kf
+        result = kf.observe(state, s1, s2, interval)
+        if not result.ready or result.z_score is None or result.beta is None:
+            return []
+        z = result.z_score
+        beta = result.beta
+    else:
+        # ---- warmup guard ----
+        z = state.model_state.kalman_z_score
+        if z is None:
+            return []
+        beta = state.model_state.kalman_beta
+        if beta is None:
+            return []
+
     # ---- Regime gate ----
-    if params.regime_gate:
-        trend = state.model_state.current_trend
-        if trend is not None:
-            label = TREND_INT_TO_LABEL.get(trend)
-            if label == "BEAR":
-                return _close_pair(state, candle, s1, s2, "[BEAR] regime", z)
+    if params.regime_gate and current_trend(state) == "BEAR":
+        return _close_pair(state, candle, s1, s2, "[BEAR] regime", z)
 
     # ---- current positions ----
     pos1 = state.portfolio.positions.get(s1, ())

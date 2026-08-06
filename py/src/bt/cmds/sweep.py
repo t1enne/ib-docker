@@ -59,11 +59,23 @@ def sweep(
         raise click.UsageError(str(exc)) from exc
 
     cfg = load_strategy(strategy_file)
-    results = run_sweep(cfg, grid, sort_metric=sort_by)
+
+    # Stream results to stdout as each combo finishes, then re-render the
+    # ranked table once at the end.
+    def _stream_result(idx: int, total: int, overrides: dict, pf) -> None:
+        params_desc = " ".join(f"{k}={v}" for k, v in overrides.items())
+        click.echo(
+            f"[{idx + 1}/{total}] {params_desc}  "
+            f"ann={pf.annual_return:.2%}  sharpe={pf.sharpe_ratio:.2f}  "
+            f"maxdd={pf.max_drawdown:.2%}  trades={len(pf.trades)}"
+        )
+
+    results = run_sweep(cfg, grid, sort_metric=sort_by, on_result=_stream_result)
 
     if fmt == "json":
         click.echo(json.dumps(sweep_report_to_json(results), indent=2))
     else:
+        click.echo()
         click.echo(render_sweep_report(results, sort_metric=sort_by, limit=top_n))
 
 

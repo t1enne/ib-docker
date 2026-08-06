@@ -12,7 +12,7 @@ Mirrors the repo's `pure.py` convention.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Callable, Mapping
 
 import pandas as pd
 
@@ -231,6 +231,8 @@ def walk_forward_folds(
 def run_split(
     cfg: StrategyConfig,
     folds: list[TestFold],
+    on_result: Callable[[TestFold, PortfolioResult, PortfolioResult], None]
+    | None = None,
 ) -> SplitReport:
     """Run one backtest per IS and OOS window of every fold.
 
@@ -238,6 +240,9 @@ def run_split(
     - Loads candles once over [train_start, trading_end], window-sliced per
       fold via trading-window overrides (no per-fold data reload).
     - Resets module-level strategy state before EVERY window run.
+
+    ``on_result`` (optional) pulls (fold, is_result, oos_result) as each fold
+    completes, letting callers stream results live.
     """
     from src.bt.data_feed import load_candles
 
@@ -284,6 +289,8 @@ def run_split(
             )
         is_result = run_window(cfg, strat_mod, data, bm_df, is_start, is_end)
         oos_result = run_window(cfg, strat_mod, data, bm_df, oos_start, oos_end)
+        if on_result is not None:
+            on_result(fold, is_result, oos_result)
         fold_metrics.append(
             FoldMetrics(fold=fold, in_sample=is_result, out_of_sample=oos_result)
         )

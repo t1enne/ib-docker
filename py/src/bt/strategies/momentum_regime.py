@@ -26,12 +26,8 @@ from src.bt.state import (
 from src.bt.strategies.types import StrategyParams
 from src.bt.strategies.utils import close, open
 
-from src.bt.regime.types import (
-    TREND_INT_TO_LABEL,
-    VOL_INT_TO_LABEL,
-    TrendRegime,
-    VolRegime,
-)
+from src.bt.regime.gates import TrendGate, current_trend, current_vol
+from src.bt.regime.types import VolRegime
 
 STRATEGY_TYPE = "momentum_regime"
 
@@ -71,47 +67,8 @@ class Params(StrategyParams):
 
 
 # ---------------------------------------------------------------------------
-# regime helpers
+# regime helpers — thin wrappers over src.bt.regime.gates
 # ---------------------------------------------------------------------------
-
-
-def _current_trend(state: BacktestState) -> TrendRegime | None:
-    """Extract current trend regime label from model state."""
-    trend_int = state.model_state.current_trend
-    if trend_int is None:
-        return None
-    return TREND_INT_TO_LABEL.get(trend_int)
-
-
-def _current_vol(state: BacktestState) -> VolRegime | None:
-    """Extract current vol regime label from model state."""
-    vol_int = state.model_state.current_vol
-    if vol_int is None:
-        return None
-    return VOL_INT_TO_LABEL.get(vol_int)
-
-
-def _should_go_long(trend: TrendRegime | None, params: Params) -> bool:
-    """Check if trend regime allows long entries."""
-    if trend is None:
-        return not params.regime_unknown_flat
-    if trend == "BULL":
-        return params.regime_long
-    if trend == "BEAR":
-        return False  # don't buy in bear
-    # RANGE
-    return not params.regime_range_flat
-
-
-def _should_go_short(trend: TrendRegime | None, params: Params) -> bool:
-    """Check if trend regime allows short entries."""
-    if trend is None:
-        return not params.regime_unknown_flat
-    if trend == "BEAR":
-        return params.regime_short
-    if trend == "BULL":
-        return False
-    return not params.regime_range_flat
 
 
 def _regime_size_mult(vol: VolRegime | None, params: Params) -> float:
@@ -191,8 +148,9 @@ def on_candle(
     if len(closes) < params.slow:
         return []
 
-    trend = _current_trend(state)
-    vol = _current_vol(state)
+    trend = current_trend(state)
+    vol = current_vol(state)
+    gate = TrendGate(trend)
     _, _, crossed_up, crossed_down = _sma_cross(
         closes, params.fast, params.slow, params
     )
@@ -203,23 +161,30 @@ def on_candle(
 
     # ---- Exit in-position ----
     if position is not None:
+        direction = "long" if position.type == ActionType.long else "short"
         if position.type == ActionType.long and crossed_down:
             return close(candle, position, f"[{trend or '?'}] sma cross down")
         if position.type == ActionType.short and crossed_up:
             return close(candle, position, f"[{trend or '?'}] sma cross up")
         # Also exit if regime turns hostile
-        if position.type == ActionType.long and trend == "BEAR":
-            return close(candle, position, f"[{trend}] exit long in bear")
-        if position.type == ActionType.short and trend == "BULL":
-            return close(candle, position, f"[{trend}] exit short in bull")
-        if trend == "RANGE" and params.regime_range_flat:
-            return close(candle, position, "[RANGE] flat")
+        if gate.hostile_to(direction, allow_range=params.regime_range_flat):
+            if gate.bear:
+                reason = "[BEAR] exit long"
+            elif gate.bull:
+                reason = "[BULL] exit short"
+            else:
+                reason = "[RANGE] flat"
+            return close(candle, position, reason)
         return []
 
     # ---- Entry ----
     if (
         crossed_up
-        and _should_go_long(trend, params)
+        and gate.allows_long(
+            allow_bull=params.regime_long,
+            allow_range=not params.regime_range_flat,
+            allow_unknown=not params.regime_unknown_flat,
+        )
         and _momentum_ok(closes, params, "long")
     ):
         return open(
@@ -231,7 +196,11 @@ def on_candle(
 
     if (
         crossed_down
-        and _should_go_short(trend, params)
+        and gate.allows_short(
+            allow_bear=params.regime_short,
+            allow_range=not params.regime_range_flat,
+            allow_unknown=not params.regime_unknown_flat,
+        )
         and _momentum_ok(closes, params, "short")
     ):
         return open(

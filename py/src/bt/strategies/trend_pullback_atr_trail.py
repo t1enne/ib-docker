@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import src.indicators.ta as ta
 
+from src.bt.regime.gates import weekly_above_sma
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
 
@@ -69,14 +70,14 @@ class Params(StrategyParams):
 
 GLOBAL: dict = {
     "cooldowns": {},
-    "weekly_cache": {},
+    "gate_cache": {},
     "in_trail": set(),  # position_ids currently in trail mode
 }
 
 
 def reset_global() -> None:
     global GLOBAL
-    GLOBAL = {"cooldowns": {}, "weekly_cache": {}, "in_trail": set()}
+    GLOBAL = {"cooldowns": {}, "gate_cache": {}, "in_trail": set()}
 
 
 # ---------------------------------------------------------------------------
@@ -84,36 +85,15 @@ def reset_global() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _weekly_bullish(
-    symbol: str,
-    daily_closes: pd.Series,
-    params: Params,
-    current_ts: pd.Timestamp,
-) -> bool:
-    if len(daily_closes) < params.weekly_ma_period * 5 + 1:
-        return False
-
-    weekly = daily_closes.resample("W").last().dropna()
-    if len(weekly) < params.weekly_ma_period:
-        return False
-
-    last_weekly_ts = weekly.index[-1]
-    cache_key = GLOBAL["weekly_cache"].get(symbol)
-    if cache_key is not None and cache_key[0] == last_weekly_ts:
-        return cache_key[1]
-
-    sma50 = float(weekly.iloc[-params.weekly_ma_period :].mean())
-    price_ok = float(weekly.iloc[-1]) > sma50
-
-    if params.weekly_return_threshold > -99.0 and len(weekly) >= 2:
-        weekly_return = (weekly.iloc[-1] - weekly.iloc[-2]) / weekly.iloc[-2]
-        ret_ok = float(weekly_return) > params.weekly_return_threshold
-    else:
-        ret_ok = True
-
-    result = price_ok and ret_ok
-    GLOBAL["weekly_cache"][symbol] = (last_weekly_ts, result)
-    return result
+def _weekly_bullish(state: BacktestState, symbol: str, params: Params) -> bool:
+    return weekly_above_sma(
+        state,
+        symbol,
+        window=params.weekly_ma_period,
+        bar="1d",
+        min_weekly_return=params.weekly_return_threshold,
+        cache=GLOBAL["gate_cache"],
+    )
 
 
 def _is_oversold(
@@ -225,7 +205,7 @@ def on_candle(
         if len(closes) < params.warmup_bars:
             continue
 
-        if not _weekly_bullish(symbol, closes, params, candle.timestamp):
+        if not _weekly_bullish(state, symbol, params):
             continue
 
         if not _is_oversold(closes, highs, lows, params):

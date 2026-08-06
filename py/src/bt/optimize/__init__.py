@@ -22,7 +22,7 @@ from `sweep.py`. Mirrors the repo's `pure.py` convention.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -102,6 +102,7 @@ def run_optimize(
     folds: list[TestFold],
     merge: dict[str, Any],
     sort_metric: str = "sharpe_ratio",
+    on_result: Callable[..., None] | None = None,
 ) -> tuple[list[OptimizeResult], dict[str, float]]:
     """Walk-forward optimize: tune params per fold's IS, validate on its OOS.
 
@@ -200,6 +201,8 @@ def run_optimize(
                 oos=oos_pf,
             )
         )
+        if on_result is not None:
+            on_result(fold, best_patch, best_is, oos_pf)
 
     agg = {
         "mean_oos_sharpe": (

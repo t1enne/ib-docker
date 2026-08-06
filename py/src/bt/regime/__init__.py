@@ -20,6 +20,15 @@ Model updaters
 create_regime_model_updater   — single detector → current_regime
 create_dual_online_updater    — SMA trend + online HMM vol → current_trend + current_vol
 create_hmm_online_updater     — online HMM → current_regime
+
+Gates (strategy-facing)
+-----------------------
+TrendGate            — typed BULL/BEAR/RANGE with allows_long/short + hostile_to
+sma_trend            — SMA fast/slow crossover → TrendGate
+above_sma            — last close vs N-SMA (bool)
+series_above_sma     — stateless close series vs N-SMA (bool)
+weekly_above_sma     — weekly close vs weekly N-SMA (structural trend, bool)
+current_trend / vol  — decode ModelState.current_trend/current_vol to labels
 """
 
 from src.bt.regime.types import (
@@ -43,6 +52,15 @@ from src.bt.regime.model_updater import (
     create_hmm_online_updater,
     create_dual_online_updater,
 )
+from src.bt.regime.gates import (
+    TrendGate,
+    current_trend,
+    current_vol,
+    sma_trend,
+    above_sma,
+    series_above_sma,
+    weekly_above_sma,
+)
 
 __all__ = [
     # Types
@@ -63,4 +81,12 @@ __all__ = [
     "create_regime_model_updater",
     "create_hmm_online_updater",
     "create_dual_online_updater",
+    # Gates
+    "TrendGate",
+    "sma_trend",
+    "above_sma",
+    "series_above_sma",
+    "weekly_above_sma",
+    "current_trend",
+    "current_vol",
 ]

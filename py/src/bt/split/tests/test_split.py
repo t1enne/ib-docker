@@ -347,7 +347,7 @@ def test_reset_strategy_state_clears_set_state() -> None:
     reset_strategy_state(trail_variant)
     assert trail_variant.GLOBAL["in_trail"] == set()
     assert trail_variant.GLOBAL["cooldowns"] == {}
-    assert trail_variant.GLOBAL["weekly_cache"] == {}
+    assert trail_variant.GLOBAL["gate_cache"] == {}
 
 
 def test_reset_strategy_state_noop_without_hook() -> None:

@@ -135,6 +135,63 @@ def bt_split(
         click.echo(render_split_report(report))
 
 
+@bt_group.command(name="sweep")
+@click.argument("strategy_file", type=click.Path(exists=True))
+@click.argument("param_grid", type=str)
+@click.option(
+    "--sort-by",
+    default="annual_return",
+    help="PortfolioResult metric to rank combos by (e.g. sharpe_ratio).",
+)
+@click.option(
+    "--limit",
+    "top_n",
+    type=int,
+    default=None,
+    help="Show only the top N combos (default: all).",
+)
+@click.option(
+    "--format",
+    "-F",
+    "fmt",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Report format.",
+)
+def bt_sweep(
+    strategy_file: str, param_grid: str, sort_by: str, top_n: int | None, fmt: str
+):
+    """Sweep a strategy's params over a grid and rank backtest results.
+
+    PARAM_GRID: JSON object mapping param name -> list of values to try.
+    The full cartesian product is run. Keys matching top-level config fields
+    (e.g. stop_loss, take_profit, position_size) override the config; all
+    other keys override the strategy's own params.
+
+    Example:
+      ibkr bt sweep mystrat.json '{"rebalance_days":[5,10,21], "drift_tolerance":[0.01,0.05]}'
+    """
+    from src.bt import load_strategy
+    from src.bt.sweep import (
+        render_sweep_report,
+        run_sweep,
+        sweep_report_to_json,
+    )
+
+    try:
+        grid: dict = _parse_param_grid(param_grid)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    cfg = load_strategy(strategy_file)
+    results = run_sweep(cfg, grid, sort_metric=sort_by)
+
+    if fmt == "json":
+        click.echo(json.dumps(sweep_report_to_json(results), indent=2))
+    else:
+        click.echo(render_sweep_report(results, sort_metric=sort_by, limit=top_n))
+
+
 @bt_group.command(name="analyze")
 @click.argument("strategy_file", type=click.Path(exists=True))
 def bt_analyze(strategy_file: str):
@@ -161,6 +218,40 @@ def bt_analyze(strategy_file: str):
                 metrics[key] = val
 
     click.echo(json.dumps(metrics, indent=2))
+
+
+def _parse_param_grid(raw: str) -> dict:
+    """Parse a JSON-like param grid, tolerating unquoted bare keys.
+
+    Accepts strict JSON and shorthand like ``{ma_slow: [9, 14, 21]}``.
+    Column values (keys) with no quotes are wrapping in double quotes before
+    parsing. Single-quoted text stays literal.
+    """
+    try:
+        return json.loads(raw, parse_int=int, parse_float=float)
+    except json.JSONDecodeError:
+        pass
+    import re
+
+    # Tolerate unquoted bare keys anywhere in the JSON: wrap each bare key
+    # (identifier not already preceded by a quote) in double quotes.
+    quoted = re.sub(
+        r"(?P<notsquote>^|[^\"'])([A-Za-z_][A-Za-z0-9_]*)\s*:",
+        r'\g<notsquote>"\2" :',
+        raw,
+    )
+    try:
+        parsed = json.loads(quoted, parse_int=int, parse_float=float)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"param_grid is not valid JSON: {exc}")
+    if not isinstance(parsed, dict) or not all(
+        isinstance(v, list) for v in parsed.values()
+    ):
+        raise ValueError(
+            "param_grid must be a JSON object of param -> [values]: "
+            "'{ \"ma_slow\": [9,14,21] }'"
+        )
+    return parsed
 
 
 def _cli_ts(dt) -> pd.Timestamp:

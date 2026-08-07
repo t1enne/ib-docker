@@ -151,13 +151,21 @@ class MarketRegimeHMMOnline:
         ).dropna()
 
     def _latest_features(self) -> np.ndarray:
-        """Compute feature vector for the latest bar only."""
+        """Compute feature vector for the latest bar only.
+
+        Feature definitions must match ``_compute_features`` (what the HMM was
+        trained on): log returns, not simple returns. Mixing log-return
+        volatility/momentum during training with simple-return features at
+        prediction shifts the distribution the classifier sees and degrades
+        regime labels.
+        """
         prices = self._to_series()
         if len(prices) < 2:
             return np.zeros(3)
-        ret = np.log(prices.iloc[-1] / prices.iloc[-2])
-        vol = prices.pct_change().rolling(self.vol_window).std().iloc[-1] * np.sqrt(252)
-        mom = prices.pct_change().rolling(self.momentum_window).mean().iloc[-1] * 252
+        returns = np.log(prices / prices.shift(1))
+        ret = float(returns.iloc[-1])
+        vol = returns.rolling(self.vol_window).std().iloc[-1] * np.sqrt(252)
+        mom = returns.rolling(self.momentum_window).mean().iloc[-1] * 252
         return np.array(
             [ret, vol if not pd.isna(vol) else 0.0, mom if not pd.isna(mom) else 0.0]
         )

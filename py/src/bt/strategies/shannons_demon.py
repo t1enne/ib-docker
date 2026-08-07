@@ -316,8 +316,12 @@ def on_candle(
     # Entry/exit prices: use entry-interval closes (e.g. hourly)
     entry_closes, _, _ = _portfolio_closes(state, risk_symbols, entry_interval)
 
-    # First deployment: buy both legs at target weights
-    if not current_weights:
+    # First deployment: buy both legs at target weights.
+    # Gate on whether any risky position is held — NOT on current_weights,
+    # which for cash_leg always includes {'__cash__': ...} (so `not current_weights`
+    # would be False and the initial deploy would be skipped, opening the first
+    # position via _full_rebalance instead).
+    if not state.portfolio.positions:
         GLOBAL["last_rebalance"][cache_key] = GLOBAL["bar_idx"]
         return _deploy_initial(
             candle, risk_symbols, all_legs, target, entry_closes, total

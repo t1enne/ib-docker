@@ -63,6 +63,15 @@ def _open_position(
     # Generate position_id from signal if provided, else auto-generate
     pid = signal.position_id or f"{signal.symbol}_{fill.timestamp.timestamp()}"
 
+    # Map the open action to a real position side. `rebalance` is a lifecycle
+    # action (net-delta), not a side — a fresh open via rebalance (no existing
+    # position) is a `long` here (shannons_demon rebalances longs). This matters
+    # because calculate_positions_value/update_prices branch on the side type:
+    # a `rebalance`-typed Position would be misvalued as a short.
+    position_type = (
+        ActionType.short if signal.action == ActionType.short else ActionType.long
+    )
+
     # Create position — SL/TP from signal, None if not set.
     # Mark explicit so risk module doesn't override signal-provided levels.
     position = Position(
@@ -73,7 +82,7 @@ def _open_position(
         stop_loss=signal.stop_loss,
         take_profit=signal.take_profit,
         last_price=fill.executed_price,
-        type=signal.action,
+        type=position_type,
         position_id=pid,
         sl_explicit=signal.stop_loss is not None,
         tp_explicit=signal.take_profit is not None,

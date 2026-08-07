@@ -147,35 +147,33 @@ class MarketRegimeHMM:
         # Train a secondary model to figure out which HMM state = which vol regime.
         # We remap the raw HMM state numbers (arbitrary component order) into
         # semantically meaningful labels: 0=lowest vol, 1=med vol, 2=highest vol.
-        self._build_regime_remap(features)
+        self._build_regime_remap()
 
         self.fitted = True
         self.last_train_idx = len(features)
 
         return self
 
-    def _build_regime_remap(self, features: pd.DataFrame) -> None:
-        """Build a state→ranked-regime mapping sorted by mean volatility.
+    def _build_regime_remap(self) -> None:
+        """Build a state→ranked-regime mapping sorted by fitted return variance.
 
-        HMM components are numbered arbitrarily. This method runs predict on
-        the training features, sorts states by their mean volatility, and
-        builds a mapping: raw_state → [0=lowest vol, ..., N-1=highest vol].
-        All predict/predict_proba outputs are then run through this remap.
+        HMM components are numbered arbitrarily (unidentifiable gauge), so the
+        raw state index is meaningless on its own. This builds a deterministic
+        bijective remap that canonicalises the permutation: each component is
+        sorted by the *fitted* variance of its return emission (covars_[·, 0]),
+        a fitted model parameter that is stable across refits and does not
+        depend on how many points happen to be assigned to a state.
+
+        Mapping: raw_state → [0=lowest return-var, ..., N-1=highest return-var].
+        Because the sort key is a fitted parameter (not a noisy empirical mean
+        over predict assignments), the semantic ordering is stable across refits
+        even when raw component labels flip. All predict/predict_proba outputs
+        are run through this remap.
         """
         assert self.model is not None
-        raw_states = self.model.predict(features.values)
-
-        vol_by_state: dict[int, float] = {}
-        for s in range(self.n_regimes):
-            mask = raw_states == s
-            vol_by_state[s] = (
-                float(features["volatility"][mask].mean()) if mask.any() else 0.0
-            )
-
-        # Rank: lowest vol → 0, highest vol → N-1
-        sorted_states = sorted(vol_by_state, key=lambda s: vol_by_state[s])
-        self._state_to_regime = {old: new for new, old in enumerate(sorted_states)}
-        self._regime_to_state = {new: old for new, old in enumerate(sorted_states)}
+        self._state_to_regime, self._regime_to_state = rank_states_by_vol(
+            self.model, self.n_regimes
+        )
 
         label_map = {0: "Low Vol", 1: "Medium Vol", 2: "High Vol"}
         self.regime_labels = {
@@ -379,6 +377,65 @@ class MarketRegimeHMM:
 
         with open(filepath, "wb") as f:
             pickle.dump(model_data, f)
+
+
+def rank_states_by_vol(
+    model, n_regimes: int, vol_feature_idx: int = 0
+) -> tuple[dict[int, int], dict[int, int]]:
+    """Canonicalise HMM component order into a deterministic vol ranking.
+
+    HMM components are unidentifiable: refitting can permute the raw state
+    indices without changing the fitted distribution. The training-window
+    practice of sorting states by the empirical mean ``volatility`` over
+    ``predict()`` assignments is unstable — a dominant state grabs most points
+    so the others get tiny, noisy vol estimates, and their order can flip
+    between refits, making ``current_vol``/``current_regime`` jump spuriously.
+
+    Instead we anchor the rank to the *fitted* emission variance of the return
+    feature (``covars_[s, vol_feature_idx]``), a fitted model parameter that is
+    deterministic per fit and does not depend on assignment counts. Sorting
+    states by it fixes the component permutation gauge, so ``raw_state → rank``
+    (0 = lowest return-var, N-1 = highest) stays semantically stable across
+    refits whenever the underlying fit is stable.
+
+    Parameters
+    ----------
+    model : hmmlearn GaussianHMM
+        Fitted model (diagonal covariance).
+    n_regimes : int
+        Number of hidden states.
+    vol_feature_idx : int
+        Column index of the return feature in the emission covariance. The
+        feature vector is [returns, volatility, momentum], so index 0. Return
+        variance is the canonical volatility anchor (a parameter, not a sample
+        statistic).
+
+    Returns
+    -------
+    tuple[dict[int, int], dict[int, int]]
+        (state_to_regime, regime_to_state) — inverse bijective remaps.
+    """
+    covars = np.asarray(model.covars_, dtype=float)
+    var_by_state: dict[int, float] = {}
+    for s in range(n_regimes):
+        if covars.ndim == 3:
+            # hmmlearn stores `diag` covariances as an (n_components,
+            # n_features, n_features) stack of diagonal matrices — the
+            # variance of feature *j* for state s is covars[s, j, j].
+            var_by_state[s] = float(covars[s, vol_feature_idx, vol_feature_idx])
+        elif covars.ndim == 2:
+            # Dot-product style: (n_components, n_features) row profile.
+            var_by_state[s] = float(covars[s, vol_feature_idx])
+        else:
+            # Scalar emission variance per component.
+            var_by_state[s] = float(covars[s])
+
+    # Lowest return-variance → regime 0, highest → regime N-1. Ties broken by
+    # state index for a fully deterministic result.
+    sorted_states = sorted(var_by_state, key=lambda s: (var_by_state[s], s))
+    state_to_regime = {old: new for new, old in enumerate(sorted_states)}
+    regime_to_state = {new: old for new, old in enumerate(sorted_states)}
+    return state_to_regime, regime_to_state
 
 
 def create_regime_features(

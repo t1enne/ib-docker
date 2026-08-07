@@ -24,6 +24,8 @@ import warnings
 
 from hmmlearn import hmm
 
+from src.indicators.hmm.hmm import rank_states_by_vol
+
 
 class MarketRegimeHMMOnline:
     """Online HMM regime detector — periodic batch refit on rolling window.
@@ -197,17 +199,12 @@ class MarketRegimeHMMOnline:
         finally:
             sys.stderr = old_stderr
 
-        # Build vol-ranked remap: 0=lowest vol, N-1=highest
-        raw_states = self._model.predict(features.values)
-        vol_by_state: dict[int, float] = {}
-        for s in range(self.n_regimes):
-            mask = raw_states == s
-            vol_by_state[s] = (
-                float(features["volatility"][mask].mean()) if mask.any() else 0.0
-            )
-
-        sorted_states = sorted(vol_by_state, key=lambda s: vol_by_state[s])
-        self._state_to_regime = {old: new for new, old in enumerate(sorted_states)}
+        # Build vol-ranked remap: 0=lowest return-var, N-1=highest. Anchored to
+        # the fitted return-variance emission parameter (rank_states_by_vol),
+        # deterministic across refits — not the noisy empirical mean of
+        # predict() assignments, which could reorder and make current_vol
+        # flip spuriously between refits.
+        self._state_to_regime, _ = rank_states_by_vol(self._model, self.n_regimes)
 
         self._fitted = True
         self._last_refit = self._n

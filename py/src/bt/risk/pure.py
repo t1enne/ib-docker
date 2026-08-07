@@ -80,6 +80,7 @@ def check_position_risk(
             reason="sl",
             position_id=pid,
             position_qty=abs(position.qty),
+            position_type=ActionType.long,
         )
 
     if not is_long and position.stop_loss and tick.high >= position.stop_loss:
@@ -90,6 +91,7 @@ def check_position_risk(
             reason="sl",
             position_id=pid,
             position_qty=abs(position.qty),
+            position_type=ActionType.short,
         )
 
     # Check take profit
@@ -101,6 +103,7 @@ def check_position_risk(
             reason="tp",
             position_id=pid,
             position_qty=abs(position.qty),
+            position_type=ActionType.long,
         )
 
     if not is_long and position.take_profit and tick.low <= position.take_profit:
@@ -111,6 +114,7 @@ def check_position_risk(
             reason="tp",
             position_id=pid,
             position_qty=abs(position.qty),
+            position_type=ActionType.short,
         )
 
     return position, None

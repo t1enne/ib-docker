@@ -157,6 +157,7 @@ class StopLossEvent:
     reason: str = "sl"
     position_id: str = ""  # links to the Position that triggered
     position_qty: float = 0.0  # absolute qty of the triggering position
+    position_type: Optional[ActionType] = None  # long/short of the triggering position
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ class TakeProfitEvent:
     reason: str = "tp"
     position_id: str = ""  # links to the Position that triggered
     position_qty: float = 0.0  # absolute qty of the triggering position
+    position_type: Optional[ActionType] = None  # long/short of the triggering position
 
 
 RiskEvent = Tuple[StopLossEvent, TakeProfitEvent]

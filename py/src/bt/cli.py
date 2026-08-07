@@ -12,6 +12,7 @@ import click
 from src.bt.cmds.analyze import register as register_analyze
 from src.bt.cmds.optimize import register as register_optimize
 from src.bt.cmds.run import register as register_run
+from src.bt.cmds.screen import register as register_screen
 from src.bt.cmds.split import register as register_split
 from src.bt.cmds.sweep import register as register_sweep
 
@@ -26,3 +27,4 @@ register_split(bt_group)
 register_sweep(bt_group)
 register_optimize(bt_group)
 register_analyze(bt_group)
+register_screen(bt_group)

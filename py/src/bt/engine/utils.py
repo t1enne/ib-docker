@@ -134,6 +134,13 @@ def candle_generator(
         idx = ts_to_idx.get(ts)
         if idx is not None:
             for s in symbols:
+                # Multi-symbol loads outer-join on the union of timestamps, so a
+                # symbol missing data at this bar has NaN rows (closed market /
+                # data gap). Skipping that symbol's candle keeps NaN out of the
+                # engine (mark-to-market positions_value and equity would
+                # otherwise go NaN permanently).
+                if not np.isfinite(base_arrays[(s, "close")][idx]):
+                    continue
                 yield Candle(
                     timestamp=pdt,
                     symbol=s,

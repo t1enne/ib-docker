@@ -41,7 +41,12 @@ def load_candles(
         DataFrame with MultiIndex (symbol, timestamp) containing OHLCV data
     """
     time_series = [get_local_candles(s, start, end, bar) for s in symbols]
-    return pd.concat(time_series, axis=1, keys=symbols)
+    df = pd.concat(time_series, axis=1, keys=symbols)
+    # The engine iterates candles by index order (per-symbol arrays aligned by
+    # row). Guarantee chronological order regardless of source row order so
+    # downstream consumers (benchmarks, generators) never see reversed/shuffled
+    # timestamps.
+    return df.sort_index()
 
 
 def candles_from_dataframe(

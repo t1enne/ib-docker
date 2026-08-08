@@ -26,6 +26,7 @@ import src.indicators.ta as ta
 from src.bt.regime.gates import weekly_above_sma
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
+from src.bt.strategies.utils import sl_tp_from_pct
 
 STRATEGY_TYPE = "trend_pullback_atr_enhanced"
 
@@ -47,6 +48,10 @@ class Params(StrategyParams):
 
     # ATR-based position sizing (total across both legs)
     risk_pct: float = 0.025  # 2.5% of capital at risk total
+
+    # Per-trade SL/TP fractional pcts of entry; <=0 disables that leg.
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
 
     # Exit
     trail_ma_period: int = 10  # MA trail for the trend leg
@@ -219,6 +224,9 @@ def on_candle(
         risk_dollars = state.portfolio.cash * params.risk_pct
         qty_total = risk_dollars / (atr_val * params.atr_mult)
         qty_per_leg = round(qty_total / 2, 4)
+        sl, tp = sl_tp_from_pct(
+            entry_price, params.stop_loss, params.take_profit, is_long=True
+        )
 
         ts = candle.timestamp
         base_id = f"{symbol}_{ts.timestamp():.0f}"
@@ -232,6 +240,8 @@ def on_candle(
                 price=entry_price,
                 qty=qty_per_leg,
                 position_id=f"{base_id}_rev",
+                stop_loss=sl,
+                take_profit=tp,
                 reason=f"[enhanced] reversion {params.atr_mult}×ATR oversold (ATR={atr_val:.2f} risk={params.risk_pct:.1%})",
             )
         )
@@ -245,6 +255,8 @@ def on_candle(
                 price=entry_price,
                 qty=qty_per_leg,
                 position_id=f"{base_id}_trend",
+                stop_loss=sl,
+                take_profit=tp,
                 reason=f"[enhanced] trend leg (trail=MA{params.trail_ma_period})",
             )
         )

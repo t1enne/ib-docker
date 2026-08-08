@@ -33,6 +33,7 @@ import src.indicators.ta as ta
 from src.bt.regime.gates import weekly_above_sma
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
+from src.bt.strategies.utils import sl_tp_from_pct
 
 STRATEGY_TYPE = "trend_pullback_atr_trail"
 
@@ -54,6 +55,10 @@ class Params(StrategyParams):
 
     # ATR-based position sizing
     risk_pct: float = 0.01
+
+    # Per-trade SL/TP fractional pcts of entry; <=0 disables that leg.
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
 
     # Trail stop — activated after price recovers above MA
     trail_lookback: int = 10  # bars for lowest-low trail
@@ -218,6 +223,9 @@ def on_candle(
             continue
         risk_dollars = state.portfolio.cash * params.risk_pct
         qty = risk_dollars / (atr_val * params.atr_mult)
+        sl, tp = sl_tp_from_pct(
+            entry_price, params.stop_loss, params.take_profit, is_long=True
+        )
 
         signals.append(
             TradeSignal(
@@ -226,6 +234,8 @@ def on_candle(
                 timestamp=candle.timestamp,
                 price=entry_price,
                 qty=round(qty, 4),
+                stop_loss=sl,
+                take_profit=tp,
                 reason=f"[trail] 50wSMA↑ + {params.atr_mult}×ATR oversold (ATR={atr_val:.2f})",
             )
         )

@@ -28,17 +28,19 @@ def _cfg(
         name="t",
         strategy_type="sector_mean_reversion_trail",
         symbols=["XLB", "XLV", "XLY", "XLU", "SPY"],
-        stop_loss=0.15,
-        take_profit=0.3,
         initial_capital=50000,
-        position_size=0.45,
         commission=0.1,
         training_start=training_start,
         training_end=training_start,
         trading_start=trading_start,
         trading_end=trading_end,
         bars=["1d"],
-        strategy_params={"momentum_lookback": 30},
+        strategy_params={
+            "momentum_lookback": 30,
+            "position_size": 0.45,
+            "stop_loss": 0.15,
+            "take_profit": 0.3,
+        },
         model_params={},
     )
 

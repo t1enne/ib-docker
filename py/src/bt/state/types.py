@@ -67,8 +67,6 @@ class Position:
     last_price: float
     type: ActionType
     position_id: str = ""  # unique identifier, e.g. "SPY_1714003200.0"
-    sl_explicit: bool = False  # True if SL came from TradeSignal (fixed, no trail)
-    tp_explicit: bool = False  # True if TP came from TradeSignal (fixed)
 
 
 @dataclass

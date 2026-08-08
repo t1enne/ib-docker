@@ -143,8 +143,6 @@ def test_gap_stop_through_full_risk_flow():
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=True,
-        tp_explicit=True,
     )
     tick = _candle(open_=85.0, high=88.0, low=84.0, close=86.0)
     cfg = create_risk_config(stop_loss_pct=0.1, take_profit_pct=0.2)

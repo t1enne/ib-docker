@@ -33,6 +33,7 @@ from src.bt.regime.gates import current_trend
 from src.indicators.kalman.strategy import OnlinePairs
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
+from src.bt.strategies.utils import sl_tp_from_pct
 
 STRATEGY_TYPE = "kalman_pairs"
 
@@ -69,8 +70,13 @@ class Params(StrategyParams):
     # Asymmetric risk — divergence stop
     z_exit_stop: float = 3.5
 
-    # Position sizing
-    position_size_pct: float = 0.25
+    # Position sizing + SL/TP — strategy-owned, per-trade.
+    # ``position_size`` = fraction of cash deployed per leg (0-1).
+    # ``stop_loss`` / ``take_profit`` = fractional pcts of entry price;
+    #  <=0 disables that leg. Set per-trade on each TradeSignal.
+    position_size: float = 0.25
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
 
     # Regime gate
     regime_gate: bool = False
@@ -227,12 +233,20 @@ def on_candle(
         leg2_action = ActionType.long if z > 0 else ActionType.short
 
         cash = state.portfolio.cash
-        pos_pct = params.position_size_pct
+        pos_pct = params.position_size
         leg1_value = cash * pos_pct
         leg2_value = leg1_value * abs(beta) if abs(beta) > 1e-12 else leg1_value
 
         qty1 = round(leg1_value / p1, 4)
         qty2 = round(leg2_value / p2, 4)
+
+        # Per-trade SL/TP prices from fractional params.
+        sl1, tp1 = sl_tp_from_pct(
+            p1, params.stop_loss, params.take_profit, leg1_action == ActionType.long
+        )
+        sl2, tp2 = sl_tp_from_pct(
+            p2, params.stop_loss, params.take_profit, leg2_action == ActionType.long
+        )
 
         return [
             TradeSignal(
@@ -241,6 +255,8 @@ def on_candle(
                 timestamp=candle.timestamp,
                 price=p1,
                 qty=qty1,
+                stop_loss=sl1,
+                take_profit=tp1,
                 reason=f"kalman({direction}) z={z:.1f} β={beta:.2f}",
                 z_score=z,
                 hedge_beta=beta,
@@ -251,6 +267,8 @@ def on_candle(
                 timestamp=candle.timestamp,
                 price=p2,
                 qty=qty2,
+                stop_loss=sl2,
+                take_profit=tp2,
                 reason=f"kalman({direction}) z={z:.1f} β={beta:.2f}",
                 z_score=z,
                 hedge_beta=beta,

@@ -92,10 +92,10 @@ class Backtest:
         self.execution_params = create_execution_params(
             fixed_commission=self.config.commission
         )
-        self.risk_config = create_risk_config(
-            stop_loss_pct=self.config.stop_loss,
-            take_profit_pct=self.config.take_profit,
-        )
+        # SL/TP is strategy-owned (set per-trade on TradeSignal from
+        # strategy_params). No config-level fallback: zero pct means the risk
+        # module never derives SL/TP — a strategy-set level is the only source.
+        self.risk_config = create_risk_config(stop_loss_pct=0.0, take_profit_pct=0.0)
 
 
 def run_backtest(

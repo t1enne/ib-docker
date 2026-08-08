@@ -22,17 +22,14 @@ def _cfg() -> StrategyConfig:
         name="opt",
         strategy_type="dummy",
         symbols=["A"],
-        stop_loss=0.5,
-        take_profit=0.8,
         initial_capital=100000.0,
-        position_size=0.95,
         commission=0.05,
         training_start="2020-01-01",
         training_end="2020-01-02",
         trading_start="2020-01-02",
         trading_end="2024-01-01",
         bars=["1d"],
-        strategy_params={},
+        strategy_params={"position_size": 0.95, "stop_loss": 0.5, "take_profit": 0.8},
         benchmark_symbols=[],
     )
 

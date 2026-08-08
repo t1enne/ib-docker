@@ -66,7 +66,6 @@ def test_remap_ranks_by_fitted_return_variance():
 def _deterministic(seed: int, n_comp: int = 3):
     from hmmlearn import hmm
 
-    rng_keys = {}
     m1 = _fit_noisy(hmm.GaussianHMM(n_components=n_comp, random_state=seed))
     s2r1, _ = rank_states_by_vol(m1, n_comp)
     vals1 = tuple(s2r1[i] for i in sorted(s2r1))

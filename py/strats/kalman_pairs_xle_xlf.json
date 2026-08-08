@@ -6,10 +6,7 @@
   "trading_end": "2025-01-01",
   "commission": 0.05,
   "initial_capital": 100000,
-  "position_size": 0.95,
   "strategy_type": "kalman_pairs",
-  "stop_loss": 0.5,
-  "take_profit": 1.0,
   "bars": ["1d"],
   "model_params": {},
   "model_updater": {
@@ -28,7 +25,9 @@
   "strategy_params": {
     "z_entry": 2.0,
     "z_exit": 0.5,
-    "position_size_pct": 0.50,
+    "position_size": 0.50,
+    "stop_loss": 0.5,
+    "take_profit": 1.0,
     "regime_gate": false,
     "warmup_bars": 150
   },

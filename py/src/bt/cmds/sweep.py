@@ -44,7 +44,7 @@ def sweep(
     scalars override once.
 
     Example:
-      ibkr bt sweep mystrat.json '{"position_size":[0.8,0.95], "strategy_params":{"drift_tolerance":[0.01,0.05]}}'
+      ibkr bt sweep mystrat.json '{"strategy_params":{"position_size":[0.8,0.95], "drift_tolerance":[0.01,0.05]}}'
     """
     from src.bt import load_strategy
     from src.bt.sweep import (

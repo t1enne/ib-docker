@@ -84,8 +84,6 @@ def _open_position(
         last_price=fill.executed_price,
         type=position_type,
         position_id=pid,
-        sl_explicit=signal.stop_loss is not None,
-        tp_explicit=signal.take_profit is not None,
     )
 
     # Calculate new cash
@@ -325,8 +323,6 @@ def _rebalance_position(
         last_price=fill.executed_price,
         type=target.type,
         position_id=new_pid,
-        sl_explicit=target.sl_explicit,
-        tp_explicit=target.tp_explicit,
     )
 
     new_trade = Trade(
@@ -411,8 +407,6 @@ def _equity_point_for(portfolio: PortfolioState, tick) -> tuple[dict, EquityPoin
                 last_price=tick.close,
                 type=pos.type,
                 position_id=pos.position_id,
-                sl_explicit=pos.sl_explicit,
-                tp_explicit=pos.tp_explicit,
             )
             for pos in symbol_positions
         )

@@ -24,7 +24,7 @@ from src.bt.state import (
     TradeSignal,
 )
 from src.bt.strategies.types import StrategyParams
-from src.bt.strategies.utils import close, open
+from src.bt.strategies.utils import close, open, sized_qty, sl_tp_from_pct
 
 from src.bt.regime.gates import TrendGate, current_trend, current_vol
 from src.bt.regime.types import VolRegime
@@ -56,11 +56,18 @@ class Params(StrategyParams):
     regime_range_flat: bool = True  # stay flat in RANGE
     regime_unknown_flat: bool = True  # stay flat when regime is None (warmup)
 
-    # Position sizing by regime
-    position_size_pct: float = 0.2  # base % of cash per position
+    # Position sizing by regime.
+    # ``position_size`` is the base fraction of cash per position
+    # (strategy-owned). Per-regime multipliers scale it internally
+    # (e.g. ``size_high_vol`` halves in high-vol).
+    position_size: float = 0.2
     size_bull: float = 1.0
     size_bear: float = 1.0
     size_high_vol: float = 0.5
+
+    # Per-trade SL/TP fractional pcts of entry; <=0 disables that leg.
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
 
     # Warmup
     warmup_bars: int = 60
@@ -156,7 +163,7 @@ def on_candle(
     )
     size_mult = _regime_size_mult(vol, params)
     price = float(closes.iloc[-1])
-    base_qty = (state.portfolio.cash * params.position_size_pct) / price
+    base_qty = sized_qty(state.portfolio.cash, params.position_size, price)
     qty = round(base_qty * size_mult, 4)
 
     # ---- Exit in-position ----
@@ -187,11 +194,16 @@ def on_candle(
         )
         and _momentum_ok(closes, params, "long")
     ):
+        sl, tp = sl_tp_from_pct(
+            price, params.stop_loss, params.take_profit, is_long=True
+        )
         return open(
             candle,
             ActionType.long,
             qty,
             f"[{trend or '?'}] mom cross up ({size_mult:.1f}x)",
+            stop_loss=sl,
+            take_profit=tp,
         )
 
     if (
@@ -203,11 +215,16 @@ def on_candle(
         )
         and _momentum_ok(closes, params, "short")
     ):
+        sl, tp = sl_tp_from_pct(
+            price, params.stop_loss, params.take_profit, is_long=False
+        )
         return open(
             candle,
             ActionType.short,
             qty,
             f"[{trend or '?'}] mom cross down ({size_mult:.1f}x)",
+            stop_loss=sl,
+            take_profit=tp,
         )
 
     return []

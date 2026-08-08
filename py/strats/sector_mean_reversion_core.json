@@ -6,10 +6,7 @@
   "trading_end": "2025-12-31",
   "commission": 0.1,
   "initial_capital": 50000,
-  "position_size": 0.45,
   "strategy_type": "sector_mean_reversion",
-  "stop_loss": 0.15,
-  "take_profit": 0.3,
   "bars": ["1d"],
   "model_params": {},
   "strategy_params": {
@@ -21,6 +18,9 @@
     "warmup_bars": 150,
     "cooldown_bars": 3,
     "exit_rank_threshold": 3,
+    "position_size": 0.45,
+    "stop_loss": 0.15,
+    "take_profit": 0.3,
     "regime_filter": "SPY",
     "regime_sma": 200
   },

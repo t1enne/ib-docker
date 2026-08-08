@@ -36,8 +36,6 @@ def test_stop_loss_long(risk_config):
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=True,
-        tp_explicit=True,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -66,8 +64,6 @@ def test_take_profit_short(risk_config):
         take_profit=80.0,
         last_price=100.0,
         type=ActionType.short,
-        sl_explicit=True,
-        tp_explicit=True,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -93,8 +89,6 @@ def test_no_trigger_when_inside_range(risk_config):
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=True,
-        tp_explicit=True,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -112,9 +106,11 @@ def test_no_trigger_when_inside_range(risk_config):
 # ── Explicit vs auto-managed SL/TP ────────────────────────────────────
 
 
-def test_explicit_sl_not_trailed():
-    """Explicit (signal-provided) SL is fixed — no trailing."""
-    config = RiskConfig(stop_loss_pct=0.1, take_profit_pct=0.2, trailing_stop=True)
+def test_strategy_sl_not_trailed_when_trailing_disabled():
+    """Strategy-set SL is fixed unless trailing_stop is explicitly enabled.
+    The default engine config has trailing_stop=False, so a strategy-provided
+    SL must never move."""
+    config = RiskConfig(stop_loss_pct=0.1, take_profit_pct=0.2, trailing_stop=False)
     position = Position(
         symbol="AAPL",
         qty=10.0,
@@ -124,8 +120,6 @@ def test_explicit_sl_not_trailed():
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=True,
-        tp_explicit=True,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -137,13 +131,13 @@ def test_explicit_sl_not_trailed():
         volume=1000,
     )
     new_pos, event = check_position_risk(position, tick, config)
-    # SL unchanged — explicit trumps trailing
+    # SL unchanged — trailing disabled by default
     assert new_pos.stop_loss == 90.0
     assert event is None
 
 
-def test_auto_sl_set_from_config_long():
-    """Risk module sets initial SL/TP from config when signal provided none."""
+def test_no_sl_tp_without_explicit_levels_long():
+    """No config-level SL/TP fallback: a position with no levels stays level-less."""
     config = RiskConfig(stop_loss_pct=0.05, take_profit_pct=0.15, trailing_stop=False)
     position = Position(
         symbol="AAPL",
@@ -154,8 +148,6 @@ def test_auto_sl_set_from_config_long():
         take_profit=None,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -168,8 +160,9 @@ def test_auto_sl_set_from_config_long():
     )
     new_pos, event = check_position_risk(position, tick, config)
     assert event is None
-    assert new_pos.stop_loss == pytest.approx(95.0)  # 100 * (1 - 0.05)
-    assert new_pos.take_profit == pytest.approx(115.0)  # 100 * (1 + 0.15)
+    # No strategy-provided levels -> none derived from config.
+    assert new_pos.stop_loss is None
+    assert new_pos.take_profit is None
 
 
 def test_zero_pct_disables_sl_tp_legs():
@@ -188,8 +181,6 @@ def test_zero_pct_disables_sl_tp_legs():
         take_profit=None,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     # Even a bar gapping far below entry must NOT trigger a stop when SL is 0.
     tick = Candle(
@@ -207,8 +198,9 @@ def test_zero_pct_disables_sl_tp_legs():
     assert new_pos.take_profit is None
 
 
-def test_trailing_stop_disabled_at_zero_pct():
-    """Trailing stop is skipped entirely when stop_loss_pct is 0."""
+def test_no_level_stays_none_even_when_trailing_enabled():
+    """A position with no strategy-set levels stays level-less; trailing cannot
+    derive a level from config (config-level SL/TP was removed)."""
     config = RiskConfig(stop_loss_pct=0.0, take_profit_pct=0.1, trailing_stop=True)
     position = Position(
         symbol="AAPL",
@@ -219,8 +211,6 @@ def test_trailing_stop_disabled_at_zero_pct():
         take_profit=None,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -233,11 +223,11 @@ def test_trailing_stop_disabled_at_zero_pct():
     )
     new_pos, _ = check_position_risk(position, tick, config)
     assert new_pos.stop_loss is None
-    assert new_pos.take_profit == pytest.approx(110.0)  # TP leg still set
+    assert new_pos.take_profit is None
 
 
-def test_auto_sl_set_from_config_short():
-    """Risk module sets initial SL/TP for shorts."""
+def test_no_sl_tp_without_explicit_levels_short():
+    """No config-level SL/TP fallback for shorts either."""
     config = RiskConfig(stop_loss_pct=0.05, take_profit_pct=0.15, trailing_stop=False)
     position = Position(
         symbol="AAPL",
@@ -248,8 +238,6 @@ def test_auto_sl_set_from_config_short():
         take_profit=None,
         last_price=100.0,
         type=ActionType.short,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -262,12 +250,12 @@ def test_auto_sl_set_from_config_short():
     )
     new_pos, event = check_position_risk(position, tick, config)
     assert event is None
-    assert new_pos.stop_loss == 105.0  # 100 * (1 + 0.05)
-    assert new_pos.take_profit == 85.0  # 100 * (1 - 0.15)
+    assert new_pos.stop_loss is None
+    assert new_pos.take_profit is None
 
 
 def test_auto_sl_trailed():
-    """Non-explicit SL trails up with price."""
+    """An existing SL trails up with price when trailing_stop is enabled."""
     config = RiskConfig(stop_loss_pct=0.1, take_profit_pct=0.2, trailing_stop=True)
     position = Position(
         symbol="AAPL",
@@ -278,8 +266,6 @@ def test_auto_sl_trailed():
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -296,7 +282,7 @@ def test_auto_sl_trailed():
     assert event is None
 
 
-# ── update_trailing_stop (legacy, respects sl_explicit) ───────────────
+# ── update_trailing_stop (legacy) ──────────────────────────────────
 
 
 def test_trailing_sl_moves_up_long():
@@ -310,7 +296,6 @@ def test_trailing_sl_moves_up_long():
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -327,9 +312,9 @@ def test_trailing_sl_moves_up_long():
     assert new_pos.stop_loss > position.stop_loss
 
 
-def test_trailing_sl_skips_explicit():
-    """update_trailing_stop no-ops when sl_explicit=True."""
-    config = RiskConfig(stop_loss_pct=0.1, take_profit_pct=0.2, trailing_stop=True)
+def test_trailing_sl_disabled_when_not_configured():
+    """update_trailing_stop leaves the stop unchanged when trailing is off."""
+    config = RiskConfig(stop_loss_pct=0.1, take_profit_pct=0.2, trailing_stop=False)
     position = Position(
         symbol="AAPL",
         qty=10.0,
@@ -339,7 +324,6 @@ def test_trailing_sl_skips_explicit():
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=True,
     )
     tick = Candle(
         timestamp=get_ts("2025-01-02"),
@@ -369,8 +353,6 @@ def test_no_risk_on_different_symbol(risk_config):
         take_profit=120.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=True,
-        tp_explicit=True,
     )
     portfolio = PortfolioState(
         cash=10000,
@@ -401,22 +383,20 @@ def test_no_risk_on_different_symbol(risk_config):
     assert updated_pf is portfolio
 
 
-def test_check_risk_persists_sl_tp_updates():
-    """check_risk returns updated portfolio with new SL/TP levels."""
+def test_check_risk_persists_strategy_sl_tp_levels():
+    """Strategy-set SL/TP levels on the Position persist through check_risk."""
     from src.bt.state import PortfolioState, EquityPoint
 
-    config = RiskConfig(stop_loss_pct=0.05, take_profit_pct=0.15, trailing_stop=False)
+    config = RiskConfig(stop_loss_pct=0.0, take_profit_pct=0.0, trailing_stop=False)
     position = Position(
         symbol="AAPL",
         qty=10.0,
         entry_price=100.0,
         entry_time=get_ts("2025-01-01"),
-        stop_loss=None,
-        take_profit=None,
+        stop_loss=95.0,
+        take_profit=115.0,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     portfolio = PortfolioState(
         cash=10000,
@@ -444,6 +424,7 @@ def test_check_risk_persists_sl_tp_updates():
     events, new_pf = check_risk(portfolio, tick, config)
     assert events == ()
     updated_pos = new_pf.positions["AAPL"][0]
+    # Strategy-set levels are preserved unchanged (only source of truth).
     assert updated_pos.stop_loss == pytest.approx(95.0)
     assert updated_pos.take_profit == pytest.approx(115.0)
 
@@ -462,8 +443,6 @@ def test_check_risk_trails_auto_sl():
         take_profit=None,
         last_price=100.0,
         type=ActionType.long,
-        sl_explicit=False,
-        tp_explicit=False,
     )
     portfolio = PortfolioState(
         cash=10000,

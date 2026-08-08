@@ -9,17 +9,20 @@ def _cfg(**strategy_params) -> StrategyConfig:
         name="test",
         strategy_type="dummy",
         symbols=["A", "B"],
-        stop_loss=0.5,
-        take_profit=0.8,
         initial_capital=100000.0,
-        position_size=0.95,
         commission=0.05,
         training_start="2020-01-01",
         training_end="2020-01-02",
         trading_start="2020-01-02",
         trading_end="2021-01-01",
         bars=["1d"],
-        strategy_params={"base": 1, **strategy_params},
+        strategy_params={
+            "position_size": 0.95,
+            "stop_loss": 0.5,
+            "take_profit": 0.8,
+            "base": 1,
+            **strategy_params,
+        },
         benchmark_symbols=["A"],
     )
 
@@ -64,10 +67,10 @@ def test_grid_combos_deep_merge_scalar_and_sweep():
 
 def test_build_config_deep_merges_top_level():
     cfg = _cfg()
-    out = build_config(cfg, {"position_size": 0.8})
-    assert out.position_size == 0.8
-    # untouched config fields preserved
-    assert out.stop_loss == cfg.stop_loss
+    out = build_config(cfg, {"initial_capital": 5000.0})
+    assert out.initial_capital == 5000.0
+    # untouched config fields preserved (sizing/SL/TP now live in strategy_params)
+    assert out.strategy_params["position_size"] == cfg.strategy_params["position_size"]
     assert out is not cfg
 
 
@@ -83,11 +86,11 @@ def test_build_config_merges_strategy_params():
 
 def test_build_config_mixed_levels():
     cfg = _cfg()
-    out = build_config(cfg, {"position_size": 0.8, "strategy_params": {"x": 5}})
-    assert out.position_size == 0.8
+    out = build_config(cfg, {"initial_capital": 5000.0, "strategy_params": {"x": 5}})
+    assert out.initial_capital == 5000.0
     assert out.strategy_params["x"] == 5
     assert out.strategy_params["base"] == 1
-    assert out.stop_loss == cfg.stop_loss
+    assert out.strategy_params["position_size"] == cfg.strategy_params["position_size"]
 
 
 def test_build_config_target_weights_list_roundtrips():

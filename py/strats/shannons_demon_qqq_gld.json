@@ -6,10 +6,7 @@
   "trading_end": "2026-01-01",
   "commission": 0.05,
   "initial_capital": 100000,
-  "position_size": 0.95,
   "strategy_type": "shannons_demon",
-  "stop_loss": 0,
-  "take_profit": 0,
   "bars": ["1h", "1d"],
   "model_params": {},
   "model_updater": false,
@@ -22,7 +19,10 @@
     "cash_leg": false,
     "trend_gate_enabled": true,
     "trend_gate_lookback": 200,
-    "trend_gate_threshold": 0.05
+    "trend_gate_threshold": 0.05,
+    "position_size": 0.95,
+    "stop_loss": 0.0,
+    "take_profit": 0.0
   },
   "symbols": ["QQQ", "GLD"]
 }

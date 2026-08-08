@@ -47,17 +47,16 @@ class StrategyConfig:
     name: str
     strategy_type: str
     symbols: list[str]
-    stop_loss: float
-    take_profit: float
     initial_capital: float
-    position_size: float
     commission: float
     training_start: str
     training_end: str
     trading_start: str
     trading_end: str
     bars: list[str]
-    # the strategy_params will be passed to the strategy raw
+    # the strategy_params will be passed to the strategy raw.
+    # Position sizing + stop-loss/take-profit live here (strategy-owned,
+    # per-trade). They are NOT config-level fields.
     strategy_params: dict
     model_params: dict = field(default_factory=dict)
     model_updater: dict | bool = False

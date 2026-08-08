@@ -89,9 +89,9 @@ def resolve_params(
 ) -> object:
     """Instantiate typed Params if strategy defines them, else return raw dict.
 
-    ``position_size`` (top-level ``StrategyConfig`` field) is injected into the
-    strategy's ``Params`` when the strategy declares a ``position_size`` field,
-    so sweeping the config field actually reaches the strategy.
+    ``strategy_params`` holds the strategy's own parameters (sizing, SL/TP,
+    signal knobs). ``StrategyParams.from_dict`` extracts only declared fields,
+    ignoring extra keys, and fills defaults for missing ones.
     """
     mod = init_strat(strat_name)
     params_cls = getattr(mod, "Params", None)

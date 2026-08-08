@@ -19,6 +19,7 @@ import pandas as pd
 from src.bt.regime.gates import series_above_sma
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
+from src.bt.strategies.utils import sized_qty, sl_tp_from_pct
 
 STRATEGY_TYPE = "sector_mean_reversion"
 
@@ -37,7 +38,10 @@ class Params(StrategyParams):
     top_n: int = 2
     max_positions: int = 3
     max_positions_bear: int = 1
-    position_size_pct: float = 0.2  # % of cash per position
+    # Fraction of cash per position + per-trade SL/TP pcts (strategy-owned).
+    position_size: float = 0.2
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
 
     # Exit: close when rank improves to this threshold (1 = best)
     exit_rank_threshold: int = 3
@@ -292,15 +296,20 @@ def on_candle(
             continue
 
         GLOBAL["cooldown"][sym] = params.cooldown_bars
-        qty = (state.portfolio.cash * params.position_size_pct) / entry_price
+        qty = sized_qty(state.portfolio.cash, params.position_size, entry_price)
+        sl, tp = sl_tp_from_pct(
+            entry_price, params.stop_loss, params.take_profit, is_long=True
+        )
         signals.append(
             TradeSignal(
                 action=ActionType.long,
                 symbol=sym,
                 timestamp=candle.timestamp,
                 price=entry_price,
-                qty=round(qty, 4),
-                reason=f"[smrv] rank {rank}/{len(scores)} ret={scores[sym]:.2%} size={params.position_size_pct:.0%}",
+                qty=qty,
+                stop_loss=sl,
+                take_profit=tp,
+                reason=f"[smrv] rank {rank}/{len(scores)} ret={scores[sym]:.2%} size={params.position_size:.0%}",
             )
         )
 

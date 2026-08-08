@@ -40,6 +40,7 @@ import src.indicators.ta as ta
 
 from src.bt.state import ActionType, BacktestState, Candle, TradeSignal
 from src.bt.strategies.types import StrategyParams
+from src.bt.strategies.utils import sl_tp_from_pct
 
 STRATEGY_TYPE = "sector_mean_reversion_trail"
 
@@ -66,6 +67,10 @@ class Params(StrategyParams):
     atr_period: int = 14
     atr_mult: float = 2.0
     risk_pct: float = 0.01  # % of cash risked per ATR unit
+
+    # Per-trade SL/TP fractional pcts of entry; <=0 disables that leg.
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
 
     # Trail (activated after rank recovery)
     trail_lookback: int = 10  # bars for the trail low
@@ -271,6 +276,9 @@ def on_candle(
         if np.isnan(atr_val) or atr_val <= 0:
             continue  # ATR sizing only — no silent fallback
         qty = (state.portfolio.cash * params.risk_pct) / (atr_val * params.atr_mult)
+        sl, tp = sl_tp_from_pct(
+            entry_price, params.stop_loss, params.take_profit, is_long=True
+        )
 
         GLOBAL["cooldown"][sym] = params.cooldown_bars
         signals.append(
@@ -280,6 +288,8 @@ def on_candle(
                 timestamp=candle.timestamp,
                 price=entry_price,
                 qty=round(qty, 4),
+                stop_loss=sl,
+                take_profit=tp,
                 reason=f"[tmr] rank {rank}/{len(rankings)} ret={rankings[sym]:.2%} ATR {atr_val:.2f}",
             )
         )

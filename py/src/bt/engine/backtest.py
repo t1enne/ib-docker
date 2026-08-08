@@ -151,6 +151,10 @@ def run_backtest(
 
     state = initial_state or get_initial_state()
     rows: CandleRows = {}
+    # Engine-owned equity accumulator (avoids the O(n) tuple rebuild per candle
+    # in ``update_prices``). Seeded with the initial equity point; frozen to a
+    # tuple on the final PortfolioState at ``_finalize``.
+    eq_buffer: list = list(state.portfolio.equity_curve)
 
     # Create CandleStore once — wraps rows by reference, mutates in-place.
     # Strategies access it as state.candles (Mapping interface) + .latest()/.count().
@@ -210,10 +214,10 @@ def run_backtest(
         )
 
         # Stage 8: mark to market
-        state = _mark_to_market(state, candle)
+        state = _mark_to_market(state, candle, eq_buffer)
 
     # Finalize: close positions, build results
-    state = _finalize(state, bt.execution_params)
+    state = _finalize(state, bt.execution_params, equity_points=eq_buffer)
 
     # Build equity series, deduplicating by timestamp (equity curve
     # accumulates one point per candle = N points per timestamp).
@@ -421,11 +425,19 @@ def _check_risk(
     return merge_bt_state(state, dict(portfolio=portfolio, risk_events=risk_events))
 
 
-def _mark_to_market(state: BacktestState, candle: Candle) -> BacktestState:
-    """Stage 9: Update position prices and append equity point."""
-    from src.bt.portfolio.pure import update_prices
+def _mark_to_market(
+    state: BacktestState,
+    candle: Candle,
+    eq_buffer: list,
+) -> BacktestState:
+    """Stage 9: Update position prices and append equity point.
 
-    portfolio = update_prices(state.portfolio, candle)
+    Uses ``mark_to_market_list`` to append into the engine-owned ``eq_buffer``
+    (O(1)) instead of rebuilding the O(n) immutable tuple every candle.
+    """
+    from src.bt.portfolio.pure import mark_to_market_list
+
+    portfolio = mark_to_market_list(state.portfolio, candle, eq_buffer)
     return merge_bt_state(state, dict(portfolio=portfolio, timestamp=candle.timestamp))
 
 
@@ -509,8 +521,17 @@ def _append_candle(
     return rows, state
 
 
-def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestState:
-    """Close all positions at end of backtest."""
+def _finalize(
+    state: BacktestState,
+    exec_params: ExecutionParams,
+    equity_points: list | tuple | None = None,
+) -> BacktestState:
+    """Close all positions at end of backtest.
+
+    ``equity_points`` (when provided) is the engine-buffered equity curve that
+    replaces the empty per-candle curve so the final ``PortfolioState`` carries
+    the full, frozen tuple.
+    """
     portfolio = state.portfolio
 
     for symbol, positions_tuple in list(portfolio.positions.items()):
@@ -536,6 +557,10 @@ def _finalize(state: BacktestState, exec_params: ExecutionParams) -> BacktestSta
             from src.bt.portfolio.pure import apply_fill
 
             portfolio = apply_fill(portfolio, fill)
+
+    # Freeze the engine-buffered equity curve onto the final portfolio.
+    if equity_points is not None:
+        portfolio = replace(portfolio, equity_curve=tuple(equity_points))
 
     return merge_bt_state(
         state,

@@ -20,6 +20,7 @@ from src.bt.state import (
 from src.bt.portfolio.pure import (
     apply_fill,
     update_prices,
+    mark_to_market_list,
     calculate_equity,
     calculate_positions_value,
     iter_positions,
@@ -46,6 +47,7 @@ __all__ = [
     # Pure functions
     "apply_fill",
     "update_prices",
+    "mark_to_market_list",
     "calculate_equity",
     "calculate_positions_value",
     "iter_positions",

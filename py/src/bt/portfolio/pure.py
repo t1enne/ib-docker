@@ -389,15 +389,18 @@ def _close_trade(trade: Trade, fill: FillEvent, pnl: float) -> Trade:
     )
 
 
-def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
-    """Update position prices and equity curve with new tick."""
-    symbol = tick.symbol
+def _equity_point_for(portfolio: PortfolioState, tick) -> tuple[dict, EquityPoint]:
+    """Update position last_prices for tick's symbol and build the EquityPoint.
+
+    Returns ``(updated_positions, equity_point)``. Shared by ``update_prices``
+    (tuple-backed) and the engine's list-buffered mark-to-market so the per-candle
+    equity computation lives in one place.
+    """
     new_positions = dict(portfolio.positions)
 
-    # Update all positions for the tick's symbol
-    symbol_positions = portfolio.positions.get(symbol)
+    symbol_positions = portfolio.positions.get(tick.symbol)
     if symbol_positions:
-        updated = tuple(
+        new_positions[tick.symbol] = tuple(
             Position(
                 symbol=pos.symbol,
                 qty=pos.qty,
@@ -413,25 +416,53 @@ def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
             )
             for pos in symbol_positions
         )
-        new_positions[symbol] = updated
 
-    # Calculate equity (always do this, even if no positions)
     positions_value = calculate_positions_value(new_positions)
     equity = portfolio.cash + positions_value
 
-    # Add equity point
     equity_point = EquityPoint(
         timestamp=tick.timestamp,
         equity=equity,
         cash=portfolio.cash,
         positions_value=positions_value,
     )
+    return new_positions, equity_point
+
+
+def update_prices(portfolio: PortfolioState, tick) -> PortfolioState:
+    """Update position prices and equity curve with new tick.
+
+    Appends an ``EquityPoint`` to the (immutable) tuple -- correct but O(n)
+    per candle. The engine host path uses ``mark_to_market_list`` / an engine
+    buffer for long runs to avoid rebuilding the tuple every candle.
+    """
+    new_positions, equity_point = _equity_point_for(portfolio, tick)
 
     return PortfolioState(
         cash=portfolio.cash,
         positions=new_positions,
         trades=portfolio.trades,
         equity_curve=portfolio.equity_curve + (equity_point,),
+        initial_capital=portfolio.initial_capital,
+    )
+
+
+def mark_to_market_list(
+    portfolio: PortfolioState, tick, eq_buffer: list
+) -> PortfolioState:
+    """Same as ``update_prices`` but appends into a caller-owned ``eq_buffer``.
+
+    Returns a copy of the portfolio with updated positions and an EMPTY
+    equity_curve (the buffer holds the curve; the engine freezes it at finalize).
+    O(1) per candle — the hot-path replacement for ``update_prices`` in long runs.
+    """
+    new_positions, equity_point = _equity_point_for(portfolio, tick)
+    eq_buffer.append(equity_point)
+    return PortfolioState(
+        cash=portfolio.cash,
+        positions=new_positions,
+        trades=portfolio.trades,
+        equity_curve=(),
         initial_capital=portfolio.initial_capital,
     )
 

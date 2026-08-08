@@ -5,7 +5,11 @@ from typing import cast
 import pandas as pd
 import pytest
 
-from src.bt.portfolio.pure import apply_fill, update_prices
+from src.bt.portfolio.pure import (
+    apply_fill,
+    update_prices,
+    mark_to_market_list,
+)
 from src.bt.state import (
     ActionType,
     Candle,
@@ -193,3 +197,59 @@ def test_update_prices():
     assert len(aapl) == 1
     assert aapl[0].last_price == 105.0
     assert len(new.equity_curve) == 2
+
+
+def test_mark_to_market_list_matches_update_prices():
+    """Engine-buffered mark-to-market must emit identical equity points but
+    without rebuilding the O(n) immutable tuple each candle."""
+    position = Position(
+        symbol="AAPL",
+        qty=10.0,
+        entry_price=100.0,
+        entry_time=_ts("2024-01-01"),
+        stop_loss=95.0,
+        take_profit=110.0,
+        last_price=100.0,
+        type=ActionType.long,
+    )
+    portfolio = PortfolioState(
+        cash=5000,
+        positions={"AAPL": (position,)},
+        trades=(),
+        equity_curve=(),
+        initial_capital=10000,
+    )
+    ticks = [
+        Candle(
+            timestamp=_ts(f"2024-01-0{i}"),
+            symbol="AAPL",
+            open=100.0,
+            high=105.0,
+            low=99.0,
+            close=100 + i,
+            volume=1000.0,
+        )
+        for i in range(1, 4)
+    ]
+
+    # Reference: tuple-backed update_prices accumulates the full curve.
+    ref = portfolio
+    for tick in ticks:
+        ref = update_prices(ref, tick)
+    assert [p.equity for p in ref.equity_curve] == [6010.0, 6020.0, 6030.0]
+
+    # Engine path: same points land in the caller-owned buffer, interim
+    # portfolio carries an empty curve (frozen to tuple at finalize).
+    buf: list = []
+    cur = portfolio
+    for tick in ticks:
+        cur = mark_to_market_list(cur, tick, buf)
+
+    assert [p.equity for p in buf] == [p.equity for p in ref.equity_curve]
+    assert [p.timestamp for p in buf] == [p.timestamp for p in ref.equity_curve]
+    assert [p.cash for p in buf] == [p.cash for p in ref.equity_curve]
+    # Interim portfolio keeps updated positions but a placeholder curve.
+    assert cur.positions["AAPL"][0].last_price == ticks[-1].close
+    assert cur.equity_curve == ()
+    # Freezing the buffer yields exactly the reference tuple.
+    assert tuple(buf) == ref.equity_curve

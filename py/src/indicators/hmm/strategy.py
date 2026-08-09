@@ -54,7 +54,8 @@ class OnlineRegime:
     candle close of that symbol's interval. Regimes are vol-ranked:
     0=low vol, 1=med vol, 2=high vol.
 
-    Parameters mirror ``MarketRegimeHMMOnline``.
+    Parameters mirror ``MarketRegimeHMMOnline`` (including ``bars_per_year``,
+    which should be set to ~3780 for 1h bars and 252 for daily bars).
     """
 
     def __init__(
@@ -65,6 +66,7 @@ class OnlineRegime:
         momentum_window: int = 10,
         retrain_interval: int = 50,
         random_state: int = 42,
+        bars_per_year: int = 252,
     ) -> None:
         self._models: dict[str, MarketRegimeHMMOnline] = {}
         self._n_regimes = n_regimes
@@ -73,6 +75,7 @@ class OnlineRegime:
         self._momentum_window = momentum_window
         self._retrain_interval = retrain_interval
         self._random_state = random_state
+        self._bars_per_year = bars_per_year
 
     def observe(
         self,
@@ -100,6 +103,7 @@ class OnlineRegime:
                 momentum_window=self._momentum_window,
                 retrain_interval=self._retrain_interval,
                 random_state=self._random_state,
+                bars_per_year=self._bars_per_year,
             )
             self._models[symbol] = model
 

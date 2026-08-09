@@ -40,6 +40,7 @@ class MarketRegimeHMM:
         min_train_size: int = 252,
         update_interval: int = 50,
         random_state: int = 42,
+        bars_per_year: int = 252,
     ):
         """
         Initialize HMM model for regime detection.
@@ -51,6 +52,12 @@ class MarketRegimeHMM:
             min_train_size: Minimum observations needed for initial training
             update_interval: Retrain model every N observations
             random_state: Random seed for reproducibility
+            bars_per_year: Average number of bars in a trading year, used to
+                annualise return volatility and momentum features. Defaults to
+                252 (daily bars). For intraday bars pass e.g. ~3780 for 1h bars
+                (15 trading hours/day * 252) so the features annualise correctly
+                and the model separates regimes by volatility rather than by
+                raw return sign.
         """
         self.n_regimes = n_regimes
         self.vol_window = vol_window
@@ -58,6 +65,7 @@ class MarketRegimeHMM:
         self.min_train_size = min_train_size
         self.update_interval = update_interval
         self.random_state = random_state
+        self.bars_per_year = bars_per_year
 
         self.model: Optional[hmm.GaussianHMM] = None
         self.fitted = False
@@ -85,11 +93,17 @@ class MarketRegimeHMM:
         if returns is None:
             returns = np.log(prices / prices.shift(1))
 
-        # Rolling volatility (annualized)
-        volatility = returns.rolling(window=self.vol_window).std() * np.sqrt(252)
+        # Rolling volatility (annualised to the bar's year-length).
+        # Squart-root scaling so the vol and momentum features are comparable
+        # across bar sizes and the model can separate regimes by volatility.
+        volatility = returns.rolling(window=self.vol_window).std() * np.sqrt(
+            self.bars_per_year
+        )
 
-        # Rolling momentum (mean return)
-        momentum = returns.rolling(window=self.momentum_window).mean() * 252
+        # Rolling momentum (annualised mean return)
+        momentum = (
+            returns.rolling(window=self.momentum_window).mean() * self.bars_per_year
+        )
 
         features = pd.DataFrame(
             {

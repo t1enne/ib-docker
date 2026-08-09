@@ -47,6 +47,7 @@ class MarketRegimeHMMOnline:
         momentum_window: int = 10,
         retrain_interval: int = 50,
         random_state: int = 42,
+        bars_per_year: int = 252,
     ) -> None:
         self.n_regimes = n_regimes
         self.window_size = window_size
@@ -54,6 +55,7 @@ class MarketRegimeHMMOnline:
         self.momentum_window = momentum_window
         self.retrain_interval = retrain_interval
         self.random_state = random_state
+        self.bars_per_year = bars_per_year
 
         # Rolling window of prices
         self._prices: deque[float] = deque(maxlen=window_size)
@@ -142,8 +144,10 @@ class MarketRegimeHMMOnline:
         """Build feature DataFrame from the rolling window."""
         prices = self._to_series()
         returns = np.log(prices / prices.shift(1))
-        volatility = returns.rolling(self.vol_window).std() * np.sqrt(252)
-        momentum = returns.rolling(self.momentum_window).mean() * 252
+        volatility = returns.rolling(self.vol_window).std() * np.sqrt(
+            self.bars_per_year
+        )
+        momentum = returns.rolling(self.momentum_window).mean() * self.bars_per_year
         return pd.DataFrame(
             {
                 "returns": returns,
@@ -166,8 +170,10 @@ class MarketRegimeHMMOnline:
             return np.zeros(3)
         returns = np.log(prices / prices.shift(1))
         ret = float(returns.iloc[-1])
-        vol = returns.rolling(self.vol_window).std().iloc[-1] * np.sqrt(252)
-        mom = returns.rolling(self.momentum_window).mean().iloc[-1] * 252
+        vol = returns.rolling(self.vol_window).std().iloc[-1] * np.sqrt(
+            self.bars_per_year
+        )
+        mom = returns.rolling(self.momentum_window).mean().iloc[-1] * self.bars_per_year
         return np.array(
             [ret, vol if not pd.isna(vol) else 0.0, mom if not pd.isna(mom) else 0.0]
         )

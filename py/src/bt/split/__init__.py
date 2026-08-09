@@ -32,6 +32,10 @@ class TestFold:
     next trading day after IS ends, so the windows are disjoint and adjacent.
     """
 
+    # Not a pytest test collection target — pure domain type. The ``Test``
+    # prefix makes pytest otherwise try to collect it and warn.
+    __test__ = False
+
     index: int
     is_start: pd.Timestamp
     is_end: pd.Timestamp

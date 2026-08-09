@@ -10,6 +10,19 @@ import pandas as pd
 OHLCV_COLS: list[str] = ["open", "high", "low", "close", "volume"]
 
 
+def _normalize_freq(freq: str) -> str:
+    """Normalize a pandas offset string to avoid deprecated aliases.
+
+    pandas 4.x deprecates the lowercase ``'d'`` daily offset in favor of
+    ``'D'``. Rewrite a ``'d'`` frequency suffix to ``'D'`` (e.g. "1d" → "1D")
+    so ``resample``/``floor`` calls don't emit the Pandas4Warning.
+    Idempotent for already-normalized inputs.
+    """
+    if freq and freq[-1] == "d":
+        return freq[:-1] + "D"
+    return freq
+
+
 def resample_ohlcv(
     df: pd.DataFrame,
     freq: str,
@@ -28,6 +41,7 @@ def resample_ohlcv(
     Returns:
         Resampled DataFrame with OHLCV columns
     """
+    freq = _normalize_freq(freq)
     if df.empty:
         return pd.DataFrame(columns=cast(Any, OHLCV_COLS))
 
@@ -65,8 +79,9 @@ def resample_multiindex(
     Returns:
         Resampled DataFrame with MultiIndex (symbol, timestamp)
     """
+    freq = _normalize_freq(freq)
     if df.empty:
-        return pd.DataFrame(  # noqa: ARG-TYPE
+        return pd.DataFrame(
             columns=cast(Any, OHLCV_COLS),
             index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
         )
@@ -87,7 +102,7 @@ def resample_multiindex(
                 resampled_frames.append(sym_resampled)
 
         if not resampled_frames:
-            return pd.DataFrame(  # noqa: ARG-TYPE
+            return pd.DataFrame(
                 columns=cast(Any, OHLCV_COLS),
                 index=pd.MultiIndex.from_tuples([], names=["symbol", "timestamp"]),
             )

@@ -12,6 +12,7 @@ well-documented timing ratios (copper/gold, RSP/SPY breadth, plain HMM-on-CPI).
 | `2024-08_RDD-features.md` | Concrete feature math (`acc`, `real`, `rdisc`), z-scoring, smoothing, cursor-safety. |
 | `2024-08_RDD-backtest-spec.md` | Regime→sizing map, walk-forward protocol, and the **lead-time validation** that proves "leading". |
 | `2024-08_assets-data.md` | Loader contract for `assets/dgs10.csv` + reuse of the CPI loader. |
+| `2024-08_real-economy-lead.md` | **2026 follow-up.** Scan of the added real-economy FRED data (GDP, payrolls, IP, TU, UNRATE) for a tradeable lead. Null result under autocorrelation-honest testing. |
 
 ## Core idea in one line
 
@@ -193,3 +194,30 @@ New falsifiable claim: level-selection, not flip-timing.
 discount leg is inert; test dropping the HMM and regressing forward returns directly on
 the *continuous* composite (`z_acc`/`z_rdisc`) to see whether the features themselves,
 rather than the discretised regime, carry any consistent lead.
+
+---
+
+## Addendum (2026): the added real-economy data — no consistent lead
+
+The RDD line used only price/inflation data (CPI, yields). Since then real-economy FRED
+series were collected: `payems`, `indpro`, `tcu`, `unrate`, `gdpc1`/`gdp`, `bopgstb`
+(loaders in `src/indicators/macro/`). `2024-08_real-economy-lead.md` + `scripts/lead_scan.py`
+tests them for a tradeable {3,21}d leading component for SPY.
+
+**Result: null.** Every candidate (output gap, payroll/IP momentum, capacity utilisation,
+Sahm-style slack) — plus the original `acc`/`rdisc` controls — falls to an
+**autocorrelation-honest (stationary block) bootstrap**; none is significant in the
+tradeable band. The most promising naive result (GDP output-gap +0.14 @21d) was an
+**over-resampling artifact**: monthly/quarterly prints was scored on ~4300 daily rows, and
+a naive pairwise bootstrap declared it significant; a block bootstrap (p≈0.50) and
+quarterly coarsening (sign flips negative at n=48) both kill it.
+
+**Conclusions**
+1. The negative RDD verdict now generalises **across both signal families** (price/rate and
+   real-activity): for SPY 2014–2026, no daily-macro feature is a consistent tradeable lead.
+2. **Any future macro-lead scan must gate on the block-bootstrap p**, not high-n daily
+   correlation — the weekly/hourly-resampled FRED grid is a guaranteed false-positive
+   machine otherwise.
+3. The sign/horizon of the output gap *is* directionally right and monotone (stronger at
+   42/63d) — but confirming it needs a **longer price history** (≥1990s) to lift the
+   quarterly effective sample (n≈48 → ~110), not more features or a different HMM.

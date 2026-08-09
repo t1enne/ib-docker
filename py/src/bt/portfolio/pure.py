@@ -214,9 +214,21 @@ def _rebalance_position(
       - -qty: reduce position (sell some or all)
 
     When the resulting qty <= 0, the position is fully closed.
-    When the resulting qty > 0, the position is adjusted — entry_price
-    is NOT updated (simple average, not time-weighted). Trade record
-    is closed and a new one opened to track the adjusted position.
+    When the resulting qty > 0, the position is adjusted in place with a
+    time-weighted average cost (TWAC): adds re-average the surviving entry
+    price; reduces keep it (selling does not change the cost basis of what
+    remains). The single open trade/position is updated — never closed and
+    reopened — so each rebalance edits the same position_id instead of
+    fabricating a fresh trade preserving an ancient entry price.
+
+    Cash bookkeeping (P0-2):
+      - add     (delta>0): cash -= delta*price + commission; no PnL realized.
+      - reduce  (delta<0): cash += reduce_qty*price - commission;
+                           realizes PnL on the reduced shares only.
+
+    Realized P&L is booked only on an actual full close (``new_qty <= 0``),
+    so strategy-level per-trade PnL reflects true round-trips, not
+    rebalance revaluation.
     """
     symbol = fill.signal.symbol
     pid = fill.signal.position_id
@@ -277,73 +289,102 @@ def _rebalance_position(
         )
         return _close_position(portfolio, close_fill)
 
-    # Partial adjustment: close old trade, open new trade with adjusted qty
+    # Partial adjustment: keep the SAME position/trade, update in place with
+    # time-weighted average cost (TWAC). No close/reopen, no fabricated PnL.
     is_long = target.type == ActionType.long
 
     if delta > 0:
-        # Adding: cash goes out
+        # Adding: cash goes out; no PnL realized.
         cash_change = -(delta * fill.executed_price + fill.commission)
-        pnl_on_closed = 0.0  # no PnL realized on add — old position continues
+        # TWAC: re-average cost basis over old + new shares.
+        new_entry = (
+            (target.qty * target.entry_price) + (delta * fill.executed_price)
+        ) / new_qty
+        new_entry_time = fill.timestamp
     else:
-        # Reducing: cash comes in, realize partial PnL
+        # Reducing: cash comes in and the removed shares realize PnL; the
+        # remaining cost basis is unchanged (selling doesn't re-average basis).
         reduce_qty = abs(delta)
         if is_long:
-            partial_pnl = (fill.executed_price - target.entry_price) * reduce_qty
-            cash_change = reduce_qty * fill.executed_price - fill.commission
+            realized = (fill.executed_price - target.entry_price) * reduce_qty
         else:
-            partial_pnl = (target.entry_price - fill.executed_price) * reduce_qty
-            cash_change = (
-                (reduce_qty * target.entry_price) + partial_pnl - fill.commission
-            )
-        pnl_on_closed = partial_pnl
+            realized = (target.entry_price - fill.executed_price) * reduce_qty
+        cash_change = reduce_qty * fill.executed_price - fill.commission
+        new_entry = target.entry_price
+        new_entry_time = target.entry_time
 
     new_cash = portfolio.cash + cash_change
 
-    # Close the old trade with its partial PnL
+    # Update the single open trade in place: qty and (on add) cost basis. The
+    # realized ``realized`` PnL on a partial reduce is recorded against the
+    # open trade's pnl so the final close books the full round-trip P&L.
     updated_trades = list(portfolio.trades)
+    trade_rebased = False
     for i, trade in enumerate(updated_trades):
         if (
             trade.status == TradeStatus.open
             and trade.position_id == pid
             and trade.symbol == symbol
         ):
-            updated_trades[i] = _close_trade(trade, fill, pnl_on_closed)
+            updated_trades[i] = Trade(
+                entry_time=trade.entry_time,
+                entry_price=new_entry,
+                exit_time=trade.exit_time,
+                exit_price=trade.exit_price,
+                last_price=fill.executed_price,
+                reason=trade.reason,
+                symbol=trade.symbol,
+                position=trade.position,
+                qty=new_qty,
+                stop_loss=trade.stop_loss,
+                take_profit=trade.take_profit,
+                pnl=trade.pnl + (realized if delta < 0 else 0.0),
+                commission=trade.commission + fill.commission,
+                slippage=trade.slippage + fill.slippage,
+                status=trade.status,
+                close_reason=trade.close_reason,
+                position_id=trade.position_id,
+            )
+            trade_rebased = True
             break
 
-    # Open a new trade/position for the remaining qty
-    new_pid = f"{symbol}_{fill.timestamp.timestamp()}"
+    if not trade_rebased:
+        # Defensive: no open trade matched yet (e.g. directly-built portfolio),
+        # so create one rather than dropping the position's cost trail.
+        updated_trades.append(
+            Trade(
+                entry_time=new_entry_time,
+                entry_price=new_entry,
+                exit_time=None,
+                exit_price=None,
+                last_price=fill.executed_price,
+                reason=fill.signal.reason,
+                symbol=symbol,
+                position=target.type,
+                qty=new_qty,
+                stop_loss=target.stop_loss or 0.0,
+                take_profit=target.take_profit or 0.0,
+                pnl=0.0,
+                status=TradeStatus.open,
+                close_reason=None,
+                position_id=pid,
+            )
+        )
 
+    # Update the surviving position in place (same position_id).
     new_position = Position(
         symbol=symbol,
         qty=new_qty,
-        entry_price=target.entry_price,  # preserve original entry price
-        entry_time=target.entry_time,  # preserve original entry time
+        entry_price=new_entry,
+        entry_time=new_entry_time,
         stop_loss=target.stop_loss,
         take_profit=target.take_profit,
         last_price=fill.executed_price,
         type=target.type,
-        position_id=new_pid,
+        position_id=pid,
     )
 
-    new_trade = Trade(
-        entry_time=target.entry_time,
-        entry_price=target.entry_price,
-        exit_time=None,
-        exit_price=None,
-        last_price=fill.executed_price,
-        symbol=symbol,
-        position=target.type,
-        qty=new_qty,
-        stop_loss=target.stop_loss or 0.0,
-        take_profit=target.take_profit or 0.0,
-        pnl=0.0,
-        reason=fill.signal.reason,
-        status=TradeStatus.open,
-        close_reason=None,
-        position_id=new_pid,
-    )
-
-    # Replace old position with new in the tuple
+    # Replace the old position with the updated one in the tuple.
     assert target_idx is not None
     new_positions = dict(portfolio.positions)
     new_tup = (
@@ -356,7 +397,7 @@ def _rebalance_position(
     return PortfolioState(
         cash=new_cash,
         positions=new_positions,
-        trades=tuple(updated_trades + [new_trade]),
+        trades=tuple(updated_trades),
         equity_curve=portfolio.equity_curve,
         initial_capital=portfolio.initial_capital,
     )
@@ -376,7 +417,10 @@ def _close_trade(trade: Trade, fill: FillEvent, pnl: float) -> Trade:
         qty=trade.qty,
         stop_loss=trade.stop_loss,
         take_profit=trade.take_profit,
-        pnl=pnl,
+        # Accumulate: any PnL realized on earlier partial reduces (already
+        # folded into ``trade.pnl``) plus this full-close PnL on the remaining
+        # basis forms the true round-trip result.
+        pnl=trade.pnl + pnl,
         commission=trade.commission + fill.commission,
         slippage=trade.slippage + fill.slippage,
         status=TradeStatus.closed,

@@ -1,4 +1,4 @@
-"""Indicators — technical analysis, Kalman filters, and HMM regime detection."""
+"""Indicators — technical analysis, Kalman filters, HMM regime detection, and macro assets."""
 
 from src.indicators.ta import (
     ema,
@@ -33,6 +33,8 @@ from src.indicators.kalman.types import (
 from src.indicators.hmm.hmm import MarketRegimeHMM, create_regime_features
 from src.indicators.hmm.strategy import OnlineRegime, OnlineRegimeResult
 from src.indicators.hmm.types import RegimeStats
+
+from src.indicators.macro import deflated_log_prices, init_macro_indicator
 
 __all__ = [
     # TA
@@ -70,4 +72,7 @@ __all__ = [
     "create_regime_features",
     "OnlineRegime",
     "OnlineRegimeResult",
+    # Macro assets
+    "init_macro_indicator",
+    "deflated_log_prices",
 ]

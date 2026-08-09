@@ -1,6 +1,9 @@
 # A Novel Leading Indicator for Broad Equity Indexes
 
-**Status:** Research / proposal — no implementation yet
+**Status:** Reference run implemented + follow-up A/B done. Flip-level lead validated, but
+**downgraded REFINE/DEAD** by the high-n series-level test — the regime is a concurrent
+macro-state classifier, not a consistent time-leading return predictor for SPY. See
+`README.md` → Follow-up A/B and `2024-08_RDD-backtest-spec.md` §11.
 **Scope:** Leverage the existing CPI deflator + HMM regime infrastructure
 **Design constraint:** Avoid well-documented market-timing ratios (copper/gold, RSP/SPY vs cap-weight, plain HMM-on-CPI, CAMELS).
 
@@ -9,16 +12,23 @@
 ## 1. TL;DR
 
 Propose a **leading, cash/risk-shifting regime** for a broad index (SPY basket) that is
-built from three inputs the library already half-supplies:
+built from macro fundamentals (inflation acceleration, real equity, real discount).
 
-1. the **CPI-deflated real price** of the index (`cpi.deflated_log_prices` already exists),
-2. the **inflation-acceleration** gauge (a cost-push proxy), and
-3. an inflation-adjusted **"real-discount"** feature that proxies how much of the index
-   move is a *multiple/discount-rate* repricing vs a *fundamental earnings* repricing.
+> **⚠ Empirical status (2026):** the *concept* (below) and the feature math are solid, but
+> the **"leading" claim as tested was downgraded to REFINE/DEAD.** The high-n series-level
+> test (`rdd_lead_lag.py`) shows the regime is a **contemporaneous macro-state filter, not a
+> consistent time-leading return predictor** for SPY: no significant forward edge in the
+> {3,20}d tradeable band, and the lead horizon shifts ~6× across sub-samples (7d early →
+> 40d late). The original flip-level positive median lead was small-n coincidence. See the
+> README Follow-up A/B and spec §11 before building on this.
 
-The three are fused by the existing `MarketRegimeHMM` into a small number of hidden
-regimes. The **regime index itself is the leading indicator** — it is designed to turn
-*ahead of* the index's own realized return, not coincident or lagged.
+The three inputs are the **CPI-deflated real price** of the index
+(`cpi.deflated_log_prices` already exists), an **inflation-acceleration** gauge (a
+cost-push proxy), and an inflation-adjusted **"real-discount"** feature that proxies
+how much of the index move is a *multiple/discount-rate* repricing vs a *fundamental
+earnings* repricing. They are fused by the existing `MarketRegimeHMM` into a small
+number of hidden regimes. The **regime index itself is the leading indicator** — it is
+designed to turn *ahead of* the index's own realized return, not coincident or lagged.
 
 The distinctive, under-used angle is the **real-vs-nominal yield decomposition**: rather
 than timing the index on its own momentum or volatility (both coincident), we classify

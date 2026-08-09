@@ -156,3 +156,49 @@ async def test_single_year_single_request_unchanged(monkeypatch):
     period_days = int(requests[0][1].rstrip("d"))
     assert period_days <= MAX_PERIOD_DAYS
     assert result
+
+
+class _RateLimitedResp:
+    status_code = 503
+    parsed = None
+    content = b'{"error":"Service Unavailable"}'
+
+
+@pytest.mark.asyncio
+async def test_503_throttles_then_retries_same_window(monkeypatch):
+    """A transient 503 must throttle and retry the SAME window, not abort.
+
+    The first call returns HTTP 503 (rate-limit); the fetcher doubles its
+    inter-chunk delay and retries the identical start_time/period. Once it gets
+    a 200 it proceeds and completes the range.
+    """
+    from_dt = datetime(2020, 1, 1)
+    to_dt = datetime(2021, 1, 1)
+
+    real = _fake_history()
+    calls: list[tuple[str, str]] = []
+
+    async def flaky_handler(**_kwargs: object) -> _FakeResp:
+        start_time = str(_kwargs["start_time"])
+        period = str(_kwargs["period"])
+        calls.append((start_time, period))
+        if len(calls) == 1:
+            # First chunk is rate-limited; subsequent ones succeed.
+            return _RateLimitedResp()
+        return await real.side_effect(**_kwargs)
+
+    mock = AsyncMock(side_effect=flaky_handler)
+    monkeypatch.setattr(
+        _candles_module().get_iserver_marketdata_history,
+        "asyncio_detailed",
+        mock,
+    )
+
+    result = await _fetch_candles_iterative(789, "GLD", "1h", from_dt, to_dt)
+
+    assert result, "fetch must recover from a transient 503 and return candles"
+    # The same window must have been retried after the throttle.
+    assert calls[0] == calls[1], "503 must retry the identical window"
+    stamps = sorted(_ts(c["timestamp"]) for c in result)
+    assert stamps[0] <= from_dt
+    assert stamps[-1] >= to_dt

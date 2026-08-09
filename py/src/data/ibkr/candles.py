@@ -32,6 +32,11 @@ MAX_PERIOD_DAYS = 365
 # (HTTP 503). This delay spreads the requests to stay under that threshold.
 CHUNK_DELAY_S = 1.0
 
+# Upper bound (seconds) for the adaptive inter-chunk delay. Doubled on repeated
+# HTTP 503 (rate-limit) responses so a sustained burst backs off up to this cap
+# before giving up, then decays back toward CHUNK_DELAY_S once requests succeed.
+CHUNK_DELAY_MAX_S = 60.0
+
 
 def _chunked_insert(insert_data: list[CandleDict], batch_size: int = 500) -> None:
     """Insert candles in batches to avoid SQLite's variable limit."""
@@ -303,18 +308,19 @@ async def _fetch_candles_iterative(
     cursor advancing monotonically toward the past, so multi-year backfills stay
     within the per-request ``period`` cap without drifting stale cursors.
     """
+    first_chunk = True
     current_to = to_datetime
     accumulated_data: list[CandleDict] = []
-    first_chunk = True
+    # Adaptive pacing. A multi-year backfill issues many sequential history calls
+    # (IBKR caps each response at 2000 bars and/or 365d), and a burst of
+    # back-to-back requests trips the gateway's server-side rate limiter (HTTP
+    # 503). We keep a short base delay between chunks and throttle it up on a 503
+    # so a sustained burst backs off instead of aborting the whole symbol.
+    delay = CHUNK_DELAY_S
 
     while current_to > from_datetime:
-        # Pace requests: a multi-year backfill issues many sequential history
-        # calls (IBKR caps each response at 2000 bars and/or 365d), and a burst
-        # of back-to-back requests trips the gateway's server-side rate limiter
-        # (HTTP 503). A short delay between chunks keeps the download below that
-        # threshold. The first request fires immediately.
         if not first_chunk:
-            await asyncio.sleep(CHUNK_DELAY_S)
+            await asyncio.sleep(delay)
         first_chunk = False
 
         delta = current_to - from_datetime
@@ -348,6 +354,20 @@ async def _fetch_candles_iterative(
         )
         r = resp.parsed
 
+        if resp.status_code == 503:
+            # Gateway rate-limit throttle: grow the inter-chunk delay and retry
+            # the same window after backing off, rather than aborting the whole
+            # multi-year backfill over a transient burst.
+            delay = min(delay * 2.0, CHUNK_DELAY_MAX_S)
+            logger.warning(
+                "%s: rate-limited (503), throttling to %ss delay and retrying window %s",
+                ticker,
+                delay,
+                current_to,
+            )
+            await asyncio.sleep(delay)
+            continue
+
         if (
             resp.status_code != 200
             or not isinstance(r, IserverHistoryBidAskResponse)
@@ -361,6 +381,10 @@ async def _fetch_candles_iterative(
                 body,
             )
             raise Exception(f"Unexpected response: status={resp.status_code}")
+
+        # Success — gently decay the delay back toward the base.
+        if delay > CHUNK_DELAY_S:
+            delay = max(CHUNK_DELAY_S, delay / 2.0)
 
         sorted_data = sorted(r.data, key=lambda x: x.t)
         if not sorted_data or not sorted_data[0].t:

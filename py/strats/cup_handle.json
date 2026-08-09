@@ -1,0 +1,32 @@
+{
+  "name": "cup-handle-breakout",
+  "training_start": "2015-01-02",
+  "training_end": "2015-01-03",
+  "trading_start": "2015-01-03",
+  "trading_end": "2025-01-01",
+  "commission": 0.1,
+  "initial_capital": 50000,
+  "strategy_type": "cup_handle",
+  "bars": ["1d"],
+  "model_params": {},
+  "strategy_params": {
+    "swing_lookback": 3,
+    "max_cup_depth_pct": 0.4,
+    "min_cup_depth_pct": 0.1,
+    "rim_tolerance_pct": 0.05,
+    "min_mid_pivots": 1,
+    "max_cup_bars": 260,
+    "max_handle_bars": 40,
+    "max_handle_drop_pct": 0.12,
+    "volume_confirm_breakout": true,
+    "per_symbol_size": 0.3,
+    "max_risk_pct": 0.035,
+    "min_stop_atr": 0.5,
+    "trail_atr_period": 14,
+    "trail_atr_mult": 2.5,
+    "warmup_bars": 60,
+    "cooldown_bars": 5,
+    "profit_target_mult": 1.2
+  },
+  "symbols": ["GLD", "SLV"]
+}

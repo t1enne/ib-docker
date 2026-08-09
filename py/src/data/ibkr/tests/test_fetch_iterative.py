@@ -178,7 +178,9 @@ async def test_503_throttles_then_retries_same_window(monkeypatch):
     real = _fake_history()
     calls: list[tuple[str, str]] = []
 
-    async def flaky_handler(**_kwargs: object) -> _FakeResp:
+    async def flaky_handler(
+        **_kwargs: object,
+    ) -> _FakeResp | _RateLimitedResp:
         start_time = str(_kwargs["start_time"])
         period = str(_kwargs["period"])
         calls.append((start_time, period))

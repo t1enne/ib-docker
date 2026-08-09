@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from src.data.cli import _find_gaps_48h, _recap
+from src.data._shared import find_gaps_48h as _find_gaps_48h, recap as _recap
 
 
 def _make_df(timestamps: list[datetime]) -> pd.DataFrame:

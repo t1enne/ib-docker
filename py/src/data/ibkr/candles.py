@@ -7,6 +7,7 @@ from peewee import fn
 from src.data.types import CandleSchema, db
 from ib_rest_api_client.api.trading_market_data import get_iserver_marketdata_history
 from ib_rest_api_client.models import IserverHistoryBidAskResponse
+from ib_rest_api_client.models import GetIserverMarketdataHistoryDirection
 
 from .shared import get_contract_info, auth_client
 from .rate_limiter import with_retry
@@ -285,21 +286,29 @@ async def _fetch_candles_iterative(
 ) -> list[CandleDict]:
     """Iteratively fetch candles from IBKR API for a given datetime range.
 
-    Fetches candles going backwards from to_datetime until from_datetime is reached.
-    Uses exact gap boundaries — no day-truncation — to avoid leaving intra-day gaps.
+    Walks FORWARD from ``from_datetime`` toward ``to_datetime`` in chunks capped
+    at MAX_PERIOD_DAYS. Uses ``direction=1`` (forward) anchored at
+    ``from_datetime``.
+
+    The backward variant (``direction=-1``) sets ``startTime`` to the current
+    walk cursor, which drifts into the deep past after the first chunk. For a
+    multi-year range the second chunk anchors ``startTime`` a year in the past,
+    and IBKR's history endpoint rejects such requests with 50X errors. Forward
+    direction anchors ``startTime`` at the oldest desired point, which the API
+    accepts, so multi-year backfills chunk cleanly toward ``to_datetime``.
     """
-    current_to = to_datetime
+    current_from = from_datetime
     accumulated_data: list[CandleDict] = []
 
-    while current_to > from_datetime:
-        delta = current_to - from_datetime
+    while current_from < to_datetime:
+        delta = to_datetime - current_from
         days_to_fetch = max(1, delta.days + (1 if delta.seconds > 0 else 0))
 
         if delta.days > MAX_PERIOD_DAYS:
             logger.info(
                 "Range %s → %s exceeds %sd max, chunking (this request: %sd)",
-                from_datetime,
-                current_to,
+                current_from,
+                to_datetime,
                 MAX_PERIOD_DAYS,
                 days_to_fetch,
             )
@@ -309,8 +318,8 @@ async def _fetch_candles_iterative(
             "Getting candles for %s for %sd, from %s, to %s",
             ticker,
             days_to_fetch,
-            from_datetime,
-            current_to,
+            current_from,
+            to_datetime,
         )
 
         resp = await get_iserver_marketdata_history.asyncio_detailed(
@@ -318,7 +327,8 @@ async def _fetch_candles_iterative(
             conid=conid,
             bar=bar,
             period=f"{days_to_fetch}d",
-            start_time=current_to.strftime("%Y%m%d-%H:%M:%S"),
+            start_time=current_from.strftime("%Y%m%d-%H:%M:%S"),
+            direction=GetIserverMarketdataHistoryDirection.VALUE_1,
         )
         r = resp.parsed
 
@@ -341,7 +351,7 @@ async def _fetch_candles_iterative(
             logger.info("No more data available for %s", ticker)
             break
 
-        oldest_ts = sorted_data[0].t
+        newest_ts = cast(int, sorted_data[-1].t)
 
         new_candles = cast(
             list[CandleDict],
@@ -361,21 +371,21 @@ async def _fetch_candles_iterative(
         )
         accumulated_data = accumulated_data + new_candles
 
-        oldest_datetime = timestamp_to_datetime(oldest_ts)
+        newest_datetime = timestamp_to_datetime(newest_ts)
         logger.info(
-            "Got %s candles for %s, oldest: %s",
+            "Got %s candles for %s, newest: %s",
             len(sorted_data),
             ticker,
-            oldest_datetime,
+            newest_datetime,
         )
 
-        # We've reached or passed the from_datetime boundary
-        if oldest_datetime <= from_datetime:
+        # We've reached or passed the to_datetime boundary
+        if newest_datetime >= to_datetime:
             break
-        # Safety: if oldest_datetime hasn't advanced, avoid infinite loop
-        if oldest_datetime >= current_to:
+        # Safety: if newest_datetime hasn't advanced, avoid infinite loop
+        if newest_datetime <= current_from:
             break
-        current_to = oldest_datetime
+        current_from = newest_datetime
 
     return accumulated_data
 

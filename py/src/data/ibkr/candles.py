@@ -26,6 +26,12 @@ MAX_CANDLES_PER_REQUEST = 1000
 # documented maximum for daily bars and serves as an upper bound.
 MAX_PERIOD_DAYS = 365
 
+# Pause (seconds) between chunked history requests in _fetch_candles_iterative.
+# IBKR caps each response at ~2000 bars, so a multi-year hourly backfill issues
+# many back-to-back calls that can trip the gateway's server-side rate limiter
+# (HTTP 503). This delay spreads the requests to stay under that threshold.
+CHUNK_DELAY_S = 1.0
+
 
 def _chunked_insert(insert_data: list[CandleDict], batch_size: int = 500) -> None:
     """Insert candles in batches to avoid SQLite's variable limit."""
@@ -286,29 +292,39 @@ async def _fetch_candles_iterative(
 ) -> list[CandleDict]:
     """Iteratively fetch candles from IBKR API for a given datetime range.
 
-    Walks FORWARD from ``from_datetime`` toward ``to_datetime`` in chunks capped
-    at MAX_PERIOD_DAYS. Uses ``direction=1`` (forward) anchored at
-    ``from_datetime``.
+    Walks BACKWARD from ``to_datetime`` down toward ``from_datetime`` in chunks
+    capped at MAX_PERIOD_DAYS, using ``direction=-1`` (backward) anchored at the
+    current walk cursor.
 
-    The backward variant (``direction=-1``) sets ``startTime`` to the current
-    walk cursor, which drifts into the deep past after the first chunk. For a
-    multi-year range the second chunk anchors ``startTime`` a year in the past,
-    and IBKR's history endpoint rejects such requests with 50X errors. Forward
-    direction anchors ``startTime`` at the oldest desired point, which the API
-    accepts, so multi-year backfills chunk cleanly toward ``to_datetime``.
+    Empirically, IBKR's history endpoint serves backward requests reliably
+    (``direction=-1``), while the forward variant (``direction=1``) returns HTTP
+    500 ``Chart data unavailable`` for all requests on common gateways. Anchoring
+    ``startTime`` at the newest boundary and walking backward also keeps the
+    cursor advancing monotonically toward the past, so multi-year backfills stay
+    within the per-request ``period`` cap without drifting stale cursors.
     """
-    current_from = from_datetime
+    current_to = to_datetime
     accumulated_data: list[CandleDict] = []
+    first_chunk = True
 
-    while current_from < to_datetime:
-        delta = to_datetime - current_from
+    while current_to > from_datetime:
+        # Pace requests: a multi-year backfill issues many sequential history
+        # calls (IBKR caps each response at 2000 bars and/or 365d), and a burst
+        # of back-to-back requests trips the gateway's server-side rate limiter
+        # (HTTP 503). A short delay between chunks keeps the download below that
+        # threshold. The first request fires immediately.
+        if not first_chunk:
+            await asyncio.sleep(CHUNK_DELAY_S)
+        first_chunk = False
+
+        delta = current_to - from_datetime
         days_to_fetch = max(1, delta.days + (1 if delta.seconds > 0 else 0))
 
         if delta.days > MAX_PERIOD_DAYS:
             logger.info(
                 "Range %s → %s exceeds %sd max, chunking (this request: %sd)",
-                current_from,
-                to_datetime,
+                from_datetime,
+                current_to,
                 MAX_PERIOD_DAYS,
                 days_to_fetch,
             )
@@ -318,8 +334,8 @@ async def _fetch_candles_iterative(
             "Getting candles for %s for %sd, from %s, to %s",
             ticker,
             days_to_fetch,
-            current_from,
-            to_datetime,
+            from_datetime,
+            current_to,
         )
 
         resp = await get_iserver_marketdata_history.asyncio_detailed(
@@ -327,8 +343,8 @@ async def _fetch_candles_iterative(
             conid=conid,
             bar=bar,
             period=f"{days_to_fetch}d",
-            start_time=current_from.strftime("%Y%m%d-%H:%M:%S"),
-            direction=GetIserverMarketdataHistoryDirection.VALUE_1,
+            start_time=current_to.strftime("%Y%m%d-%H:%M:%S"),
+            direction=GetIserverMarketdataHistoryDirection.VALUE_NEGATIVE_1,
         )
         r = resp.parsed
 
@@ -351,7 +367,7 @@ async def _fetch_candles_iterative(
             logger.info("No more data available for %s", ticker)
             break
 
-        newest_ts = cast(int, sorted_data[-1].t)
+        oldest_ts = cast(int, sorted_data[0].t)
 
         new_candles = cast(
             list[CandleDict],
@@ -369,23 +385,23 @@ async def _fetch_candles_iterative(
                 for item in sorted_data
             ],
         )
-        accumulated_data = accumulated_data + new_candles
+        accumulated_data = new_candles + accumulated_data
 
-        newest_datetime = timestamp_to_datetime(newest_ts)
+        oldest_datetime = timestamp_to_datetime(oldest_ts)
         logger.info(
-            "Got %s candles for %s, newest: %s",
+            "Got %s candles for %s, oldest: %s",
             len(sorted_data),
             ticker,
-            newest_datetime,
+            oldest_datetime,
         )
 
-        # We've reached or passed the to_datetime boundary
-        if newest_datetime >= to_datetime:
+        # We've reached or passed the from_datetime boundary
+        if oldest_datetime <= from_datetime:
             break
-        # Safety: if newest_datetime hasn't advanced, avoid infinite loop
-        if newest_datetime <= current_from:
+        # Safety: if oldest_datetime hasn't advanced, avoid infinite loop
+        if oldest_datetime >= current_to:
             break
-        current_from = newest_datetime
+        current_to = oldest_datetime
 
     return accumulated_data
 

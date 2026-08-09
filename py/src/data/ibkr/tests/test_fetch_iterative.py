@@ -1,9 +1,15 @@
-"""Test _fetch_candles_iterative — forward chunking for multi-year backfills.
+"""Test _fetch_candles_iterative — backward chunking for multi-year backfills.
 
 Regression coverage for the fix that routes historical fetches through
-``direction=1`` (forward) anchored at ``from_datetime``. The previous backward
-variant anchored ``startTime`` at the walk cursor, which drifted into the deep
-past on the second chunk of a multi-year range and triggered IBKR 50X errors.
+``direction=-1`` (backward) anchored at the newest boundary (``to_datetime``),
+walking toward the past.
+
+Why backward: IBKR's history endpoint serves ``direction=-1`` reliably for any
+date range (verified live back to 2015+ for hourly bars), whereas the forward
+variant (``direction=1``) returns HTTP 500 ``Chart data unavailable`` for all
+requests on common gateways. Anchoring ``startTime`` at the newest boundary and
+walking backward keeps the cursor advancing monotonically toward the past, so
+multi-year backfills stay within the per-request period cap.
 """
 
 from __future__ import annotations
@@ -62,16 +68,17 @@ def _spanned_items(
 
 
 def _fake_history() -> AsyncMock:
-    """Return an async mock that serves one 365d forward chunk per call."""
+    """Return an async mock that serves one 365d backward chunk per call."""
 
     async def handler(**_kwargs: object) -> _FakeResp:
-        start = datetime.strptime(str(_kwargs["start_time"]), "%Y%m%d-%H:%M:%S")
+        end = datetime.strptime(str(_kwargs["start_time"]), "%Y%m%d-%H:%M:%S")
         period_days = int(str(_kwargs["period"]).rstrip("d"))
         direction = _kwargs["direction"]
-        assert getattr(direction, "value", None) == 1, "fetch must walk forward"
-        # Server returns up to period_days forward from start_time.
-        span_end = start + timedelta(days=period_days)
-        return _FakeResp(_spanned_items(start, span_end, step_h=1.0))
+        assert getattr(direction, "value", None) == -1, "fetch must walk backward"
+        # Server returns up to period_days backward from end, topmost bar at end.
+        span_start = end - timedelta(days=period_days, hours=1)
+        span_end = end
+        return _FakeResp(_spanned_items(span_start, span_end, step_h=1.0))
 
     return AsyncMock(side_effect=handler)
 
@@ -93,9 +100,9 @@ def _collect_requests(mock: AsyncMock) -> list[tuple[str, str, int]]:
 
 
 @pytest.mark.asyncio
-async def test_multi_year_fetches_in_forward_chunks_within_limit(monkeypatch):
+async def test_multi_year_fetches_in_backward_chunks_within_limit(monkeypatch):
     """A ~3-year range must chunk so no single request exceeds MAX_PERIOD_DAYS
-    and every start_time anchors a real past boundary (never a stale past cursor)."""
+    and every start_time anchors a real new boundary (never a stale forward cursor)."""
     from_dt = datetime(2020, 1, 1)
     to_dt = datetime(2023, 1, 1)
 
@@ -121,17 +128,17 @@ async def test_multi_year_fetches_in_forward_chunks_within_limit(monkeypatch):
         period_days = int(period.rstrip("d"))
         assert period_days <= MAX_PERIOD_DAYS
 
-    # Requests walk strictly forward from the from boundary.
+    # Requests walk strictly backward from the to boundary.
     first = datetime.strptime(requests[0][0], "%Y%m%d-%H:%M:%S")
-    assert first == from_dt
+    assert first == to_dt
     for start_time, _, _dir in requests[1:]:
         dt = datetime.strptime(start_time, "%Y%m%d-%H:%M:%S")
-        assert dt > from_dt, "subsequent chunks must advance past from_datetime"
+        assert dt < to_dt, "subsequent chunks must retreat past to_datetime"
 
 
 @pytest.mark.asyncio
 async def test_single_year_single_request_unchanged(monkeypatch):
-    """A sub-365-day range still resolves to a single forward request."""
+    """A sub-365-day range still resolves to a single backward request."""
     from_dt = datetime(2025, 1, 1)
     to_dt = datetime(2025, 6, 1)
 

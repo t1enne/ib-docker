@@ -25,9 +25,24 @@ import os
 from typing import Literal
 
 from playwright.async_api import async_playwright
-from src.utils import load_env
 
 TradingMode = Literal["paper", "live"]
+
+
+def load_env(path: str | Path = ".env") -> None:
+    """Load a .env file into os.environ. Never overrides existing env vars."""
+
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip().strip('"').strip("'")
+        if key not in os.environ:
+            os.environ[key] = val
 
 
 async def login_ibkr(username: str, password: str, mode: TradingMode = "paper") -> None:

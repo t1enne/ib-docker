@@ -185,19 +185,3 @@ def _eg_pvalue(price1, price2):
 
     resid = _hedge_ratio_residuals(price1, price2)
     return adfuller(resid)[1]
-
-
-def load_env(path: str | Path = ".env") -> None:
-    """Load a .env file into os.environ. Never overrides existing env vars."""
-
-    p = Path(path)
-    if not p.exists():
-        return
-    for line in p.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        key, val = key.strip(), val.strip().strip('"').strip("'")
-        if key not in os.environ:
-            os.environ[key] = val

@@ -152,7 +152,7 @@ def _current_weights(
     interval: str,
 ) -> dict[str, float]:
     """Return {symbol: weight} for each leg and optionally cash."""
-    closes, pos_value, total = _portfolio_closes(state, symbols, interval)
+    closes, _, total = _portfolio_closes(state, symbols, interval)
     if total <= 0:
         return {}
     weights: dict[str, float] = {}
@@ -305,7 +305,7 @@ def on_candle(
         return []
 
     # Signal decisions: use signal-interval closes (e.g. daily)
-    signal_closes, _, total = _portfolio_closes(state, risk_symbols, signal_interval)
+    _, _, total = _portfolio_closes(state, risk_symbols, signal_interval)
     if total <= 0:
         return []
 
@@ -352,7 +352,7 @@ def on_candle(
 def _deploy_initial(
     candle: Candle,
     risk_symbols: list[str],
-    all_legs: list[str],
+    _legs: list[str],
     target: dict[str, float],
     entry_closes: dict[str, float],
     total: float,
@@ -385,7 +385,7 @@ def _full_rebalance(
     state: BacktestState,
     candle: Candle,
     risk_symbols: list[str],
-    all_legs: list[str],
+    _legs: list[str],
     target: dict[str, float],
     entry_closes: dict[str, float],
     total: float,

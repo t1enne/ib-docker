@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, date, timezone
-from typing import Optional, cast
+from typing import Callable, Optional, cast
 
 from peewee import fn
 from src.data.types import CandleSchema, db
@@ -294,6 +294,7 @@ async def _fetch_candles_iterative(
     bar: str,
     from_datetime: datetime,
     to_datetime: datetime,
+    on_chunk: Optional[Callable[[list[CandleDict]], None]] = None,
 ) -> list[CandleDict]:
     """Iteratively fetch candles from IBKR API for a given datetime range.
 
@@ -307,6 +308,13 @@ async def _fetch_candles_iterative(
     ``startTime`` at the newest boundary and walking backward also keeps the
     cursor advancing monotonically toward the past, so multi-year backfills stay
     within the per-request ``period`` cap without drifting stale cursors.
+
+    Each API response is a ``chunk`` of candles. When ``on_chunk`` is supplied it
+    is called with every chunk as soon as it arrives — letting the caller write
+    candles to the DB immediately instead of buffering the whole backfill in
+    memory. If ``on_chunk`` is None (e.g. for pure tests of the fetch loop), the
+    chunks are accumulated in memory and returned. The return value is the list
+    of fetched candles in chronological order in both cases.
     """
     first_chunk = True
     current_to = to_datetime
@@ -409,7 +417,12 @@ async def _fetch_candles_iterative(
                 for item in sorted_data
             ],
         )
-        accumulated_data = new_candles + accumulated_data
+        # Write the chunk as soon as it arrives when a sink is provided;
+        # otherwise buffer it (backward-compatible path for tests).
+        if on_chunk is not None:
+            on_chunk(new_candles)
+        else:
+            accumulated_data = new_candles + accumulated_data
 
         oldest_datetime = timestamp_to_datetime(oldest_ts)
         logger.info(
@@ -483,17 +496,19 @@ async def candles(
     logger.debug("dl %s/%s from=%s to=%s", ticker, conid, gaps[0][0], gaps[-1][1])
     logger.info("Fetching %s gap(s) for %s/%s: %s", len(gaps), ticker, conid, gaps)
 
-    for gap_start, gap_end in gaps:
-        insert_data = await _fetch_candles_iterative(
-            conid, ticker, bar, gap_start, gap_end
-        )
+    def _write_chunk(chunk: list[CandleDict]) -> None:
+        # Write each chunk as it arrives so a multi-year backfill never buffers
+        # the whole range in memory.
+        try:
+            _chunked_insert(chunk, batch_size=500)
+        except Exception:
+            logger.exception("Bulk insert failed for %s", ticker)
+            raise
 
-        if insert_data:
-            try:
-                _chunked_insert(insert_data, batch_size=500)
-            except Exception:
-                logger.exception("Bulk insert failed for %s", ticker)
-                raise
+    for gap_start, gap_end in gaps:
+        await _fetch_candles_iterative(
+            conid, ticker, bar, gap_start, gap_end, on_chunk=_write_chunk
+        )
 
     # Verify: re-check gaps after insert and warn if any remain
     verify_oldest, verify_newest = await get_existing_range(ticker)

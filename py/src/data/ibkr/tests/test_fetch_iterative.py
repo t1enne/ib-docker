@@ -27,6 +27,7 @@ from ib_rest_api_client.models import (
 import pytest
 
 from src.data.ibkr.candles import _fetch_candles_iterative, MAX_PERIOD_DAYS
+from src.data.types import CandleDict
 
 
 def _candles_module() -> ModuleType:
@@ -202,5 +203,41 @@ async def test_503_throttles_then_retries_same_window(monkeypatch):
     # The same window must have been retried after the throttle.
     assert calls[0] == calls[1], "503 must retry the identical window"
     stamps = sorted(_ts(c["timestamp"]) for c in result)
+    assert stamps[0] <= from_dt
+    assert stamps[-1] >= to_dt
+
+
+@pytest.mark.asyncio
+async def test_on_chunk_writes_each_chunk_and_returns_empty(monkeypatch):
+    """When an ``on_chunk`` sink is provided, every chunk is written immediately
+    and nothing is buffered: the function returns an empty list and the sink
+    receives exactly one write per fetched chunk covering the full range."""
+    from_dt = datetime(2020, 1, 1)
+    to_dt = datetime(2023, 1, 1)
+
+    mock = _fake_history()
+    monkeypatch.setattr(
+        _candles_module().get_iserver_marketdata_history,
+        "asyncio_detailed",
+        mock,
+    )
+
+    written: list[list[CandleDict]] = []
+
+    def sink(chunk: list[CandleDict]) -> None:
+        written.append(list(chunk))
+
+    result = await _fetch_candles_iterative(
+        999, "NVDA", "1h", from_dt, to_dt, on_chunk=sink
+    )
+
+    # Memory-backed accumulation is disabled when a sink is present.
+    assert result == [], "expected no buffered candles when on_chunk is provided"
+
+    # One write per fetched chunk, covering the full range.
+    n_requests = len(mock.call_args_list)
+    assert len(written) == n_requests, "one sink write per API chunk"
+    all_candles = [c for chunk in written for c in chunk]
+    stamps = sorted(_ts(c["timestamp"]) for c in all_candles)
     assert stamps[0] <= from_dt
     assert stamps[-1] >= to_dt

@@ -207,7 +207,10 @@ tests them for a tradeable {3,21}d leading component for SPY.
 **Result: null.** Every candidate (output gap, payroll/IP momentum, capacity utilisation,
 Sahm-style slack) — plus the original `acc`/`rdisc` controls — falls to an
 **autocorrelation-honest (stationary block) bootstrap**; none is significant in the
-tradeable band. The most promising naive result (GDP output-gap +0.14 @21d) was an
+tradeable band. **Combination scan (`combo_lead_scan.py`): pairs/triples do not rescue it**
+— the best composite p (~0.40–0.47) sits at the ~40th percentile of a no-signal
+family-size search (null min-p 5th pct ≈ 0.45), i.e. indistinguishable from chance. The
+most promising naive result (GDP output-gap +0.14 @21d) was an
 **over-resampling artifact**: monthly/quarterly prints was scored on ~4300 daily rows, and
 a naive pairwise bootstrap declared it significant; a block bootstrap (p≈0.50) and
 quarterly coarsening (sign flips negative at n=48) both kill it.

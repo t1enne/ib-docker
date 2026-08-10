@@ -1,7 +1,8 @@
 # Real-Economy Leading-Indicator Scan (2026) — the added macro data
 
-**Status:** Scan implemented + run. **No consistent leading indicator found in the newly
-added real-economy FRED data** under autocorrelation-honest testing. This is a *finding*,
+**Status:** Scan implemented + run (single-feature **and** multi-feature/composite).
+**No consistent leading indicator found in the newly added real-economy FRED data** under
+autocorrelation-honest testing. This is a *finding*,
 not a failure: it closes the "different signal family" hypothesis the RDD line raised, and
 it did so with a cleaner methodology than the original RDD validation.
 
@@ -94,7 +95,46 @@ quarterly) sample sizes available (2014–2026 ≈ 11 yrs — n≈130 monthly, n
 This is the same null the RDD line reached for the inflation/discount family, expressed
 with a corrected significance test.
 
-## 6. What would change the verdict (next A/B, single change))
+## 6. Combination scan (2026) — pairs/triples do not rescue it
+
+`lead_scan` tested each macro *individually*. A reviewer correctly pushed back: a
+**combination** of macros could carry a signal no single series does. That is the RDD
+premise, so `scripts/combo_lead_scan.py` sweeps equal-weight **pairs and differences** (and
+a few activity-vs-rates / activity-vs-inflation triples) over the standardised feature
+pool, scoring each with the same block bootstrap, and — critically — estimates a
+**multiple-testing null**: the best-p an empty search over the *same family size and
+autocorrelation* would produce by chance.
+
+***Result: the composite hypothesis is falsified too.***
+
+| h | best p (block boot) | best composite                |
+|---|---|---|---|
+| 3 | 0.436 | `payems_gr + unrate_d12`     |
+| 10 | 0.399 | `payems_gr − sahm`           |
+| 21 | 0.465 | `gdp_gap − bopgstb`          |
+
+- **The best composite p (~0.40–0.47) never approaches significance.** No pair exceeds
+  the single-feature noise floor.
+- **Multiple-testing null (the decisive number):** the best h=21 composite (p=0.465) sits
+  at the **~40th percentile of the no-signal family-min null** (null min-p 5th pct ≈ 0.451,
+  50th ≈ 0.471). A *random* empty composite search of equal size produces a best-p this
+extreme or more **~60% of the time**. The "winner" is indistinguishable from noise.
+- **Holdout:** the gdp_gap−bopgstb composite gets its +0.141 corr@21 from ONE half
+  (EARLY p=1.000 / LATE p=0.441) — the same sign/horizon instability that sank the RDD
+  regime. Not a stable lead.
+- **Interpretation:** the block bootstrap on this data has a noise floor of best-p ≈ 0.45
+  over a family-sized search. Every macro — single or combined, real-activity or
+  price/rate — lands on that floor. There is no hidden composite lead under the effective
+  (quarterly/monthly) sample size available.
+
+> **Why no combination beats the parts:** the individual series are near-white-noise
+> predictors with fat autocorrelation; equally-weighted sums of near-white noise stay
+> near the same noise floor unless a *genuine* shared signal exists. No genuine shared
+> signal is present in 2014–2026 SPY at tradeable horizons. The only route to a
+> detectable composite (or single) lead is more independent macro cycles — i.e. a longer
+> price history, not more feature arithmetic.
+
+## 7. What would change the verdict (next A/B, single change))
 
 The daily-grid correlation *is* positive and horizon-monotone for the output gap
 (+0.04 → +0.14 → +0.22 at h=3/21/63) — the *sign/horizon* is right, only the significance

@@ -15,9 +15,18 @@ services:
     networks:
       - ib-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "-k", "https://localhost:5000/v1/api/tickle"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "-k",
+          "--max-time",
+          "5",
+          "https://localhost:5000/v1/api/tickle",
+        ]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 40s
 

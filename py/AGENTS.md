@@ -10,13 +10,14 @@ When implementing a feature or fix:
 1. **Understand** — read relevant strategy code, types, and tests. Don't guess.
 2. **Plan** — state approach before writing. If unclear, ask.
 3. **Implement** — minimum code that works. Pure functions, immutable state, full type annotations.
-4. **Test** — every new computation gets a test. Run `make test` before declaring done.
+4. **Test** — every new computation gets a test. Strategies, scripts and research doesn't need a test. Run `make test` before declaring done.
 5. **Verify** — `make check` must pass (lint + format + typecheck + tests).
 
 ### Running things
 
 ```bash
-uv run ibkr bt run strats/trend.json      # CLI entry point
+uv run ibkr bt run strats/trend.json       # CLI entry point
+uv run ibkr data query SPY                 # Query SPY data from the local DB
 make run bt run strats/trend.json          # Make shortcut
 make check                                 # lint + format + typecheck + test
 make test                                  # all tests
@@ -94,6 +95,8 @@ for i in range(len(spread)):
 - **Dataclass `field(default_factory=list)`** is fine — but `Tuple[...]` is preferred for state types.
 - **Lazy imports** for heavy modules (plotting, HMM) inside functions, not at module top-level.
 - **Profile before optimizing.** Don't guess.
+- **Avoid** writing expensive tests. `make check` should run under 10s. So no HMM, ML or other long-running computations in tests.
+- **Before running** expensive tasks, verify it runs and outputs the expected data. No running a 300s task to discover that it doesn't print anything, or we truncated the needed output by misusing `head` or `tail`.
 
 ### 3. Testing
 
@@ -106,7 +109,7 @@ uv run pytest src/bt/engine/tests/ -v          # specific module
 
 #### Rules
 
-- **Every new feature/computation gets a test.** No exceptions.
+- **Every new feature/computation gets a test.** Only strategies, scripts and research are excluded.
 - **Use `respx`** for mocking HTTP calls (IBKR API layer).
 - **Use `pytest-mock`** for general mocking.
 - **Test pure functions first** — they're the easiest and most valuable to test.

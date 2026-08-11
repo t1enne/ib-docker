@@ -59,6 +59,11 @@ def _open_position(
     qty = round(signal.qty, 4)
     if qty <= 0:
         return portfolio
+    # Calculate new cash
+    cash_used = qty * fill.executed_price + fill.commission
+    new_cash = portfolio.cash - cash_used
+    if new_cash < 0:
+        return portfolio
 
     # Generate position_id from signal if provided, else auto-generate
     pid = signal.position_id or f"{signal.symbol}_{fill.timestamp.timestamp()}"
@@ -85,10 +90,6 @@ def _open_position(
         type=position_type,
         position_id=pid,
     )
-
-    # Calculate new cash
-    cash_used = qty * fill.executed_price + fill.commission
-    new_cash = portfolio.cash - cash_used
 
     # Create trade record
     trade = Trade(

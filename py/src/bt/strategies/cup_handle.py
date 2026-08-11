@@ -71,11 +71,26 @@ class Params(StrategyParams):
     trail_atr_period: int = 14
     trail_atr_mult: float = 2.5
 
+    # Trend-aware exits: a fixed price target caps winners inside a strong
+    # trend; the ATR trail is what should collect a runner. ADX measures
+    # trend strength at entry and during management so we can (a) skip the
+    # hard TP in trending regimes and (b) widen/ tighten the trail with the
+    # trend.
+    adx_window: int = 14
+    adx_trend_threshold: float = 25.0  # ADX >= this => trending regime
+    # Trail multiple applied when trending (wider => let the move breathe) vs
+    # when choppy (tighter => protect gains).
+    trend_trail_atr_mult: float = 3.0
+    chop_trail_atr_mult: float = 2.0
+    # Target multiplier used ONLY in non-trending regimes (<=0 = never)
+    trend_tp_mult: float = 1.2
+
     # Warmup & cooldown
     warmup_bars: int = 60
     cooldown_bars: int = 5
 
-    # Target: multiple of cup depth above the breakout (<=0 = no hard TP)
+    # Target: multiple of cup depth above the breakout (<=0 = no hard TP).
+    # Superseded by the adaptive rule above; kept for parity/back-compat.
     profit_target_mult: float = 1.0
 
 
@@ -83,12 +98,54 @@ class Params(StrategyParams):
 # state
 # ---------------------------------------------------------------------------
 
-GLOBAL: dict = {"cooldowns": {}, "handle_lows": {}}
+GLOBAL: dict = {"cooldowns": {}, "handle_lows": {}, "trail_stops": {}}
 
 
 def reset_global() -> None:
     global GLOBAL
-    GLOBAL = {"cooldowns": {}, "handle_lows": {}}
+    GLOBAL = {"cooldowns": {}, "handle_lows": {}, "trail_stops": {}}
+
+
+# ---------------------------------------------------------------------------
+# pure trend helpers
+# ---------------------------------------------------------------------------
+
+
+def trend_strength(
+    highs: pd.Series,
+    lows: pd.Series,
+    closes: pd.Series,
+    *,
+    adx_window: int = 14,
+) -> float:
+    """Latest ADX reading (0..100); >= ``adx_trend_threshold`` = trending."""
+    adx_series = ta.adx(highs, lows, closes, adx_window)
+    val = float(adx_series.iloc[-1])
+    return val if val == val else 0.0  # NaN guard
+
+
+def is_uptrend(
+    highs: pd.Series,
+    lows: pd.Series,
+    closes: pd.Series,
+    *,
+    adx_window: int = 14,
+    threshold: float = 25.0,
+    ma_span: int = 50,
+) -> bool:
+    """Trending up? ADX >= threshold AND close above a slow moving average.
+
+    Combines directional strength (ADX) with bullish bias (price above the
+    slow MA) so a high-ADX *down* trend is never treated as a trend we want
+    to hold a long through.
+    """
+    if len(closes) < ma_span + 1:
+        return False
+    adx_val = trend_strength(highs, lows, closes, adx_window=adx_window)
+    if adx_val < threshold:
+        return False
+    ma = float(ta.sma(closes, ma_span).iloc[-1])
+    return float(closes.iloc[-1]) > ma
 
 
 # ---------------------------------------------------------------------------
@@ -523,10 +580,19 @@ def _maybe_enter(
     )
     stop_loss = round(entry_price - stop_dist, 4)
 
-    if params.profit_target_mult > 0 and handle.cup_depth > 0:
-        target = round(entry_price + params.profit_target_mult * handle.cup_depth, 4)
-    else:
-        target = 0.0
+    # Hard TP applies ONLY when we are NOT in a trending-up regime. In a
+    # strong uptrend the fixed target would cap a runner; there we persist no
+    # TP and let the (adaptive) ATR trail collect the move.
+    trending = is_uptrend(
+        highs,
+        lows,
+        closes,
+        adx_window=params.adx_window,
+        threshold=params.adx_trend_threshold,
+    )
+    target = 0.0
+    if not trending and params.trend_tp_mult > 0 and handle.cup_depth > 0:
+        target = round(entry_price + params.trend_tp_mult * handle.cup_depth, 4)
 
     GLOBAL["handle_lows"][symbol] = handle.low
     start_cooldown(symbol, params.cooldown_bars)
@@ -565,20 +631,56 @@ def _manage_position(
 
     handle_low = GLOBAL["handle_lows"].get(symbol)
     atr_val = float(ta.atr(highs, lows, closes, params.trail_atr_period).iloc[-1])
-    trail_stop = close_price - params.trail_atr_mult * atr_val
-    trail_stop = max(trail_stop, handle_low * 0.99) if handle_low else trail_stop
+    if np.isnan(atr_val) or atr_val <= 0:
+        atr_val = max(float(closes.iloc[-1]) * 0.01, 1e-9)
+
+    # Adaptive trail: wide in a trend (let the winner run), tight in chop
+    # (protect gains); ADX decides the regime.
+    trending = is_uptrend(
+        highs,
+        lows,
+        closes,
+        adx_window=params.adx_window,
+        threshold=params.adx_trend_threshold,
+    )
+    trail_mult = params.trend_trail_atr_mult if trending else params.chop_trail_atr_mult
 
     for position in pos_tup:
-        if close_price <= trail_stop:
-            start_cooldown(symbol, params.cooldown_bars)
-            signals.append(
-                TradeSignal(
-                    action=ActionType.close,
-                    symbol=symbol,
-                    timestamp=candle.timestamp,
-                    price=close_price,
-                    qty=abs(position.qty),
-                    position_id=position.position_id,
-                    reason=f"[cup&handle] trail stop hit (close {close_price:.2f} <= {trail_stop:.2f})",
-                )
+        # The ratchet is ONLY the exit path for trend entries (no hard TP). For
+        # chop entries we persist a fixed TP and let the engine's TP/SL close
+        # it -- running a tight ratchet alongside a fixed TP just churns the
+        # position into a stack of small exits.
+        if position.take_profit is not None:
+            continue
+
+        pid = position.position_id
+        # RATCHETING trail stop: never retreats. Seeded from the entry stop and
+        # handle floor, then ratchets up with ``close - mult*ATR``. A floating
+        # trail (recompute from today's close) rides give-backs; a ratchet only
+        # moves forward and locks in gains.
+        candidate = close_price - trail_mult * atr_val
+        floor = handle_low * 0.99 if handle_low else -float("inf")
+        seed = float(position.stop_loss) if position.stop_loss else -float("inf")
+        base = max(candidate, floor, seed)
+        saved = GLOBAL["trail_stops"].get(pid)
+        trail_stop = base if saved is None else max(base, saved)
+        GLOBAL["trail_stops"][pid] = trail_stop
+
+        if close_price > trail_stop:
+            continue
+
+        GLOBAL["trail_stops"].pop(pid, None)
+        start_cooldown(symbol, params.cooldown_bars)
+        signals.append(
+            TradeSignal(
+                action=ActionType.close,
+                symbol=symbol,
+                timestamp=candle.timestamp,
+                price=close_price,
+                qty=abs(position.qty),
+                position_id=position.position_id,
+                reason=(
+                    f"[cup&handle] ratchet trail hit (close {close_price:.2f} <= {trail_stop:.2f})"
+                ),
             )
+        )

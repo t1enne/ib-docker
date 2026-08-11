@@ -3,7 +3,11 @@
 > AI coding agent instructions for this repository.
 > Read this before generating any code.
 
-## Workflow
+## Alpha research
+
+Read SKILL.md
+
+## Development Workflow
 
 When implementing a feature or fix:
 

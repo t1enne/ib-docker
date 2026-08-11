@@ -19,14 +19,19 @@
     "max_handle_bars": 40,
     "max_handle_drop_pct": 0.12,
     "volume_confirm_breakout": true,
-    "per_symbol_size": 0.3,
+    "per_symbol_size": 0.15,
     "max_risk_pct": 0.035,
     "min_stop_atr": 0.5,
     "trail_atr_period": 14,
     "trail_atr_mult": 2.5,
+    "adx_window": 14,
+    "adx_trend_threshold": 25.0,
+    "trend_trail_atr_mult": 3.0,
+    "chop_trail_atr_mult": 2.0,
+    "trend_tp_mult": 1.2,
     "warmup_bars": 60,
     "cooldown_bars": 5,
     "profit_target_mult": 1.2
   },
-  "symbols": ["GLD", "SLV"]
+  "symbols": ["GLD", "SPY", "QQQ", "AMZN", "GOOG", "META"]
 }

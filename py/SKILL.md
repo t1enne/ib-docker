@@ -99,18 +99,19 @@ if not htf.empty:
 ```
 
 **Existing strategies** (in `src/bt/strategies/`):
-| File | `strategy_type` key | Description |
-|---|---|---|
-| `aegis.py` | `aegis` | Multi-asset adaptive equity generation (momentum/correlation/risk-free rotation) |
-| `kalman_pairs.py` | `kalman_pairs` | Kalman-filter pairs trading (mean-reversion, z-score of filtered spread) |
-| `momentum_regime.py` | `momentum_regime` | Momentum strategy filtered by regime (HMM/trend detection) |
-| `sector_mean_reversion.py` | `sector_mean_reversion` | Sector rotation: buy worst 6-month performers, sell when they recover |
-| `sector_mean_reversion_trail.py` | `sector_mean_reversion_trail` | Sector mean reversion + regime gating, ATR sizing, trail exit |
-| `shannons_demon.py` | `shannons_demon` | Volatility harvesting via periodic rebalancing |
-| `trend_pullback_atr_enhanced.py` | `trend_pullback_atr_enhanced` | Weekly-trend-confirmed mean reversion, dual-position entry |
-| `trend_pullback_atr_size.py` | `trend_pullback_atr_size` | Weekly-trend mean reversion with ATR position sizing |
-| `trend_pullback_atr_trail.py` | `trend_pullback_atr_trail` | Weekly-trend mean reversion with progressive trail exit |
-| `vol_extension_pullback.py` | `volatility_expansion_pullback_continuation` | ATR compression → breakout → pullback continuation |
+
+| File                             | `strategy_type` key                          | Description                                                                      |
+| -------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| `aegis.py`                       | `aegis`                                      | Multi-asset adaptive equity generation (momentum/correlation/risk-free rotation) |
+| `kalman_pairs.py`                | `kalman_pairs`                               | Kalman-filter pairs trading (mean-reversion, z-score of filtered spread)         |
+| `momentum_regime.py`             | `momentum_regime`                            | Momentum strategy filtered by regime (HMM/trend detection)                       |
+| `sector_mean_reversion.py`       | `sector_mean_reversion`                      | Sector rotation: buy worst 6-month performers, sell when they recover            |
+| `sector_mean_reversion_trail.py` | `sector_mean_reversion_trail`                | Sector mean reversion + regime gating, ATR sizing, trail exit                    |
+| `shannons_demon.py`              | `shannons_demon`                             | Volatility harvesting via periodic rebalancing                                   |
+| `trend_pullback_atr_enhanced.py` | `trend_pullback_atr_enhanced`                | Weekly-trend-confirmed mean reversion, dual-position entry                       |
+| `trend_pullback_atr_size.py`     | `trend_pullback_atr_size`                    | Weekly-trend mean reversion with ATR position sizing                             |
+| `trend_pullback_atr_trail.py`    | `trend_pullback_atr_trail`                   | Weekly-trend mean reversion with progressive trail exit                          |
+| `vol_extension_pullback.py`      | `volatility_expansion_pullback_continuation` | ATR compression → breakout → pullback continuation                               |
 
 **To register a new strategy**, drop a `.py` file in `src/bt/strategies/` that declares
 `STRATEGY_TYPE` and `on_candle()` — it's auto-discovered, no manual wiring:
@@ -261,9 +262,9 @@ uv run pytest src/bt/risk/tests/ -v
 
 All CLI groups under the `py` root command — also callable via `make run <subcommand> <args>`:
 
-| Group  | Commands                 | Description                                   |
-| ------ | ------------------------ | --------------------------------------------- |
-| `data` | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
+| Group  | Commands                   | Description                                                        |
+| ------ | -------------------------- | ------------------------------------------------------------------ |
+| `data` | `dl`, `query`, `preview`   | Sync/download OHLCV from IBKR, query local DB                      |
 | `bt`   | `run`, `split`, `optimize` | Backtesting engine + IS/OOS validation + walk-forward param tuning |
 
 ### `bt split` — IS/OOS walk-forward validation

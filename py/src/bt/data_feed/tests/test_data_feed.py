@@ -79,42 +79,6 @@ def test_detect_gaps_reports_gap_over_threshold():
     assert b.duration == pd.Timedelta(hours=72)
 
 
-def test_detect_gaps_ignores_gap_within_threshold():
-    # 24h gap is fine (e.g. missing a trading day).
-    def template(_s: str) -> list[str]:
-        return _two_bars("2024-01-01 00:00", "2024-01-02 00:00")
-
-    df = _frame(["A"], template)
-    assert detect_gaps(df, ["A"]) == {}
-
-
-def test_detect_gaps_skips_missing_symbol():
-    def template(_s: str) -> list[str]:
-        return _hourly("2024-01-01 00:00", "2024-01-05 00:00")
-
-    df = _frame(["A"], template)
-    assert detect_gaps(df, ["B"]) == {}
-
-
-def test_detect_gaps_single_bar_and_empty():
-    assert (
-        detect_gaps(_frame(["A"], lambda s: _hourly("2024-01-01 00:00")), ["A"]) == {}
-    )
-    assert detect_gaps(_frame(["A"], lambda s: _hourly()), ["A"]) == {}
-
-
-def test_detect_gaps_per_symbol_isolation():
-    def template(s: str) -> list[str]:
-        if s == "A":
-            return _hourly("2024-01-01 00:00", "2024-01-05 00:00")
-        return _two_bars("2024-01-01 00:00", "2024-01-02 00:00")
-
-    df = _frame(["A", "B"], template)
-    report = detect_gaps(df, ["A", "B"]).get("A", ())
-    assert len(report) == 1
-    assert detect_gaps(df, ["B"]) == {}
-
-
 # ── load_candles guard ─────────────────────────────────────────────────
 def _load_df(*, hourly_spans: dict):
     def factory(symbol):

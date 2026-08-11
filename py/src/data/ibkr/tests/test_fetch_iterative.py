@@ -14,6 +14,7 @@ multi-year backfills stay within the per-request period cap.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from types import ModuleType
@@ -28,6 +29,27 @@ import pytest
 
 from src.data.ibkr.candles import _fetch_candles_iterative, MAX_PERIOD_DAYS
 from src.data.types import CandleDict
+
+
+@pytest.fixture(autouse=True)
+def _no_sleep():
+    """No-op the inter-chunk cooldown so these tests run fast.
+
+    ``_fetch_candles_iterative`` sleeps ``CHUNK_DELAY_S`` (1s) between chunks
+    and backs off on 503s. Those wall-clock delays are real when the tests
+    exercise a multi-year hourly range (~3-5s across a handful of chunks) and
+    push ``make check`` far past its budget. The retry/backoff *logic* is what
+    matters here, not the elapsed time, so patch ``asyncio.sleep`` to return
+    immediately.
+    """
+
+    async def _instant(_secs: float) -> None:
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(asyncio, "sleep", _instant)
+    yield
+    monkeypatch.undo()
 
 
 def _candles_module() -> ModuleType:

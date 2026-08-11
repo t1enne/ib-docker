@@ -26,7 +26,7 @@ from src.data import sync_data
 # Maximum tolerated discontinuity between consecutive bars of a symbol.
 # Any gap strictly greater than this is treated as missing/corrupt data and
 # aborts the load — indicators across an unresolved hole are meaningless.
-DEFAULT_MAX_GAP: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta(hours=48))
+DEFAULT_MAX_GAP: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta(hours=96))
 
 
 @dataclass(frozen=True)

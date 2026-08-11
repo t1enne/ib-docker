@@ -47,6 +47,7 @@ import pandas as pd
 
 from src.bt.metrics import calculate_portfolio_result
 from src.bt.strategies import resolve_params
+from src.bt.strategies.ta_context import TaContext
 
 if TYPE_CHECKING:
     from src.bt.types import StrategyConfig
@@ -107,6 +108,7 @@ def run_backtest(
     model_updater_fn: Any = None,
     strategy_mod: Any = None,
     benchmark_curves: Optional[Mapping[str, pd.Series]] = None,
+    ta: Optional[TaContext] = None,
 ) -> Tuple[BacktestResults, BacktestState]:
     """Run backtest with the given candle generator and handlers.
 
@@ -124,6 +126,9 @@ def run_backtest(
         benchmark_curves: Optional pre-sliced benchmark curves to reuse across
             windows (avoids a per-window benchmark DB reload). When omitted,
             benchmarks are loaded+drawn here from config.
+        ta: Optional prefetched ``TaContext`` for DSL strategies (built once from
+            the full feed in ``run``; attached to the CandleStore so decorated
+            strategies read it cursor-safely via ``state.candles.ta``).
 
     Returns:
         Tuple of (BacktestResults, final BacktestState)
@@ -159,6 +164,12 @@ def run_backtest(
     # Create CandleStore once — wraps rows by reference, mutates in-place.
     # Strategies access it as state.candles (Mapping interface) + .latest()/.count().
     store = CandleStore(rows)
+    # Bind the prefetched TaContext (DSL) to share the store's cursor. Reading
+    # ``store.ta`` from a decorated strategy is always lookahead-safe because
+    # the TaContext slices against this same cursor.
+    if ta is not None:
+        store.attach_ta(ta)
+        ta.bind(store)
     state = merge_bt_state(state, dict(candles=store))
 
     for candle in candle_gen:
@@ -674,6 +685,19 @@ def run(
     risk_handler = default_risk_handler()
     model_updater_fn = _resolve_model_updater(bt.config)
 
+    # Prefetch the cursor-safe TaContext ONLY for DSL strategies (identified by
+    # the marker exposed on the adapter produced by ``@strategy``). Raw
+    # ``on_candle`` power users skip the build entirely (no wasted work). The
+    # DSL computes every indicator it reads ONCE over the full feed, then does
+    # O(1) cursor-truncated reads per candle -- no per-candle recompute, no
+    # per-access DataFrame rebuild.
+    ta = None
+    on_candle = getattr(strat_mod, "on_candle", None)
+    if getattr(on_candle, "ctx_fn", None) is not None:
+        from src.bt.strategies.ta_context import init_ta
+
+        ta = init_ta(data, bt.config.symbols, bt.config.bars[0])
+
     results, _ = run_backtest(
         bt,
         gen,
@@ -682,5 +706,6 @@ def run(
         model_updater_fn=model_updater_fn,
         strategy_mod=strat_mod,
         benchmark_curves=benchmark_curves,
+        ta=ta,
     )
     return results

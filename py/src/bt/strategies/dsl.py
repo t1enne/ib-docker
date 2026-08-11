@@ -1,0 +1,404 @@
+"""Pine-flavoured declarative strategy framework (Option A of prompt2.md).
+
+A decorated strategy is a tiny pure function of a :class:`StrategyContext` --
+it describes *what* to do per candle, not *how* the engine delivers data. The
+framework owns the plumbing the raw ``on_candle`` style re-invents everywhere:
+
+* candle iteration, cursor advancement, per-symbol signal bucketing,
+* OHLCV + indicator prefetch into a cursor-safe ``ctx.ta`` (``TaContext``),
+* the ``GLOBAL``/``reset_global`` lifecycle via an implicit ``ctx.state``,
+* signal construction from ``ctx.long/close/...``.
+
+A decorated strategy still exposes ``on_candle(state, candle, params)`` +
+``STRATEGY_TYPE`` + a generated ``reset_global``, so it plugs straight into the
+existing auto-discovery, ``bt split`` and ``bt sweep`` -- no engine fork.
+
+Shape::
+
+    STRATEGY_TYPE = "ema_cross"
+
+    @strategy(bars="1d")
+    def on_candle(ctx: StrategyContext):
+        fast = ctx.ta.ema("AAPL", 9)
+        slow = ctx.ta.ema("AAPL", 21)
+        if ctx.cross_over(fast, slow):
+            ctx.long("AAPL", size=0.1, sl=0.04, tp=0.08)
+        elif ctx.cross_under(fast, slow):
+            ctx.close("AAPL")
+
+The decorator is a pure adapter: it wraps the plain decision function in an
+``on_candle(state, candle, params)`` that builds a ``StrategyContext``,
+collects the signals the user's ``ctx.long/close`` calls emit, and returns
+them. The raw ``on_candle`` hook stays intact for non-DSL power users.
+"""
+
+from __future__ import annotations
+
+import sys
+from types import FunctionType
+from typing import Any, Callable, TYPE_CHECKING
+
+from src.bt.state import ActionType, TradeSignal
+from src.bt.strategies.series import SeriesView
+from src.bt.strategies.ta_context import OhlcvView, TaContext
+from src.bt.strategies.utils import sl_tp_from_pct
+
+if TYPE_CHECKING:
+    from src.bt.state import BacktestState, Candle, Position
+
+
+class StrategyContext:
+    """Per-candle decision surface handed to a decorated strategy.
+
+    Every data access is cursor-safe: ``ctx.ohlcv`` and ``ctx.ta`` read through
+    the engine's ``TaContext``, which shares the ``CandleStore`` cursor and can
+    never expose a future bar. ``ctx.state`` is the raw ``BacktestState`` for
+    power users (portfolio / position lookup) -- the DSL does not forbid it, it
+    just makes the common path safe by construction.
+
+    Sizing: ``size`` is a 0..1 fraction of current free cash deployed for that
+    symbol's position (the engine scales ``qty`` by ``cash / close``). ``sl``/``tp``
+    are fractional percentages (e.g. ``0.04`` = 4%) converted to absolute
+    per-trade stop/target prices.
+    """
+
+    __slots__ = (
+        "_state",
+        "_candle",
+        "_ta",
+        "_params",
+        "_symbols",
+        "_interval",
+        "_signals",
+        "_shared",
+    )
+
+    def __init__(
+        self,
+        state: "BacktestState",
+        candle: "Candle",
+        params: Any,
+        ta: TaContext,
+        symbols: tuple[str, ...],
+        interval: str,
+    ) -> None:
+        self._state = state
+        self._candle = candle
+        self._ta = ta
+        self._params = params
+        self._symbols = symbols
+        self._interval = interval
+        self._signals: list[TradeSignal] = []
+        self._shared: dict | None = None
+
+    @property
+    def shared(self) -> dict:
+        """Framework-owned cross-cancel storage (only when the strategy is
+        declared ``@strategy(stateful=True)``). Persists across candles within
+        a run and is cleared by ``reset_global()`` between split/sweep windows.
+
+        Raises when the strategy wasn't declared stateful -- calling this from a
+        stateless strategy is a footgun, so fail loudly rather than silently
+        sharing nothing.
+        """
+        if self._shared is None:
+            raise RuntimeError(
+                "ctx.shared requires the strategy to be declared "
+                "`@strategy(stateful=True)` (cross-call state is the DSL's "
+                "GLOBAL replacement)."
+            )
+        return self._shared
+
+    # -- public read-only accessors ------------------------------------------
+
+    @property
+    def state(self) -> "BacktestState":
+        return self._state
+
+    @property
+    def candle(self) -> "Candle":
+        return self._candle
+
+    @property
+    def timestamp(self):
+        return self._candle.timestamp
+
+    @property
+    def params(self) -> Any:
+        return self._params
+
+    @property
+    def symbols(self) -> tuple[str, ...]:
+        return self._symbols
+
+    @property
+    def interval(self) -> str:
+        return self._interval
+
+    @property
+    def ta(self) -> TaContext:
+        return self._ta
+
+    # -- data access -----------------------------------------------------------
+
+    def ohlcv(self, sym: str, interval: str | None = None) -> OhlcvView:
+        return self._ta.ohlcv(sym, interval or self._interval)
+
+    def price(self, sym: str) -> float:
+        """Current close for ``sym`` (cursor-safe O(1))."""
+        return self._ta.close(sym, self._interval)[-1]
+
+    def position(self, sym: str) -> "Position | None":
+        """In-position? Returns the newest open :class:`Position` for ``sym``."""
+        tup = self._state.portfolio.positions.get(sym)
+        if not tup:
+            return None
+        return tup[-1]
+
+    # -- signal emission ---------------------------------------------------------
+
+    def long(
+        self,
+        sym: str,
+        size: float | None = None,
+        sl: float | None = None,
+        tp: float | None = None,
+        reason: Any = "long",
+    ) -> None:
+        """Open a long position in ``sym``.
+
+        ``size`` is a 0..1 fraction of free cash (defaults to the engine's
+        ``config.position_size`` when omitted). ``sl``/``tp`` are fractional
+        percentages converted to absolute levels.
+        """
+        self._emit(ActionType.long, sym, size, sl, tp, reason)
+
+    def short(
+        self,
+        sym: str,
+        size: float | None = None,
+        sl: float | None = None,
+        tp: float | None = None,
+        reason: Any = "short",
+    ) -> None:
+        self._emit(ActionType.short, sym, size, sl, tp, reason)
+
+    def close(self, sym: str, reason: Any = "close") -> None:
+        """Close the open position in ``sym`` (full position)."""
+        price = self.price(sym)
+        pos = self.position(sym)
+        pid: str | None = pos.position_id if pos is not None else None
+        self._signals.append(
+            TradeSignal(
+                action=ActionType.close,
+                symbol=sym,
+                timestamp=self._candle.timestamp,
+                price=price,
+                reason=reason,
+                position_id=pid,
+            )
+        )
+
+    def _emit(
+        self,
+        action: ActionType,
+        sym: str,
+        size: float | None,
+        sl: float | None,
+        tp: float | None,
+        reason: Any,
+    ) -> None:
+        price = self.price(sym)
+        is_long = action == ActionType.long
+        sl_price, tp_price = sl_tp_from_pct(
+            price, sl or 0.0, tp or 0.0, is_long=is_long
+        )
+        qty = size if size is not None else 0.0
+        self._signals.append(
+            TradeSignal(
+                action=action,
+                symbol=sym,
+                timestamp=self._candle.timestamp,
+                price=price,
+                qty=qty,
+                reason=reason,
+                stop_loss=sl_price,
+                take_profit=tp_price,
+            )
+        )
+
+    # -- Pine built-ins (pure; operate on cursor-truncated views / floats) ------
+
+    def nz(self, v: float, fallback: float = 0.0) -> float:
+        return v if v == v else fallback
+
+    def cross_over(self, a, b) -> bool:
+        return _cross(a, b, over=True)
+
+    def cross_under(self, a, b) -> bool:
+        return _cross(a, b, over=False)
+
+    def change(self, series: SeriesView, bars: int = 1) -> float:
+        return series.change(bars)
+
+    def barssince(self, pred: Callable[[int], bool], max_bars: int = 500) -> float:
+        """Pine ``barssince`` — bars ago the ``pred(offset)`` was last True.
+
+        ``pred(i)`` tests the bar ``i`` bars in the past (``i=0`` = current
+        candle). Returns NaN when ``pred`` is never True within ``max_bars``.
+        """
+        for i in range(max_bars):
+            if pred(i):
+                return float(i)
+        return float("nan")
+
+
+# ---------------------------------------------------------------------------
+# decorator + wrapper
+# ---------------------------------------------------------------------------
+
+
+class _StrategyAdapter:
+    """Callable engine hook produced by ``@strategy``.
+
+    Wraps a user ``def on_candle(ctx)`` so it exposes the engine contract
+    ``on_candle(state, candle, params) -> list[TradeSignal]`` while building a
+    cursor-safe :class:`StrategyContext` for the decision body. Created per
+    decoration; holds the cross-call state holder (when stateful).
+    """
+
+    __slots__ = (
+        "ctx_fn",
+        "params_cls",
+        "interval",
+        "stateful",
+        "_state_holder",
+        "__name__",
+    )
+
+    def __init__(
+        self,
+        fn: FunctionType,
+        bars: str,
+        stateful: bool,
+        state_holder: dict,
+    ) -> None:
+        self.ctx_fn = fn
+        self.params_cls = None
+        self.interval = bars
+        self.stateful = stateful
+        self._state_holder = state_holder
+        self.__name__ = "on_candle"
+
+    def reset(self) -> None:
+        """Clear cross-candle state. Wired as the module's ``reset_global`` so
+        ``bt split``/``bt sweep`` reset a stateful DSL strategy between windows.
+        """
+        self._state_holder.clear()
+
+    def __call__(
+        self,
+        state: "BacktestState",
+        candle: "Candle",
+        params: Any,
+    ) -> list[TradeSignal]:
+        ta = getattr(state.candles, "ta", None)
+        if not isinstance(ta, TaContext):
+            raise RuntimeError(
+                "DSL strategy requires a prefetched TaContext; run through "
+                "`src.bt.engine.backtest.run` (it builds `ta` from data) so "
+                f"state.candles.ta is set for module {self.ctx_fn.__module__}."
+            )
+        ctx = StrategyContext(
+            state=state,
+            candle=candle,
+            params=params,
+            ta=ta,
+            symbols=symbols_from(state),
+            interval=self.interval,
+        )
+        if self.stateful:
+            ctx._shared = self._state_holder
+        self.ctx_fn(ctx)
+        return ctx._signals
+
+
+def strategy(bars: str = "1d", stateful: bool = False):
+    """Decorate ``def on_candle(ctx: StrategyContext)`` into an engine hook.
+
+    Returns an adapter (callable ``on_candle(state, candle, params) ->
+    list[TradeSignal]``) wrapping the plain decision function with a
+    ``StrategyContext``. It injects a module-level ``reset_global`` that clears
+    the framework-owned context state so splits and sweeps never bleed state
+    across windows. The raw ``on_candle`` hook stays intact for non-DSL power
+    users.
+
+    Args:
+        bars: signal interval served by ``ctx`` (matches the config base bar).
+        stateful: when True, persist cross-call state in ``ctx.state`` (a
+            per-module dict, reset per window).
+    """
+    state_holder: dict = {}
+
+    def decorate(fn: FunctionType):
+        adapter = _StrategyAdapter(fn, bars, stateful, state_holder)
+        module = sys.modules.get(fn.__module__)
+        if module is not None:
+            adapter.params_cls = getattr(module, "Params", None)
+            strategy_type = getattr(module, "STRATEGY_TYPE", None)
+            if strategy_type is None:
+                strategy_type = getattr(fn, "STRATEGY_TYPE", None)
+            if strategy_type is not None:
+                setattr(module, "STRATEGY_TYPE", strategy_type)
+            # reset_global clears the framework-owned context state (the adapter
+            # shares the same state_holder) so splits/sweeps can't bleed.
+            setattr(module, "reset_global", adapter.reset)
+        return adapter
+
+    return decorate
+
+
+def symbols_from(state: "BacktestState") -> tuple[str, ...]:
+    """Symbols present in the candle store's accumulator (deduped, ordered)."""
+    seen: list[str] = []
+    for k in state.candles.keys():
+        if k[0] not in seen:
+            seen.append(k[0])
+    return tuple(seen)
+
+
+# ---------------------------------------------------------------------------
+# cross helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_position(v) -> float:
+    return v[-1] if isinstance(v, SeriesView) else float(v)
+
+
+def _read_previous(v) -> float:
+    return v[-2] if isinstance(v, SeriesView) else float(v)
+
+
+def _cross(a, b, over: bool) -> bool:
+    """True when ``a`` crossed ``b`` on the current bar in the given direction.
+
+    SeriesViews read the current + previous cursor-truncated values (O(1), no
+    lookahead); raw floats compare against themselves (a degenerate, usually
+    false, single-value cross).
+    """
+    a_cur, b_cur = _read_position(a), _read_position(b)
+    a_prev, b_prev = _read_previous(a), _read_previous(b)
+    if over:
+        return a_prev <= b_prev and a_cur > b_cur
+    return a_prev >= b_prev and a_cur < b_cur
+
+
+__all__ = [
+    "strategy",
+    "StrategyContext",
+    "SeriesView",
+    "OhlcvView",
+    "TaContext",
+    "symbols_from",
+]

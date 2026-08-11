@@ -196,9 +196,7 @@ def uptrend_aligned(
     """
     return is_bull_market(
         sym_close, ma_span=sym_span, slope_span=20, min_slope_frac=0.0
-    ) and is_bull_market(
-        mkt_close, ma_span=mkt_span, slope_span=20, min_slope_frac=0.0
-    )
+    ) and is_bull_market(mkt_close, ma_span=mkt_span, slope_span=20, min_slope_frac=0.0)
 
 
 def _symbol_market_aligned(state: BacktestState, closes: pd.Series) -> bool:
@@ -213,7 +211,6 @@ def _symbol_market_aligned(state: BacktestState, closes: pd.Series) -> bool:
     if mkt is None:
         return True  # no SPY data -> fall back to symbol-only alignment
     return uptrend_aligned(closes, mkt["close"])
-
 
 
 def _market_regime_ok(state: BacktestState) -> bool:

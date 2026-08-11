@@ -13,7 +13,7 @@ from __future__ import annotations
 import glob
 import importlib
 import os
-from typing import Protocol, TYPE_CHECKING, cast
+from typing import Protocol, TYPE_CHECKING, cast, Any
 
 if TYPE_CHECKING:
     from src.bt.strategies.types import StrategyParams
@@ -107,4 +107,34 @@ def resolve_params(
     return params_cls.from_dict(params)
 
 
-__all__ = ["init_strat", "resolve_params"]
+# Lazy re-export of the DSL symbols. Imported on demand (functions only) so
+# ``from src.bt.strategies.dsl import strategy`` stays available without forcing
+# ``src.bt.strategies`` -> dsl -> ``src.bt.state`` -> engine -> backtest ->
+# ``src.bt.strategies`` at package import time (a circular-init hazard).
+_DSL_EXPORTS = {
+    "strategy": "strategy",
+    "StrategyContext": "StrategyContext",
+    "SeriesView": "SeriesView",
+    "OhlcvView": "OhlcvView",
+    "TaContext": "TaContext",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _DSL_EXPORTS:
+        import importlib as _il
+
+        mod = _il.import_module("src.bt.strategies.dsl")
+        return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = [
+    "init_strat",
+    "resolve_params",
+    "strategy",
+    "StrategyContext",
+    "SeriesView",
+    "OhlcvView",
+    "TaContext",
+]

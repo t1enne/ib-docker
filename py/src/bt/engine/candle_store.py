@@ -13,7 +13,7 @@ See ``src/bt/engine/backtest.py`` for the ``CandleRows`` layout.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -52,7 +52,7 @@ class CandleStore(Mapping[tuple[str, str], "DataFrame"]):
     ``__len__``, ``__iter__``, ``keys``, ``items``, ``values``.
     """
 
-    __slots__ = ("_rows", "_cursor")
+    __slots__ = ("_rows", "_cursor", "_ta")
 
     def __init__(
         self,
@@ -61,6 +61,44 @@ class CandleStore(Mapping[tuple[str, str], "DataFrame"]):
     ) -> None:
         self._rows: CandleRows = rows
         self._cursor: Timestamp | None = cursor
+        self._ta: Any = None  # optional prefetched TaContext (DSL)
+
+    # -- DSL support --------------------------------------------------------
+
+    def attach_ta(self, ta: Any) -> None:
+        """Bind a prefetched TaContext to this store (set once by the engine).
+
+        Strategies that opt into the DSL read indicators through ``store.ta``;
+        the TaContext shares this store's cursor so it can never lookahead.
+        Ta type is deliberately loose ``Any``: the store must not import the
+        concrete DSL context (keeps the engine decoupled from the strategy
+        layer); the decorated strategy narrows it via isinstance at call time.
+        """
+        self._ta = ta
+
+    @property
+    def ta(self) -> Any:
+        """The prefetched TaContext for DSL strategies, or None if not enabled."""
+        return self._ta
+
+    def cursor_count(self, sym: str, interval: str) -> int:
+        """Number of accumulated bars for *sym*/*interval* up to the cursor.
+
+        Like ``_build_df`` truncation, but O(log n) numpy ``searchsorted`` and
+        zero DataFrame allocation. Falls back to the absolute count when no
+        cursor is set.
+        """
+        cols = self._rows.get((sym, interval))
+        if cols is None:
+            return 0
+        n = int(cols["_len"][0])
+        if n == 0:
+            return 0
+        if self._cursor is None:
+            return n
+        cursor_ns = np.datetime64(self._cursor.to_datetime64())
+        ts_arr = cols["timestamp"][:n]
+        return int(np.searchsorted(ts_arr, cursor_ns, side="right"))
 
     # -- mutation (called by engine, not strategies) --------------------
 

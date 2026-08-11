@@ -264,7 +264,7 @@ All CLI groups under the `py` root command — also callable via `make run <subc
 | Group  | Commands                 | Description                                   |
 | ------ | ------------------------ | --------------------------------------------- |
 | `data` | `dl`, `query`, `preview` | Sync/download OHLCV from IBKR, query local DB |
-| `bt`   | `run`, `analyze`, `split`, `optimize` | Backtesting engine + IS/OOS validation + walk-forward param tuning |
+| `bt`   | `run`, `split`, `optimize` | Backtesting engine + IS/OOS validation + walk-forward param tuning |
 
 ### `bt split` — IS/OOS walk-forward validation
 

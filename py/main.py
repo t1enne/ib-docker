@@ -2,7 +2,6 @@
 
 Usage:
     ibkr bt run strategy.json
-    ibkr bt analyze strategy.json
     ibkr data query AAPL --from 2026-01-01
     ibkr data dl AAPL MSFT --from 2026-01-01
 

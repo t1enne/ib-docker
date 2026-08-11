@@ -164,7 +164,6 @@ src/
 ```bash
 # Backtesting
 uv run ibkr bt run <strategy.json> [--format jsonl]
-uv run ibkr bt analyze <strategy.json>
 uv run ibkr bt split <strategy.json> --folds 4          # IS/OOS walk-forward
 uv run ibkr bt split <strategy.json> --is-end 2020-12-31  # single anchor split
 uv run ibkr bt optimize <strategy.json> '{...grid...}' --folds 4  # per-fold IS tune → OOS validate
@@ -190,8 +189,8 @@ uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --is-end 2020-12-31
 
 Options: `--min-is-years` (walk-forward first-fold history floor, default 5.0),
 `--train-start` (warmup override), `--format text|json`. Does **not** re-tune
-params per fold — it answers *"given these locked params, how does performance
-hold up out-of-sample?"*
+params per fold — it answers _"given these locked params, how does performance
+hold up out-of-sample?"_
 
 ### `bt optimize` — walk-forward parameter optimization
 

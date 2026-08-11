@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import click
 
-from src.bt.cmds.analyze import register as register_analyze
 from src.bt.cmds.optimize import register as register_optimize
 from src.bt.cmds.run import register as register_run
 from src.bt.cmds.screen import register as register_screen
@@ -26,5 +25,4 @@ register_run(bt_group)
 register_split(bt_group)
 register_sweep(bt_group)
 register_optimize(bt_group)
-register_analyze(bt_group)
 register_screen(bt_group)

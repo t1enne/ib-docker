@@ -15,6 +15,7 @@ Usage:
 """
 
 import pandas as pd
+from dataclasses import dataclass
 from pandas import Timestamp
 from typing import List, cast
 
@@ -22,31 +23,124 @@ from src.bt.state import Candle
 from src.utils import get_local_candles
 from src.data import sync_data
 
+# Maximum tolerated discontinuity between consecutive bars of a symbol.
+# Any gap strictly greater than this is treated as missing/corrupt data and
+# aborts the load — indicators across an unresolved hole are meaningless.
+DEFAULT_MAX_GAP: pd.Timedelta = cast(pd.Timedelta, pd.Timedelta(hours=48))
+
+
+@dataclass(frozen=True)
+class GapBreak:
+    """A single discontinuity in a symbol's bars exceeding a threshold."""
+
+    symbol: str
+    prev_ts: pd.Timestamp
+    next_ts: pd.Timestamp
+    duration: pd.Timedelta
+
+
+def detect_gaps(
+    df: pd.DataFrame,
+    symbols: List[str],
+    max_gap: pd.Timedelta = DEFAULT_MAX_GAP,
+) -> dict[str, tuple[GapBreak, ...]]:
+    """Return, per symbol, the gaps (delta between consecutive bars) > max_gap.
+
+    A gap is the time elapsed between a bar's timestamp and the *previous*
+    bar's timestamp. A pre-existing first bar is not a gap (no prior bar).
+
+    Args:
+        df: MultiIndex-column frame (symbol, field) as produced by load_candles.
+        symbols: Symbols whose columns to inspect.
+        max_gap: Threshold; only gaps strictly greater than this are reported.
+
+    Returns:
+        Mapping ``symbol -> tuple[GapBreak, ...]``. Symbols with no gaps do not
+        appear as keys (use ``.get(symbol, ())`` for a safe default).
+    """
+    report: dict[str, tuple[GapBreak, ...]] = {}
+    for symbol in symbols:
+        try:
+            block = df.xs(symbol, axis=1)
+        except KeyError:
+            continue
+        # The MultiIndex-column frame is outer-joined across symbols, so other
+        # symbols' timestamps appear as all-NaN rows in this block. Only the
+        # symbol's own (non-NaN) bars are real — drop the padding before
+        # measuring continuity.
+        time_idx = pd.DatetimeIndex(block.dropna(subset=["close"]).index)
+        if len(time_idx) < 2:
+            continue
+        deltas = time_idx[1:] - time_idx[:-1]
+        breaks: list[GapBreak] = []
+        for idx, delta in enumerate(deltas):
+            assert isinstance(delta, pd.Timedelta)
+            if delta > max_gap:
+                breaks.append(
+                    GapBreak(
+                        symbol=symbol,
+                        prev_ts=time_idx[idx],
+                        next_ts=time_idx[idx + 1],
+                        duration=delta,
+                    )
+                )
+        if breaks:
+            report[symbol] = tuple(breaks)
+    return report
+
+
+class DataIntegrityError(Exception):
+    """Raised when a symbol's candle series contains a gap > the limit."""
+
 
 def load_candles(
     symbols: List[str],
     start: pd.Timestamp,
     end: pd.Timestamp,
     bar: str,
+    max_gap: pd.Timedelta = DEFAULT_MAX_GAP,
 ) -> pd.DataFrame:
     """Pure function - loads candles for given symbols and date range.
+
+    Data integrity: after assembling the MultiIndex frame, every symbol's bar
+    sequence is checked for discontinuities. If any symbol contains a gap
+    strictly greater than ``max_gap`` (default 48h) between consecutive bars,
+    a :class:`DataIntegrityError` is raised and loading aborts — a hole that
+    wide is presumed to be missing/corrupt data, and indicators computed across
+    it would be meaningless. Pass ``max_gap`` as ``pd.Timedelta.max`` (or a
+    large sentinel) to skip the check.
 
     Args:
         symbols: List of ticker symbols
         start: Start timestamp
         end: End timestamp
         bar: Bar size (e.g., "1h", "1d")
+        max_gap: Maximum tolerated discontinuity between consecutive bars.
 
     Returns:
         DataFrame with MultiIndex (symbol, timestamp) containing OHLCV data
+
+    Raises:
+        DataIntegrityError: If any symbol has a gap > ``max_gap``.
     """
     time_series = [get_local_candles(s, start, end, bar) for s in symbols]
-    df = pd.concat(time_series, axis=1, keys=symbols)
+    df = pd.concat(time_series, axis=1, keys=symbols, sort=False)
     # The engine iterates candles by index order (per-symbol arrays aligned by
     # row). Guarantee chronological order regardless of source row order so
     # downstream consumers (benchmarks, generators) never see reversed/shuffled
     # timestamps.
-    return df.sort_index()
+    df = df.sort_index()
+
+    report = detect_gaps(df, list(symbols), max_gap=max_gap)
+    if report:
+        lines = [
+            f"{sym}: {', '.join(f'{b.prev_ts} -> {b.next_ts} (gap {b.duration})' for b in breaks)}"
+            for sym, breaks in report.items()
+        ]
+        raise DataIntegrityError(
+            f"Candle data contains gaps > {max_gap}: {'; '.join(lines)}"
+        )
+    return df
 
 
 def candles_from_dataframe(

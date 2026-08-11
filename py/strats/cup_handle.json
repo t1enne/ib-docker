@@ -25,7 +25,7 @@
     "trail_atr_period": 14,
     "trail_atr_mult": 2.5,
     "adx_window": 14,
-    "adx_trend_threshold": 25.0,
+    "adx_trend_threshold": 20.0,
     "trend_trail_atr_mult": 3.0,
     "chop_trail_atr_mult": 2.0,
     "trend_tp_mult": 1.2,

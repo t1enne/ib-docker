@@ -148,6 +148,88 @@ def is_uptrend(
     return float(closes.iloc[-1]) > ma
 
 
+def is_bull_market(
+    closes: pd.Series,
+    *,
+    ma_span: int = 200,
+    slope_span: int = 20,
+    min_slope_frac: float = 0.0,
+) -> bool:
+    """Is the broad market in a bullish regime?
+
+    Pure gate on a market proxy (SPY) closes: price must be above a long
+    moving average. ``min_slope_frac`` additionally requires that MA to be
+    rising by at least that fraction over ``slope_span`` bars (default 0.0 =
+    only break below the long MA closes the gate, so flat-but-above-MA chop
+    still allows entries and only a true bear market is gated out).
+    """
+    if len(closes) < ma_span + slope_span:
+        return False
+    ma = ta.sma(closes, ma_span)
+    last_ma = float(ma.iloc[-1])
+    if last_ma != last_ma or last_ma <= 0:  # NaN guard
+        return False
+    if min_slope_frac > 0:
+        past_ma = float(ma.iloc[-slope_span - 1])
+        if past_ma != past_ma:  # NaN guard
+            return False
+        slope = (last_ma - past_ma) / past_ma
+        if slope < min_slope_frac:
+            return False
+    return float(closes.iloc[-1]) > last_ma
+
+
+def uptrend_aligned(
+    sym_close: pd.Series,
+    mkt_close: pd.Series,
+    *,
+    sym_span: int = 100,
+    mkt_span: int = 200,
+) -> bool:
+    """Both the symbol and the market proxy are in an uptrend (level-based).
+
+    Each series must close above its own long moving average. The symbol uses
+    a shorter span than SPY so the symbol must merely be in a positive trend
+    (above its 100 day MA) -- not necessarily as extended as the index -- while
+    SPY must confirm the broad bull. This keeps upside while still requiring
+    symbol+market direction alignment.
+    """
+    return is_bull_market(
+        sym_close, ma_span=sym_span, slope_span=20, min_slope_frac=0.0
+    ) and is_bull_market(
+        mkt_close, ma_span=mkt_span, slope_span=20, min_slope_frac=0.0
+    )
+
+
+def _symbol_market_aligned(state: BacktestState, closes: pd.Series) -> bool:
+    """Symbol + SPY uptrend alignment, read straight off CandleStore.
+
+    A stronger, narrower filter than the broad 200-MA bull gate: the symbol's
+    OWN long-MA uptrend must line up with SPY's. Only when both are trending
+    up do we open a long. (SPY is broadly gated upstream; this adds the
+    symbol's contribution to the alignment.)
+    """
+    mkt = state.candles.get(("SPY", "1d"))
+    if mkt is None:
+        return True  # no SPY data -> fall back to symbol-only alignment
+    return uptrend_aligned(closes, mkt["close"])
+
+
+
+def _market_regime_ok(state: BacktestState) -> bool:
+    """New entries only when a broad-market bull gate is open.
+
+    Gates on SPY daily closes via the pure ``is_bull_market`` check (price
+    above a rising slow MA). Existing positions are never force-closed by the
+    gate -- it only blocks entries, so an open runner in a fading bull is still
+    given to its ratchet.
+    """
+    df = state.candles.get(("SPY", "1d"))
+    if df is None:
+        return True  # no SPY data -> don't block live per-symbol entries
+    return is_bull_market(df["close"])
+
+
 # ---------------------------------------------------------------------------
 # pure pattern detection
 # ---------------------------------------------------------------------------
@@ -483,6 +565,18 @@ def on_candle(
         return signals
 
     symbols: list[str] = sorted({k[0] for k in state.candles.keys()})
+
+    # Bull-market gate, evaluated lazily: skip the O(n) SMA work entirely when
+    # every symbol already holds a position (no possible new entry this bar) or
+    # nothing can enter. Existing positions are managed regardless; the gate
+    # only blocks NEW entries.
+    can_enter = False
+    for symbol in symbols:
+        if not state.portfolio.positions.get(symbol, ()):
+            can_enter = True
+            break
+    bull_ok = True if not can_enter else _market_regime_ok(state)
+
     for symbol in symbols:
         pos_tup = state.portfolio.positions.get(symbol, ())
         if pos_tup:
@@ -496,6 +590,10 @@ def on_candle(
 
         df = state.candles.get((symbol, "1d"))
         if df is None:
+            continue
+        # Bull-market gate: never open NEW longs while the broad market (SPY)
+        # is bearish/choppy.
+        if not bull_ok:
             continue
         _maybe_enter(signals, state, symbol, df, candle, params)
 
@@ -547,6 +645,13 @@ def _maybe_enter(
         return
 
     handle = result.handle
+
+    # Alignment filter: take the breakout only when BOTH the symbol and SPY
+    # (level-based long-MA uptrends) are aligned. This lifts entry quality
+    # and, entering into aligned uptrends, lets runners travel further.
+    if not _symbol_market_aligned(state, closes):
+        return
+
     entry_price = float(closes.iloc[-1])
 
     # ATR for risk / trail sizing.
@@ -580,9 +685,11 @@ def _maybe_enter(
     )
     stop_loss = round(entry_price - stop_dist, 4)
 
-    # Hard TP applies ONLY when we are NOT in a trending-up regime. In a
-    # strong uptrend the fixed target would cap a runner; there we persist no
-    # TP and let the (adaptive) ATR trail collect the move.
+    # Hard TP applies when the alignment holds at the broad level but the
+    # symbol is NOT currently in a momentum uptrend (ADX + slow-MA edge). In
+    # that case we don't want to ride an unconfirmed breakout for free -- a
+    # fixed target banks the gain; a ratchet (no TP) is reserved for the
+    # aligned-trending runner we enter to capture maximum upside.
     trending = is_uptrend(
         highs,
         lows,

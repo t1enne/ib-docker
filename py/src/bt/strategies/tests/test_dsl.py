@@ -313,6 +313,39 @@ def test_ctx_barssince_finds_back_cross():
     assert "AAPL" in symbols_from(ctx.state)
 
 
+def test_symbols_from_dedups_across_intervals():
+    """Regression (#4): ``symbols_from`` must dedupe across (base + HTF) interval
+    keys in O(S) while preserving store insertion order."""
+    from src.bt.engine.candle_store import CandleStore
+    from src.bt.engine.utils import merge_bt_state
+    from src.bt.state import create_initial_backtest_state
+    from src.bt.strategies.dsl import symbols_from
+
+    # Store with a symbol present under BOTH base and HTF interval keys.
+    n = 10
+    rows: dict = {}
+    for sym, iv in (("AAPL", "1d"), ("MSFT", "1d"), ("AAPL", "4h")):
+        arr = {
+            k: (np.empty(n) if k != "_len" else np.array([n]))
+            for k in ("timestamp", "open", "high", "low", "close", "volume", "_len")
+        }
+        arr["timestamp"] = np.arange(n).astype("datetime64[s]")
+        for f in ("open", "high", "low", "close", "volume"):
+            arr[f] = np.arange(n, dtype=float)
+        rows[(sym, iv)] = arr
+    store = CandleStore(rows)
+    state = create_initial_backtest_state(
+        symbols=["AAPL", "MSFT"],
+        initial_capital=10000.0,
+        start_timestamp=pd.Timestamp("2023-01-01"),  # ty: ignore[invalid-argument-type]
+        rolling_window_size=None,
+    )
+    state = merge_bt_state(state, dict(candles=store))
+    # AAPL appears twice (1d + 4h) but must dedupe to a single occurrence, and
+    # order (AAPL, MSFT) is preserved from the store's insertion order.
+    assert symbols_from(state) == ("AAPL", "MSFT")
+
+
 # ---------------------------------------------------------------------------
 # stateful mode: ctx.shared persists across candles, resets between runs
 # ---------------------------------------------------------------------------
@@ -324,9 +357,11 @@ def _stateful_ctx(ctx: StrategyContext):
     ctx.shared["calls"] = ctx.shared.get("calls", 0) + 1
 
 
-def _drive(adapter, df, n_bars: int = 40) -> list[int]:
-    """Drive a strategy adapter over ``df``, returning the shared counter seen
-    at each candle (stateful strategies accumulate it via ctx.shared)."""
+def _drive(adapter, df, n_bars: int = 40) -> tuple[list[int], dict]:
+    """Drive a strategy adapter over ``df``, returning ``(counter_seen, holder)``
+    for a stateful strategy. ``_drive`` mimics the engine by minting a FRESH
+    per-run holder and attaching it to the store — the same per-run isolation
+    ``run_split``/``run_sweep`` get from ``run()``."""
     from src.bt.engine.backtest import _append_candle
     from src.bt.engine.candle_store import CandleStore
     from src.bt.engine.utils import candle_generator, merge_bt_state
@@ -344,7 +379,9 @@ def _drive(adapter, df, n_bars: int = 40) -> list[int]:
     rows: dict = {}
     store = CandleStore(rows)
     ta = TaContext.from_data(df, ("AAPL",), "1d")
+    holder: dict = {}
     store.attach_ta(ta)
+    store.attach_strategy_state(holder)
     ta.bind(store)
     state = merge_bt_state(state, dict(candles=store))
     seen: list[int] = []
@@ -354,25 +391,63 @@ def _drive(adapter, df, n_bars: int = 40) -> list[int]:
         rows, state = _append_candle(rows, state, c, "1d")
         store.advance(c.timestamp)
         adapter(state, c, object())
-        seen.append(adapter._state_holder["calls"])
-    return seen
+        seen.append(holder["calls"])
+    return seen, holder
 
 
 def test_dsl_stateful_shared_persists_and_resets():
     df = _df(40)
     # Across a run, ctx.shared accumulates: candle N sees counter == N.
-    seen = _drive(_stateful_ctx, df)
+    seen, _ = _drive(_stateful_ctx, df)
     assert seen == list(range(1, len(seen) + 1))
     total = seen[-1]
     assert total > 1
 
-    # A second run (new window) WITHOUT a reset would carry the counter over --
-    # that is exactly the cross-fold bleed the framework must prevent.
-    # After reset_global, the next run starts from scratch again.
-    _stateful_ctx.reset()
-    seen2 = _drive(_stateful_ctx, df)
+    # A second run (new window) mints a FRESH holder — no module-level state to
+    # clear, so the counter restarts at 1 without any reset call. This is the
+    # per-run isolation the thread-safety design guarantees.
+    seen2, holder2 = _drive(_stateful_ctx, df)
     assert seen2 == list(range(1, len(seen2) + 1))
     assert seen2[0] == 1  # fresh, not total+1
+    # The first run's holder is untouched by the second run.
+    assert seen[-1] == total
+
+
+def test_dsl_stateful_is_thread_safe_across_runs():
+    """Two concurrent runs sharing ONE stateful adapter must not bleed state.
+
+    Each thread gets its own per-run holder (minted in ``_drive`` like the
+    engine mints in ``run()``); the adapter reads it from ``state.candles.
+    strategy_state``, never from a module singleton. So N threads each see
+    their counter restart at 1 and reach the full bar count independently.
+    """
+    import threading
+
+    df = _df(40)
+    n_threads = 8
+    results: list[BaseException | None] = [None] * n_threads
+    outcomes: list[list[int]] = [None] * n_threads
+
+    def worker(idx: int) -> None:
+        try:
+            seen, _ = _drive(_stateful_ctx, df)
+            outcomes[idx] = seen
+        except Exception as exc:  # surfaced below for a clean assertion
+            results[idx] = exc
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    for idx, err in enumerate(results):
+        assert err is None, f"worker {idx} raised: {err!r}"
+    # Every thread independently accumulated 1..len(df) — no cross-bleed, no
+    # torn shared counter that would exceed the per-run total.
+    expected = list(range(1, len(df) + 1))
+    for idx, seen in enumerate(outcomes):
+        assert seen == expected, f"worker {idx} bled state: {seen} != {expected}"
 
 
 def test_dsl_stateless_shared_raises():
@@ -382,3 +457,23 @@ def test_dsl_stateless_shared_raises():
     assert ctx._shared is None
     with pytest.raises(RuntimeError):
         _ = ctx.shared
+
+
+def test_close_on_flat_symbol_is_a_noop():
+    # ``ctx.close`` on a symbol with no open position must not emit a dangling
+    # ``close`` signal with ``position_id=None`` — it's a no-op instead.
+    ctx = _make_ctx(_df(120), idx=60)
+    assert ctx.position("AAPL") is None  # fresh state: portfolio is flat
+    ctx.close("AAPL")
+    assert ctx._signals == []
+
+
+def test_shared_setter_binds_holder():
+    # The ``shared`` setter mirrors the getter so the adapter wires the state
+    # holder through the public accessor rather than poking ``._shared``.
+    ctx = _make_ctx(_df(40), idx=10)
+    holder = {"n": 0}
+    ctx.shared = holder
+    assert ctx.shared is holder
+    ctx.shared["n"] += 1
+    assert holder["n"] == 1

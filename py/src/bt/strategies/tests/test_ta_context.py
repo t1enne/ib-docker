@@ -194,3 +194,77 @@ def test_init_ta_factory():
     ta.bind(store)
     store.advance(df.index[10])
     assert ta.close("AAPL")[-1] == pytest.approx(df[("AAPL", "close")].iloc[10])
+
+
+def _df_with_gap(seed: int = 0) -> pd.DataFrame:
+    """DataFrame where AAPL has a NaN-close gap at the middle index; MSFT is clean.
+
+    Mirrors ``candle_generator`` semantics: a symbol with a NaN close has that
+    candle skipped entirely (not accumulated) in the store.
+    """
+    df = _df(40, seed=seed)
+    # Introduce a single-row gap (NaN close) for AAPL at index 20.
+    for f in ("open", "high", "low", "close", "volume"):
+        df.iloc[20, df.columns.get_loc(("AAPL", f))] = np.nan
+    return df
+
+
+def _gap_store(df: pd.DataFrame) -> CandleStore:
+    """CandleStore whose rows mirror the generator: AAPL's NaN-close row is dropped."""
+    rows: dict = {}
+    for sym in ("AAPL",):
+        mask = np.isfinite(df[("AAPL", "close")].to_numpy(dtype=float))
+        n = int(mask.sum())
+        arr = {
+            k: np.empty(n) if k != "_len" else np.array([n])
+            for k in ("timestamp", "open", "high", "low", "close", "volume", "_len")
+        }
+        arr["timestamp"] = df.index[mask].to_numpy().astype("datetime64[ms]")
+        for f in ("open", "high", "low", "close", "volume"):
+            arr[f] = df[(sym, f)].to_numpy(dtype=float)[mask]
+        rows[(sym, "1d")] = arr
+    return CandleStore(rows)
+
+
+def test_gap_feed_stays_aligned_with_store():
+    """Regression (#3): a NaN-close gap must not silently shift the feed's indices
+    relative to the store. After a gap, ``view[-1]`` must return the *current*
+    non-gap bar, not a stale/future one."""
+    df = _df_with_gap()
+    ta = TaContext.from_data(df, ("AAPL",), "1d")
+    store = _gap_store(df)
+    ta.bind(store)
+
+    # The feed should hold exactly the non-gap rows (39 here: 40 - 1 skipped).
+    assert len(ta.close("AAPL")) != len(df)  # gap dropped from feed
+
+    # Cursor past the gap: visible length == store rows up to cursor, and the
+    # last visible bar must be the real close at that timestamp, not a shifted one.
+    # The gap was at df index 20; a cursor at df index 30 lands on store row 29
+    # (row 20 skipped). The value must equal the non-gap close of df index 30.
+    store.advance(df.index[30])
+    assert store.cursor_count("AAPL", "1d") == 30  # 31 bars up to idx30 minus the gap
+    assert len(ta.close("AAPL")) == 30
+    assert ta.close("AAPL")[-1] == pytest.approx(df.iloc[30][("AAPL", "close")])
+
+    # Cursor at the bar right before the gap: no gap has been reached, so indices
+    # still align with the raw df (both feed and store count 0..19 -> 20 bars).
+    store.advance(df.index[18])
+    assert len(ta.close("AAPL")) == 19
+    assert ta.close("AAPL")[-1] == pytest.approx(df.iloc[18][("AAPL", "close")])
+
+
+def test_gap_misalignment_guard_fires_on_inconsistent_feed():
+    """The access-time guard must fail loudly when a feed is *shorter* than the
+    store's accumulated rows (a feed/storage mismatch that would serve a stale or
+    misaligned bar). Simulates the pre-fix state: feed filtered (39 rows) but store
+    kept the gap row (40 rows), so at the final cursor the store out-runs the feed."""
+    df = _df_with_gap()
+    ta = TaContext.from_data(df, ("AAPL",), "1d")  # properly filtered -> 39 rows
+    store = _store(df, ("AAPL",))  # UNFILTERED store keeps all 40 rows
+    ta.bind(store)
+    # Cursor at the final bar: store counts 40 rows, feed only 39 -> guard fires.
+    store.advance(df.index[-1])
+    assert store.cursor_count("AAPL", "1d") == 40
+    with pytest.raises(RuntimeError, match="misaligned"):
+        _ = ta.close("AAPL")[-1]

@@ -52,7 +52,7 @@ class CandleStore(Mapping[tuple[str, str], "DataFrame"]):
     ``__len__``, ``__iter__``, ``keys``, ``items``, ``values``.
     """
 
-    __slots__ = ("_rows", "_cursor", "_ta")
+    __slots__ = ("_rows", "_cursor", "_ta", "_strategy_state")
 
     def __init__(
         self,
@@ -62,6 +62,7 @@ class CandleStore(Mapping[tuple[str, str], "DataFrame"]):
         self._rows: CandleRows = rows
         self._cursor: Timestamp | None = cursor
         self._ta: Any = None  # optional prefetched TaContext (DSL)
+        self._strategy_state: dict | None = None  # optional per-run DSL holder
 
     # -- DSL support --------------------------------------------------------
 
@@ -80,6 +81,23 @@ class CandleStore(Mapping[tuple[str, str], "DataFrame"]):
     def ta(self) -> Any:
         """The prefetched TaContext for DSL strategies, or None if not enabled."""
         return self._ta
+
+    def attach_strategy_state(self, holder: dict) -> None:
+        """Bind a per-run cross-candle state holder (stateful DSL strategies).
+
+        The engine mints a **fresh** holder per ``run_once``/window and stores
+        it here, so concurrent runs never share strategy state — the adapter
+        reads it from the ``state`` it is handed, never from a module singleton.
+        """
+        self._strategy_state = holder
+
+    @property
+    def strategy_state(self) -> dict | None:
+        """The per-run cross-candle state holder for stateful DSL strategies.
+
+        ``None`` when the strategy is stateless (or the engine didn't mint one).
+        """
+        return self._strategy_state
 
     def cursor_count(self, sym: str, interval: str) -> int:
         """Number of accumulated bars for *sym*/*interval* up to the cursor.

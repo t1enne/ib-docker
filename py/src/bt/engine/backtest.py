@@ -109,6 +109,7 @@ def run_backtest(
     strategy_mod: Any = None,
     benchmark_curves: Optional[Mapping[str, pd.Series]] = None,
     ta: Optional[TaContext] = None,
+    strategy_state: Optional[dict] = None,
 ) -> Tuple[BacktestResults, BacktestState]:
     """Run backtest with the given candle generator and handlers.
 
@@ -129,6 +130,9 @@ def run_backtest(
         ta: Optional prefetched ``TaContext`` for DSL strategies (built once from
             the full feed in ``run``; attached to the CandleStore so decorated
             strategies read it cursor-safely via ``state.candles.ta``).
+        strategy_state: Optional per-run cross-candle state holder for stateful
+            DSL strategies (minted fresh by ``run`` per window; attached to the
+            CandleStore so no module-level singleton is shared).
 
     Returns:
         Tuple of (BacktestResults, final BacktestState)
@@ -170,6 +174,8 @@ def run_backtest(
     if ta is not None:
         store.attach_ta(ta)
         ta.bind(store)
+    if strategy_state is not None:
+        store.attach_strategy_state(strategy_state)
     state = merge_bt_state(state, dict(candles=store))
 
     for candle in candle_gen:
@@ -692,11 +698,18 @@ def run(
     # O(1) cursor-truncated reads per candle -- no per-candle recompute, no
     # per-access DataFrame rebuild.
     ta = None
+    strategy_state = None
     on_candle = getattr(strat_mod, "on_candle", None)
     if getattr(on_candle, "ctx_fn", None) is not None:
         from src.bt.strategies.ta_context import init_ta
 
         ta = init_ta(data, bt.config.symbols, bt.config.bars[0])
+        # Mint a FRESH cross-candle state holder for every run/window when the
+        # DSL strategy is stateful. Bound to this run's store (never a module
+        # singleton) so concurrent split/sweep/optimize workers can't share or
+        # race on strategy state.
+        if getattr(on_candle, "stateful", False):
+            strategy_state = {}
 
     results, _ = run_backtest(
         bt,
@@ -707,5 +720,6 @@ def run(
         strategy_mod=strat_mod,
         benchmark_curves=benchmark_curves,
         ta=ta,
+        strategy_state=strategy_state,
     )
     return results

@@ -68,6 +68,7 @@ def process(data: Any) -> Any: ...
 - **Use `TypedDict`** for structured dicts when a dataclass would be overkill.
 - **No `object` or bare `dict`** as parameter/return types.
 - **`TYPE_CHECKING` guard** for import-only types to avoid circular imports.
+- **Top level imports only** No lazy imports.
 
 ```python
 # ✅ Pattern: TYPE_CHECKING for type-only imports

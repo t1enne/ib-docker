@@ -108,10 +108,21 @@ class TaContext:
         complete: dict[str, dict[str, np.ndarray]] = {}
         for sym in symbols:
             arrays: dict[str, np.ndarray] = {}
-            for f in _FIELDS:
-                if cols is not None and (sym, f) in cols:
-                    arrays[f] = data[(sym, f)].to_numpy(dtype=np.float64)
-                else:
+            if cols is not None and (sym, "close") in cols:
+                # Align the TaContext feed with the engine's CandleStore 1:1.
+                # ``candle_generator`` skips a symbol's candle whenever its close
+                # is non-finite (data gap / closed market), so the store only ever
+                # accumulates rows with a finite close. We must drop the same rows
+                # here, otherwise ``cursor_count`` (store-based) and ``values[idx]``
+                # (this feed) point at different timestamps -> silent misalignment.
+                mask = np.isfinite(data[(sym, "close")].to_numpy(dtype=np.float64))
+                for f in _FIELDS:
+                    if (sym, f) in cols:
+                        arrays[f] = data[(sym, f)].to_numpy(dtype=np.float64)[mask]
+                    else:
+                        arrays[f] = np.array([], dtype=np.float64)
+            else:
+                for f in _FIELDS:
                     arrays[f] = np.array([], dtype=np.float64)
             complete[sym] = arrays
         return cls(complete, tuple(symbols), base_interval)
@@ -153,7 +164,20 @@ class TaContext:
             if store is None:
                 arr = self._complete[sym].get("close")
                 return len(arr) if arr is not None else 0
-            return store.cursor_count(sym, iv)
+            n = store.cursor_count(sym, iv)
+            close_arr = self._complete[sym].get("close")
+            feed_n = len(close_arr) if close_arr is not None else 0
+            if n > feed_n:
+                # The store accumulated more bars than this symbol's aligned feed
+                # holds - the feed was gapped/NaN-filtered inconsistently, so
+                # ``values[idx]`` would read a future/stale bar. Fail loudly rather
+                # than serve misaligned data.
+                raise RuntimeError(
+                    f"TaContext feed for {sym!r} has {feed_n} rows but CandleStore "
+                    f"accumulated {n} up to the cursor; feed and store are "
+                    "misaligned (NaN/data-gap rows were not filtered consistently)."
+                )
+            return n
 
         return _len
 

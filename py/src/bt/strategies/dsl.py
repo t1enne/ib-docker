@@ -110,6 +110,14 @@ class StrategyContext:
             )
         return self._shared
 
+    @shared.setter
+    def shared(self, holder: dict) -> None:
+        """Bind the framework-owned state holder (the adapter wires this for
+        stateful strategies). Mirrors the ``shared`` getter so the adapter
+        doesn't poke ``self._shared`` directly.
+        """
+        self._shared = holder
+
     # -- public read-only accessors ------------------------------------------
 
     @property
@@ -195,10 +203,18 @@ class StrategyContext:
         self._emit(ActionType.short, sym, size, sl, tp, reason)
 
     def close(self, sym: str, reason: Any = "close") -> None:
-        """Close the open position in ``sym`` (full position)."""
+        """Close the open position in ``sym`` (full position).
+
+        A no-op when ``sym`` is flat: closing a symbol with no position would
+        otherwise emit a dangling ``close`` signal with ``position_id=None``
+        that the engine must swallow. Guarding here keeps the emitted surface
+        clean and the strategy's intent ("close whatever we hold") explicit.
+        """
+        if self.position(sym) is None:
+            return
         price = self.price(sym)
         pos = self.position(sym)
-        pid: str | None = pos.position_id if pos is not None else None
+        assert pos is not None
         self._signals.append(
             TradeSignal(
                 action=ActionType.close,
@@ -206,7 +222,7 @@ class StrategyContext:
                 timestamp=self._candle.timestamp,
                 price=price,
                 reason=reason,
-                position_id=pid,
+                position_id=pos.position_id,
             )
         )
 
@@ -289,7 +305,6 @@ class _StrategyAdapter:
         "params_cls",
         "interval",
         "stateful",
-        "_state_holder",
         "__name__",
     )
 
@@ -298,20 +313,23 @@ class _StrategyAdapter:
         fn: FunctionType,
         bars: str,
         stateful: bool,
-        state_holder: dict,
     ) -> None:
         self.ctx_fn = fn
         self.params_cls = None
         self.interval = bars
         self.stateful = stateful
-        self._state_holder = state_holder
         self.__name__ = "on_candle"
 
     def reset(self) -> None:
-        """Clear cross-candle state. Wired as the module's ``reset_global`` so
-        ``bt split``/``bt sweep`` reset a stateful DSL strategy between windows.
+        """Wired as the module's ``reset_global`` for split/sweep back-compat.
+
+        With per-run state holders (minted fresh by the engine for every run
+        window), there is no module-level dict to clear — a new window simply
+        gets a new holder. Kept as a no-op so old ``bt split``/``bt sweep``
+        callers that invoke ``reset_global()`` between windows keep working
+        without racing on shared state.
         """
-        self._state_holder.clear()
+        return None
 
     def __call__(
         self,
@@ -326,6 +344,16 @@ class _StrategyAdapter:
                 "`src.bt.engine.backtest.run` (it builds `ta` from data) so "
                 f"state.candles.ta is set for module {self.ctx_fn.__module__}."
             )
+        holder = None
+        if self.stateful:
+            holder = getattr(state.candles, "strategy_state", None)
+            if not isinstance(holder, dict):
+                raise RuntimeError(
+                    "Stateful DSL strategy requires a per-run state holder; run "
+                    "through `src.bt.engine.backtest.run` (it mints a fresh "
+                    "holder per window) so `state.candles.strategy_state` is a "
+                    f"dict for module {self.ctx_fn.__module__}."
+                )
         ctx = StrategyContext(
             state=state,
             candle=candle,
@@ -334,8 +362,8 @@ class _StrategyAdapter:
             symbols=symbols_from(state),
             interval=self.interval,
         )
-        if self.stateful:
-            ctx._shared = self._state_holder
+        if holder is not None:
+            ctx.shared = holder
         self.ctx_fn(ctx)
         return ctx._signals
 
@@ -345,20 +373,24 @@ def strategy(bars: str = "1d", stateful: bool = False):
 
     Returns an adapter (callable ``on_candle(state, candle, params) ->
     list[TradeSignal]``) wrapping the plain decision function with a
-    ``StrategyContext``. It injects a module-level ``reset_global`` that clears
-    the framework-owned context state so splits and sweeps never bleed state
-    across windows. The raw ``on_candle`` hook stays intact for non-DSL power
-    users.
+    ``StrategyContext``. The raw ``on_candle`` hook stays intact for non-DSL
+    power users.
+
+    Cross-candle state (``stateful=True``) is **per-run**: the engine mints a
+    fresh holder for every ``run``/window and the adapter reads it from
+    ``state.candles.strategy_state``. Nothing is shared at module scope, so a
+    stateless OR stateful DSL strategy is thread-safe across concurrent
+    ``run_split``/``run_sweep``/``run_optimize`` workers. ``reset_global`` is
+    kept as a no-op shim for split/sweep back-compat.
 
     Args:
         bars: signal interval served by ``ctx`` (matches the config base bar).
-        stateful: when True, persist cross-call state in ``ctx.state`` (a
-            per-module dict, reset per window).
+        stateful: when True, persist cross-call state in ``ctx.shared`` (a
+            per-run dict, fresh for every run window).
     """
-    state_holder: dict = {}
 
     def decorate(fn: FunctionType):
-        adapter = _StrategyAdapter(fn, bars, stateful, state_holder)
+        adapter = _StrategyAdapter(fn, bars, stateful)
         module = sys.modules.get(fn.__module__)
         if module is not None:
             adapter.params_cls = getattr(module, "Params", None)
@@ -367,8 +399,9 @@ def strategy(bars: str = "1d", stateful: bool = False):
                 strategy_type = getattr(fn, "STRATEGY_TYPE", None)
             if strategy_type is not None:
                 setattr(module, "STRATEGY_TYPE", strategy_type)
-            # reset_global clears the framework-owned context state (the adapter
-            # shares the same state_holder) so splits/sweeps can't bleed.
+            # reset_global is a no-op back-compat shim. State is per-run (minted
+            # fresh by the engine per window), so cross-window bleed is already
+            # impossible without any module-level clear.
             setattr(module, "reset_global", adapter.reset)
         return adapter
 
@@ -376,12 +409,21 @@ def strategy(bars: str = "1d", stateful: bool = False):
 
 
 def symbols_from(state: "BacktestState") -> tuple[str, ...]:
-    """Symbols present in the candle store's accumulator (deduped, ordered)."""
-    seen: list[str] = []
+    """Symbols present in the candle store's accumulator (deduped, ordered).
+
+    Dedups by symbol across every interval key (base + any HTF), preserving the
+    store's deterministic insertion order. O(S) via a set, not an O(S²) list scan.
+    By the time ``on_candle`` fires, the store is populated for all configured
+    symbols, so this is authoritative at call sites.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
     for k in state.candles.keys():
-        if k[0] not in seen:
-            seen.append(k[0])
-    return tuple(seen)
+        sym = k[0]
+        if sym not in seen:
+            seen.add(sym)
+            result.append(sym)
+    return tuple(result)
 
 
 # ---------------------------------------------------------------------------

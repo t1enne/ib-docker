@@ -1,12 +1,12 @@
 {
-  "name": "kalman-pairs-xle-tlt",
+  "name": "kalman-pairs-xle-tlt-dsl",
   "training_start": "2017-11-12",
   "training_end": "2018-11-12",
   "trading_start": "2018-11-12",
   "trading_end": "2025-01-01",
   "commission": 0.05,
   "initial_capital": 100000,
-  "strategy_type": "kalman_pairs",
+  "strategy_type": "kalman_pairs_dsl",
   "bars": ["1d"],
   "model_params": {},
   "model_updater": {

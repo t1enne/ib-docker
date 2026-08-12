@@ -67,6 +67,7 @@ class Position:
     last_price: float
     type: ActionType
     position_id: str = ""  # unique identifier, e.g. "SPY_1714003200.0"
+    tag: str = ""  # optional strategy-facing label for lot targeting, e.g. "spy-r1"
 
 
 @dataclass
@@ -131,6 +132,7 @@ class TradeSignal:
     )
     stop_loss: Optional[float] = None  # explicit SL for new positions
     take_profit: Optional[float] = None  # explicit TP for new positions
+    tag: str = ""  # optional strategy-facing lot label (stored on the Position)
 
 
 @dataclass(frozen=True)

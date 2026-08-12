@@ -253,3 +253,184 @@ def test_mark_to_market_list_matches_update_prices():
     assert cur.equity_curve == ()
     # Freezing the buffer yields exactly the reference tuple.
     assert tuple(buf) == ref.equity_curve
+
+
+# ---------------------------------------------------------------------------
+# multi-position: tag propagation, lot resolution, net reads
+# ---------------------------------------------------------------------------
+
+
+def _long_position(pid: str, qty: float, price: float, tag: str = "") -> Position:
+    return Position(
+        symbol="AAPL",
+        qty=qty,
+        entry_price=price,
+        entry_time=_ts("2024-01-01"),
+        stop_loss=None,
+        take_profit=None,
+        last_price=price,
+        type=ActionType.long,
+        position_id=pid,
+        tag=tag,
+    )
+
+
+def _fill_long(qty: float, price: float, position_id: str, tag: str = "") -> FillEvent:
+    return FillEvent(
+        signal=TradeSignal(
+            action=ActionType.long,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-01"),
+            price=price,
+            qty=qty,
+            position_id=position_id,
+            tag=tag,
+        ),
+        filled_qty=qty,
+        executed_price=price,
+        commission=1.0,
+        slippage=0.0,
+        timestamp=_ts("2024-01-01"),
+    )
+
+
+def test_open_stores_tag_on_position():
+    from src.bt.portfolio.pure import get_symbol_positions, resolve_lot
+
+    portfolio = create_initial_portfolio(
+        initial_capital=10000, start_timestamp=_ts("2024-01-01")
+    )
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_1", tag="spy-r1"))
+    pos = get_symbol_positions(portfolio, "AAPL")[0]
+    assert pos.tag == "spy-r1"
+    assert resolve_lot((pos,), tag="spy-r1") is pos
+    assert resolve_lot((pos,), lot="AAPL_1") is pos
+
+
+def test_long_always_opens_fresh_lot():
+    from src.bt.portfolio.pure import count_positions, get_symbol_positions
+
+    portfolio = create_initial_portfolio(
+        initial_capital=10000, start_timestamp=_ts("2024-01-01")
+    )
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_1", tag="r1"))
+    portfolio = apply_fill(portfolio, _fill_long(5.0, 100.0, "AAPL_2", tag="r2"))
+    lots = get_symbol_positions(portfolio, "AAPL")
+    assert count_positions(portfolio) == 2
+    assert [p.position_id for p in lots] == ["AAPL_1", "AAPL_2"]
+    assert [p.tag for p in lots] == ["r1", "r2"]
+    assert lots[-1].position_id == "AAPL_2"  # newest lot
+
+
+def test_partial_close_releases_fraction_of_lot():
+    from src.bt.portfolio.pure import get_symbol_positions
+
+    portfolio = create_initial_portfolio(
+        initial_capital=10000, start_timestamp=_ts("2024-01-01")
+    )
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_1", tag="r1"))
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_2", tag="r2"))
+
+    # Release 25% of lot r1 only (2.5 shares at 100 => +250 cash, PnL zero).
+    reduce = FillEvent(
+        signal=TradeSignal(
+            action=ActionType.rebalance,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-02"),
+            price=100.0,
+            qty=-2.5,
+            reason="partial",
+            position_id="AAPL_1",
+        ),
+        filled_qty=2.5,
+        executed_price=100.0,
+        commission=1.0,
+        slippage=0.0,
+        timestamp=_ts("2024-01-02"),
+    )
+    portfolio = apply_fill(portfolio, reduce)
+    lots = get_symbol_positions(portfolio, "AAPL")
+    assert len(lots) == 2
+    assert lots[0].position_id == "AAPL_1"
+    assert lots[0].qty == pytest.approx(7.5)
+    assert lots[0].tag == "r1"  # tag preserved across partial close
+    assert lots[1].position_id == "AAPL_2"
+    assert lots[1].qty == 10.0
+    # The partially-closed trade remains open with the released PnL booked.
+    r1_trade = [t for t in portfolio.trades if t.position_id == "AAPL_1"][0]
+    assert r1_trade.status == TradeStatus.open
+    assert r1_trade.qty == pytest.approx(7.5)
+
+
+def test_partial_close_full_release_closes_lot():
+    from src.bt.portfolio.pure import get_symbol_positions
+
+    portfolio = create_initial_portfolio(
+        initial_capital=10000, start_timestamp=_ts("2024-01-01")
+    )
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_1", tag="r1"))
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_2", tag="r2"))
+
+    # Release 100% of r1 => fully closes that lot, leaves r2 untouched.
+    reduce = FillEvent(
+        signal=TradeSignal(
+            action=ActionType.rebalance,
+            symbol="AAPL",
+            timestamp=_ts("2024-01-02"),
+            price=110.0,
+            qty=-10.0,
+            reason="full",
+            position_id="AAPL_1",
+        ),
+        filled_qty=10.0,
+        executed_price=110.0,
+        commission=1.0,
+        slippage=0.0,
+        timestamp=_ts("2024-01-02"),
+    )
+    portfolio = apply_fill(portfolio, reduce)
+    lots = get_symbol_positions(portfolio, "AAPL")
+    assert len(lots) == 1
+    assert lots[0].position_id == "AAPL_2"
+    closed = [t for t in portfolio.trades if t.position_id == "AAPL_1"][0]
+    assert closed.status == TradeStatus.closed
+    # PnL reflects the gross round-trip on the closed lot; commission is tracked
+    # separately on the trade (consistent with test_close_long_position).
+    assert closed.pnl == pytest.approx((110.0 - 100.0) * 10.0)
+
+
+def test_net_quantity_and_avg_entry():
+    from src.bt.portfolio.pure import avg_entry, net_quantity
+
+    portfolio = create_initial_portfolio(
+        initial_capital=10000, start_timestamp=_ts("2024-01-01")
+    )
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 100.0, "AAPL_1"))  # 1000 @ 100
+    portfolio = apply_fill(portfolio, _fill_long(10.0, 120.0, "AAPL_2"))  # 1200 @ 120
+    assert net_quantity(portfolio, "AAPL") == pytest.approx(20.0)
+    assert avg_entry(portfolio, "AAPL") == pytest.approx(
+        (10.0 * 100.0 + 10.0 * 120.0) / 20.0
+    )
+    assert net_quantity(portfolio, "MSFT") == 0.0
+    assert avg_entry(portfolio, "MSFT") is None
+
+
+def test_tag_preserved_through_price_update():
+    portfolio = PortfolioState(
+        cash=5000,
+        positions={"AAPL": (_long_position("AAPL_1", 10.0, 100.0, tag="r1"),)},
+        trades=(),
+        equity_curve=(),
+        initial_capital=10000,
+    )
+    tick = Candle(
+        timestamp=_ts("2024-01-02"),
+        symbol="AAPL",
+        open=100.0,
+        high=105.0,
+        low=99.0,
+        close=105.0,
+        volume=1000.0,
+    )
+    new = update_prices(portfolio, tick)
+    assert new.positions["AAPL"][0].tag == "r1"

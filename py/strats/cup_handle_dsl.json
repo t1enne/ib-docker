@@ -1,12 +1,12 @@
 {
-  "name": "cup-handle-breakout",
+  "name": "cup-handle-breakout-dsl",
   "training_start": "2015-01-02",
   "training_end": "2015-01-03",
   "trading_start": "2015-01-03",
   "trading_end": "2025-01-01",
   "commission": 0.1,
   "initial_capital": 50000,
-  "strategy_type": "cup_handle",
+  "strategy_type": "cup_handle_dsl",
   "bars": ["1d"],
   "model_params": {},
   "strategy_params": {

@@ -1,12 +1,12 @@
 {
-  "name": "trend-pullback-atr-trail-L15-r1.5",
+  "name": "trend-pullback-atr-trail-dsl",
   "training_start": "2013-01-01",
   "training_end": "2015-01-01",
   "trading_start": "2015-01-01",
   "trading_end": "2025-12-31",
   "commission": 0.1,
   "initial_capital": 50000,
-  "strategy_type": "trend_pullback_atr_trail",
+  "strategy_type": "trend_pullback_atr_trail_dsl",
   "bars": ["1d"],
   "model_params": {},
   "strategy_params": {

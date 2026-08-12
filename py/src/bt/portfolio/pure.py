@@ -89,6 +89,7 @@ def _open_position(
         last_price=fill.executed_price,
         type=position_type,
         position_id=pid,
+        tag=signal.tag,
     )
 
     # Create trade record
@@ -383,6 +384,7 @@ def _rebalance_position(
         last_price=fill.executed_price,
         type=target.type,
         position_id=pid,
+        tag=target.tag,
     )
 
     # Replace the old position with the updated one in the tuple.
@@ -452,6 +454,7 @@ def _equity_point_for(portfolio: PortfolioState, tick) -> tuple[dict, EquityPoin
                 last_price=tick.close,
                 type=pos.type,
                 position_id=pos.position_id,
+                tag=pos.tag,
             )
             for pos in symbol_positions
         )
@@ -549,3 +552,60 @@ def get_symbol_positions(
 ) -> TupleT[Position, ...]:
     """Return all positions for a symbol. Empty tuple if none."""
     return portfolio.positions.get(symbol, ())
+
+
+def resolve_lot(
+    positions: TupleT[Position, ...],
+    lot: Optional[str] = None,
+    tag: str = "",
+) -> Optional[Position]:
+    """Resolve a specific lot from a symbol's position tuple.
+
+    Matching precedence:
+      1. ``lot`` — exact ``position_id`` match (canonical handle).
+      2. ``tag`` — exact ``Position.tag`` match (strategy-facing label).
+      3. Neither — the newest (last) position.
+
+    Returns ``None`` when ``positions`` is empty, when ``lot``/``tag`` is
+    given but matches nothing, or when a non-empty ``tuple`` has only older
+    lots and ``lot``/``tag`` are empty. This is the shared resolver behind the
+    DSL's ``ctx.partial_close`` lot targeting.
+    """
+    if not positions:
+        return None
+    if lot:
+        return next((p for p in positions if p.position_id == lot), None)
+    if tag:
+        return next((p for p in positions if p.tag == tag), None)
+    return positions[-1]
+
+
+def net_quantity(portfolio: PortfolioState, symbol: str) -> float:
+    """Net signed position size for ``symbol`` across all lots.
+
+    Long lots count positive, short lots negative; the DSL's ``Position.qty``
+    is always a positive magnitude (the side lives in ``Position.type``).
+    Returns 0.0 when the symbol has no open lots.
+    """
+    total = 0.0
+    for p in portfolio.positions.get(symbol, ()):
+        if p.type == ActionType.long:
+            total += p.qty
+        else:
+            total -= p.qty
+    return total
+
+
+def avg_entry(portfolio: PortfolioState, symbol: str) -> Optional[float]:
+    """Quantity-weighted average entry price across ``symbol``'s lots.
+
+    ``Position.qty`` is stored as a positive magnitude for both sides, so the
+    VWAP uses absolute quantities. Returns ``None`` when the symbol is flat.
+    """
+    lots = portfolio.positions.get(symbol, ())
+    if not lots:
+        return None
+    total_qty = sum(abs(p.qty) for p in lots)
+    if total_qty <= 0:
+        return None
+    return sum(p.qty * p.entry_price for p in lots) / total_qty

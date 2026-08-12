@@ -158,11 +158,88 @@ class StrategyContext:
         return self._ta.close(sym, self._interval)[-1]
 
     def position(self, sym: str) -> "Position | None":
-        """In-position? Returns the newest open :class:`Position` for ``sym``."""
+        """In-position? Returns the newest open :class:`Position` for ``sym``.
+
+        For multi-lot bookkeeping use :meth:`quantity`, :meth:`position_ids`
+        and :meth:`avg_entry` — this convenience accessor returns the most
+        recently opened lot (``tuple[-1]``) and ``None`` when ``sym`` is flat.
+        """
         tup = self._state.portfolio.positions.get(sym)
         if not tup:
             return None
         return tup[-1]
+
+    # -- multi-position aggregated reads --------------------------------------
+
+    def quantity(self, sym: str) -> float:
+        """Net signed size for ``sym`` across all lots.
+
+        Long lots count positive, short lots negative. One unambiguous answer
+        to "how big"; a strategy that wants netting semantics computes this and
+        opens the delta itself via ``long`` + ``partial_close``.
+        """
+        from src.bt.portfolio.pure import net_quantity
+
+        return net_quantity(self._state.portfolio, sym)
+
+    def position_ids(self, sym: str) -> tuple[str, ...]:
+        """Ordered handles of the active lots for ``sym``.
+
+        The list-of-trades surface backtesting.py ships as ``self.trades`` and
+        Pine tracks per entry-name — the DSL previously hid this. Pass an id
+        to :meth:`partial_close` as ``lot=...`` to target that lot.
+        """
+        return tuple(
+            p.position_id for p in self._state.portfolio.positions.get(sym, ())
+        )
+
+    def avg_entry(self, sym: str) -> float | None:
+        """Quantity-weighted average entry price across ``sym``'s lots."""
+        from src.bt.portfolio.pure import avg_entry
+
+        return avg_entry(self._state.portfolio, sym)
+
+    # -- lot-targeted mutation -------------------------------------------------
+
+    def partial_close(
+        self,
+        sym: str,
+        qty: float,
+        lot: str = "",
+        tag: str = "",
+        reason: str = "partial close",
+    ) -> None:
+        """Release a fraction of a specific lot in ``sym``.
+
+        ``qty`` is a fraction ``(0, 1]`` of the target lot's current quantity
+        to shed (``0.25`` = release a quarter of the lot's shares). ``lot``
+        targets by ``position_id``; ``tag`` targets by the ``ctx.long(...,
+        tag=...)`` label; for neither, the newest lot is used. Fills as a
+        ``rebalance`` reduce, realizing PnL on the released shares and keeping
+        the surviving shares' cost basis (see ``_rebalance_position``). A no-op
+        when the lot is flat or ``qty`` <= 0.
+        """
+        lots = self._state.portfolio.positions.get(sym, ())
+        from src.bt.portfolio.pure import resolve_lot
+
+        target = resolve_lot(lots, lot=lot, tag=tag)
+        if target is None or qty <= 0:
+            return
+        release = round(target.qty * qty, 4)
+        if release <= 0:
+            return
+        price = self.price(sym)
+        self._signals.append(
+            TradeSignal(
+                action=ActionType.rebalance,
+                symbol=sym,
+                timestamp=self._candle.timestamp,
+                price=price,
+                qty=-release,
+                reason=reason,
+                position_id=target.position_id,
+            )
+        )
 
     # -- signal emission ---------------------------------------------------------
 
@@ -172,17 +249,23 @@ class StrategyContext:
         size: float | None = None,
         sl: float | None = None,
         tp: float | None = None,
+        tag: str = "",
         reason: Any = "long",
     ) -> None:
         """Open a long position in ``sym`` ``size`` fraction of capital.
 
-        ``size`` is a 0..1 fraction of *initial* capital converted to an
-        absolute share count (``size * initial_capital / price``) before
-        emission — a fixed-size order, not scaled by available cash. When
-        omitted, defaults to the engine's ``config.position_size``. ``sl``/
-        ``tp`` are fractional percentages converted to absolute levels.
+        Always opens a **fresh lot** — this is Pine ``entry`` semantics, never
+        a netting adjust. ``size`` is a 0..1 fraction of *initial* capital
+        converted to an absolute share count (``size * initial_capital /
+        price``) before emission — a fixed-size order, not scaled by available
+        cash. When omitted, defaults to the engine's ``config.position_size``.
+        ``sl``/``tp`` are fractional percentages converted to absolute levels.
+        ``tag`` is an optional strategy-facing lot label (Pine entry-name
+        analogue, e.g. ``"spy-r1"``) stored on the :class:`Position` so
+        ``partial_close(..., tag=...)`` is readable lot targeting instead of
+        raw ``position_id`` strings.
         """
-        self._emit(ActionType.long, sym, size, sl, tp, reason)
+        self._emit(ActionType.long, sym, size, sl, tp, reason, tag)
 
     def short(
         self,
@@ -190,6 +273,7 @@ class StrategyContext:
         size: float | None = None,
         sl: float | None = None,
         tp: float | None = None,
+        tag: str = "",
         reason: Any = "short",
     ) -> None:
         """Open a short position in ``sym`` ``size`` fraction of capital.
@@ -199,32 +283,39 @@ class StrategyContext:
         emission — a fixed-size order, not scaled by available cash. When
         omitted, defaults to the engine's ``config.position_size``. ``sl``/
         ``tp`` are fractional percentages converted to absolute levels.
+        ``tag`` is an optional strategy-facing lot label (Pine entry-name
+        analogue) stored on the :class:`Position` for readable ``partial_close``
+        lot targeting.
         """
-        self._emit(ActionType.short, sym, size, sl, tp, reason)
+        self._emit(ActionType.short, sym, size, sl, tp, reason, tag)
 
     def close(self, sym: str, reason: Any = "close") -> None:
-        """Close the open position in ``sym`` (full position).
+        """Close **every** open lot in ``sym`` (invoke-all).
 
-        A no-op when ``sym`` is flat: closing a symbol with no position would
-        otherwise emit a dangling ``close`` signal with ``position_id=None``
-        that the engine must swallow. Guarding here keeps the emitted surface
-        clean and the strategy's intent ("close whatever we hold") explicit.
+        Emits one position-targeted ``close`` signal per open lot — matching
+        the design's "``close`` = invoke-all, ``long`` = always-new" rule with no
+        ``exclusive_orders`` ambiguity. A no-op when ``sym`` is flat.
+
+        The multiple emits share a symbol bucket; each carries its own
+        ``position_id`` and fills at next bar's open, so the engine's per-symbol
+        drain closes each lot independently (no dangling ``close`` with
+        ``position_id=None``).
         """
-        if self.position(sym) is None:
+        lots = self._state.portfolio.positions.get(sym, ())
+        if not lots:
             return
         price = self.price(sym)
-        pos = self.position(sym)
-        assert pos is not None
-        self._signals.append(
-            TradeSignal(
-                action=ActionType.close,
-                symbol=sym,
-                timestamp=self._candle.timestamp,
-                price=price,
-                reason=reason,
-                position_id=pos.position_id,
+        for pos in lots:
+            self._signals.append(
+                TradeSignal(
+                    action=ActionType.close,
+                    symbol=sym,
+                    timestamp=self._candle.timestamp,
+                    price=price,
+                    reason=reason,
+                    position_id=pos.position_id,
+                )
             )
-        )
 
     def _emit(
         self,
@@ -234,6 +325,7 @@ class StrategyContext:
         sl: float | None,
         tp: float | None,
         reason: Any,
+        tag: str = "",
     ) -> None:
         price = self.price(sym)
         is_long = action == ActionType.long
@@ -257,6 +349,7 @@ class StrategyContext:
                 reason=reason,
                 stop_loss=sl_price,
                 take_profit=tp_price,
+                tag=tag,
             )
         )
 

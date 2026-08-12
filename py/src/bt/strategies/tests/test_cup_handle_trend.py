@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from src.bt.strategies.cup_handle import is_uptrend, trend_strength
+from src.bt.strategies.cup_handle_dsl import is_uptrend, trend_strength
 
 
 def _synthetic(n: int, start: float, step: float, noise: float = 0.0) -> tuple:

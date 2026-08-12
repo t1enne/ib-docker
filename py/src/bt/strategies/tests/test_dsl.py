@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from src.bt.engine.backtest import Backtest, run
+from src.bt.state import ActionType, Candle, ExecutionParams
 from src.bt.strategies import init_strat
 from src.bt.strategies.dsl import StrategyContext, strategy
 from src.bt.types import StrategyConfig
@@ -426,7 +427,7 @@ def test_dsl_stateful_is_thread_safe_across_runs():
     df = _df(40)
     n_threads = 8
     results: list[BaseException | None] = [None] * n_threads
-    outcomes: list[list[int]] = [None] * n_threads
+    outcomes: list[list[int] | None] = [None] * n_threads
 
     def worker(idx: int) -> None:
         try:
@@ -447,6 +448,7 @@ def test_dsl_stateful_is_thread_safe_across_runs():
     # torn shared counter that would exceed the per-run total.
     expected = list(range(1, len(df) + 1))
     for idx, seen in enumerate(outcomes):
+        assert seen is not None, f"worker {idx} never ran"
         assert seen == expected, f"worker {idx} bled state: {seen} != {expected}"
 
 
@@ -477,3 +479,125 @@ def test_shared_setter_binds_holder():
     assert ctx.shared is holder
     ctx.shared["n"] += 1
     assert holder["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# multi-position DSL surface: aggregated reads + lot-targeted mutations
+# ---------------------------------------------------------------------------
+
+
+def _seed_multi_lots(ctx, n=2, side=ActionType.long):
+    """Emit and **apply** ``n`` tagged lots into ``ctx``'s portfolio state.
+
+    Returns a new :class:`StrategyContext` bound to the updated state so
+    subsequent reads/mutations see the real open lots (positions only become
+    visible once the emitted signals are executed as fills).
+    """
+    from src.bt.engine.utils import merge_bt_state
+    from src.bt.execution.pure import execute_signal
+    from src.bt.portfolio.pure import apply_fill
+
+    df_pd = _df(120)
+    candle = Candle(
+        timestamp=df_pd.index[60],
+        symbol="AAPL",
+        open=float(df_pd[("AAPL", "open")].iloc[60]),
+        high=float(df_pd[("AAPL", "high")].iloc[60]),
+        low=float(df_pd[("AAPL", "low")].iloc[60]),
+        close=float(df_pd[("AAPL", "close")].iloc[60]),
+        volume=1000.0,
+        interval="1d",
+    )
+    state = ctx.state
+    for i in range(n):
+        probe = StrategyContext(
+            state, ctx.candle, ctx.params, ctx.ta, ctx.symbols, interval="1d"
+        )
+        if side == ActionType.long:
+            probe.long("AAPL", size=0.1, tag=f"r{i + 1}")
+        else:
+            probe.short("AAPL", size=0.1, tag=f"r{i + 1}")
+        fill = execute_signal(probe._signals[0], candle, ExecutionParams())
+        state = merge_bt_state(state, dict(portfolio=apply_fill(state.portfolio, fill)))
+    return StrategyContext(
+        state, ctx.candle, ctx.params, ctx.ta, ctx.symbols, interval="1d"
+    )
+
+
+def test_ctx_long_emits_tag_bound_signal():
+    from src.bt.state import ActionType as _AT
+
+    ctx = _make_ctx(_df(120), idx=60)
+    ctx.long("AAPL", size=0.1, tag="spy-r1")
+    assert len(ctx._signals) == 1
+    sig = ctx._signals[0]
+    assert sig.action == _AT.long
+    assert sig.tag == "spy-r1"
+
+
+def test_ctx_close_invokes_all_lots():
+    ctx = _make_ctx(_df(120), idx=60)
+    ctx = _seed_multi_lots(ctx)
+    ctx.close("AAPL")
+    ids = ctx.position_ids("AAPL")
+    assert len(ids) == 2
+    close_sigs = [s for s in ctx._signals if s.action == ActionType.close]
+    assert len(close_sigs) == 2
+    assert {s.position_id for s in close_sigs} == set(ids)
+    # No dangling close with position_id=None.
+    assert all(s.position_id for s in close_sigs)
+
+
+def test_ctx_close_flat_is_noop_and_does_not_mutate():
+    ctx = _make_ctx(_df(120), idx=60)
+    assert ctx.quantity("AAPL") == 0.0
+    ctx.close("AAPL")
+    assert ctx._signals == []
+
+
+def test_ctx_partial_close_targets_lot_by_tag():
+    ctx = _make_ctx(_df(120), idx=60)
+    ctx = _seed_multi_lots(ctx)
+    ctx.partial_close("AAPL", qty=0.25, tag="r1")
+    rebal = [s for s in ctx._signals if s.action == ActionType.rebalance]
+    assert len(rebal) == 1
+    assert rebal[0].qty < 0  # a reduce
+    # Only one lot emitted against (no double-target).
+    assert len(ctx._signals) == 1
+
+
+def test_ctx_partial_close_by_lot_id_and_default_newest():
+    ctx = _make_ctx(_df(120), idx=60)
+    ctx = _seed_multi_lots(ctx)
+    newest_id = ctx.position_ids("AAPL")[-1]
+    ctx.partial_close("AAPL", qty=0.5, lot=newest_id)
+    assert len(ctx._signals) == 1
+    assert ctx._signals[0].position_id == newest_id
+    assert ctx._signals[0].qty < 0  # a reduce (fraction-of-lot)
+
+    ctx2 = _make_ctx(_df(120), idx=60)
+    ctx2 = _seed_multi_lots(ctx2)
+    ctx2.partial_close("AAPL", qty=0.5)  # no lot/tag -> newest lot
+    assert ctx2._signals[0].position_id == ctx2.position_ids("AAPL")[-1]
+
+
+def test_ctx_partial_close_flat_or_bad_target_is_noop():
+    ctx = _make_ctx(_df(120), idx=60)
+    ctx.partial_close("AAPL", qty=0.5)  # flat
+    assert ctx._signals == []
+    ctx = _seed_multi_lots(ctx)
+    ctx.partial_close("AAPL", qty=0.5, tag="nope")  # unknown tag
+    assert len(ctx._signals) == 0
+    ctx.partial_close("AAPL", qty=0.0)  # zero fraction
+    assert len(ctx._signals) == 0
+
+
+def test_ctx_quantity_and_avg_entry_read_after_opens():
+    ctx = _make_ctx(_df(120), idx=60)
+    ctx = _seed_multi_lots(ctx, n=3)
+    assert ctx.quantity("AAPL") > 0
+    ea = ctx.avg_entry("AAPL")
+    assert ea is not None and ea > 0
+    assert len(ctx.position_ids("AAPL")) == 3
+    assert ctx.quantity("MSFT") == 0.0
+    assert ctx.avg_entry("MSFT") is None

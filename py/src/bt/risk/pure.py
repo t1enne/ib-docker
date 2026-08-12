@@ -139,6 +139,7 @@ def _trail_stop(position: Position, tick: Candle, config: RiskConfig) -> Positio
                 last_price=position.last_price,
                 type=position.type,
                 position_id=position.position_id,
+                tag=position.tag,
             )
     else:
         new_stop = tick.low * (1 + config.stop_loss_pct)
@@ -153,6 +154,7 @@ def _trail_stop(position: Position, tick: Candle, config: RiskConfig) -> Positio
                 last_price=position.last_price,
                 type=position.type,
                 position_id=position.position_id,
+                tag=position.tag,
             )
 
     return position

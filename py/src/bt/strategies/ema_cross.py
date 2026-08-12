@@ -58,7 +58,7 @@ def on_candle(ctx: StrategyContext):
         if has_pos:
             if ctx.cross_under(fast, slow):
                 ctx.close(sym, reason="bearish ema cross")
-            return
+            continue
 
         # has open position
         if ctx.cross_over(fast, slow):

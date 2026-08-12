@@ -56,10 +56,11 @@ class StrategyContext:
     power users (portfolio / position lookup) -- the DSL does not forbid it, it
     just makes the common path safe by construction.
 
-    Sizing: ``size`` is a 0..1 fraction of current free cash deployed for that
-    symbol's position (the engine scales ``qty`` by ``cash / close``). ``sl``/``tp``
-    are fractional percentages (e.g. ``0.04`` = 4%) converted to absolute
-    per-trade stop/target prices.
+    Sizing: ``size`` is a 0..1 fraction of *initial* capital converted to an
+    absolute share count (``size * initial_capital / close``) — a fixed-percent
+    order, not scaled by available cash. ``sl``/``tp`` are fractional
+    percentages (e.g. ``0.04`` = 4%) converted to absolute per-trade stop/target
+    prices.
     """
 
     __slots__ = (
@@ -165,11 +166,13 @@ class StrategyContext:
         tp: float | None = None,
         reason: Any = "long",
     ) -> None:
-        """Open a long position in ``sym``.
+        """Open a long position in ``sym`` ``size`` fraction of capital.
 
-        ``size`` is a 0..1 fraction of free cash (defaults to the engine's
-        ``config.position_size`` when omitted). ``sl``/``tp`` are fractional
-        percentages converted to absolute levels.
+        ``size`` is a 0..1 fraction of *initial* capital converted to an
+        absolute share count (``size * initial_capital / price``) before
+        emission — a fixed-size order, not scaled by available cash. When
+        omitted, defaults to the engine's ``config.position_size``. ``sl``/
+        ``tp`` are fractional percentages converted to absolute levels.
         """
         self._emit(ActionType.long, sym, size, sl, tp, reason)
 
@@ -181,6 +184,14 @@ class StrategyContext:
         tp: float | None = None,
         reason: Any = "short",
     ) -> None:
+        """Open a short position in ``sym`` ``size`` fraction of capital.
+
+        ``size`` is a 0..1 fraction of *initial* capital converted to an
+        absolute share count (``size * initial_capital / price``) before
+        emission — a fixed-size order, not scaled by available cash. When
+        omitted, defaults to the engine's ``config.position_size``. ``sl``/
+        ``tp`` are fractional percentages converted to absolute levels.
+        """
         self._emit(ActionType.short, sym, size, sl, tp, reason)
 
     def close(self, sym: str, reason: Any = "close") -> None:
@@ -213,7 +224,13 @@ class StrategyContext:
         sl_price, tp_price = sl_tp_from_pct(
             price, sl or 0.0, tp or 0.0, is_long=is_long
         )
-        qty = size if size is not None else 0.0
+        # ``size`` is a fixed 0..1 fraction of *initial* capital -> absolute
+        # share count. Not scaled by available cash (a fixed-size order).
+        qty = (
+            0.0
+            if size is None
+            else round(size * self._state.portfolio.initial_capital / price, 4)
+        )
         self._signals.append(
             TradeSignal(
                 action=action,

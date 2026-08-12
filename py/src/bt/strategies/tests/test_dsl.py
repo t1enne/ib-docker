@@ -132,13 +132,19 @@ def _ema_raw_strategy(state, candle, params):
             crossed = fast.iloc[-2] <= slow.iloc[-2] and fast.iloc[-1] > slow.iloc[-1]
             if crossed:
                 sl, tp = _sl_tp(price, params)
+                # Mirror the DSL's fixed-percent sizing: absolute shares from a
+                # fraction of *initial* capital (not cash-scaled).
+                qty = round(
+                    params.size * state.portfolio.initial_capital / price,
+                    4,
+                )
                 signals.append(
                     TradeSignal(
                         action=ActionType.long,
                         symbol=sym,
                         timestamp=candle.timestamp,
                         price=price,
-                        qty=params.size,
+                        qty=qty,
                         reason="bullish ema cross",
                         stop_loss=sl,
                         take_profit=tp,

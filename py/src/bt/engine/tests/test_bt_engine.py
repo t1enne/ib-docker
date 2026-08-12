@@ -36,7 +36,7 @@ def test_candle_generator_multi_symbol():
 def test_run_backtest_no_crash():
     cfg = StrategyConfig(
         name="test",
-        strategy_type="momentum_regime",
+        strategy_type="ema_cross",
         symbols=["AAPL"],
         initial_capital=10000.0,
         commission=0.5,

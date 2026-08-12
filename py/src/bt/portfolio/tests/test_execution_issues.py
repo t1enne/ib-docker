@@ -94,7 +94,7 @@ def test_explicit_qty_sizing():
             timestamp=get_ts("2025-01-01"),
             price=500.0,
             z_score=3.0,
-            qty=42.0,
+            qty=10.0,
         ),
         tick,
         params,
@@ -102,7 +102,7 @@ def test_explicit_qty_sizing():
     portfolio_after = apply_fill(portfolio, fill)
     spy = portfolio_after.positions["SPY"]
     assert len(spy) == 1
-    assert abs(spy[0].qty - 42.0) < 0.01
+    assert abs(spy[0].qty - 10.0) < 0.01
 
 
 def test_sl_tp_from_signal():
@@ -127,7 +127,7 @@ def test_sl_tp_from_signal():
             timestamp=get_ts("2025-01-01"),
             price=500.0,
             z_score=3.0,
-            qty=20.0,
+            qty=10.0,
             stop_loss=480.0,
             take_profit=530.0,
         ),

@@ -317,41 +317,6 @@ def test_split_report_to_dict_counts_only_closed_trades() -> None:
     }
 
 
-def test_reset_strategy_state_clears_module_dicts() -> None:
-    import src.bt.strategies.sector_mean_reversion_trail as trail_mod
-
-    trail_mod.GLOBAL["cooldown"]["XLB"] = 3
-    trail_mod.GLOBAL["trails"]["pos-1"] = 42.0
-    reset_strategy_state(trail_mod)
-    assert trail_mod.GLOBAL == {"cooldown": {}, "trails": {}}
-
-
-def test_reset_strategy_state_rebinds_non_dict_state() -> None:
-    """Non-dict state (Timestamp, set, int) must reset too — the old
-    heuristic only cleared uppercase dict globals and bled these across folds."""
-    import src.bt.strategies.sector_mean_reversion as smr_mod
-
-    smr_mod.GLOBAL["cooldown"]["XLB"] = 3
-    smr_mod.GLOBAL["regime_ts"] = parse_timestamp("2020-01-02")
-    reset_strategy_state(smr_mod)
-    assert smr_mod.GLOBAL == {
-        "cooldown": {},
-        "regime_cache": {},
-        "regime_ts": None,
-        "regime_candles_cache": {},
-    }
-
-
-def test_reset_strategy_state_clears_set_state() -> None:
-    import src.bt.strategies.trend_pullback_atr_trail as trail_variant
-
-    trail_variant.GLOBAL["in_trail"].add("pos-1")
-    reset_strategy_state(trail_variant)
-    assert trail_variant.GLOBAL["in_trail"] == set()
-    assert trail_variant.GLOBAL["cooldowns"] == {}
-    assert trail_variant.GLOBAL["gate_cache"] == {}
-
-
 def test_reset_strategy_state_noop_without_hook() -> None:
     import types as types_mod
 

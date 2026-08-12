@@ -104,7 +104,7 @@ def load_candles(
 
     Data integrity: after assembling the MultiIndex frame, every symbol's bar
     sequence is checked for discontinuities. If any symbol contains a gap
-    strictly greater than ``max_gap`` (default 48h) between consecutive bars,
+    strictly greater than ``max_gap`` (default 96h) between consecutive bars,
     a :class:`DataIntegrityError` is raised and loading aborts — a hole that
     wide is presumed to be missing/corrupt data, and indicators computed across
     it would be meaningless. Pass ``max_gap`` as ``pd.Timedelta.max`` (or a

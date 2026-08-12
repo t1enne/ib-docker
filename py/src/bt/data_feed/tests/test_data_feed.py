@@ -1,7 +1,7 @@
 """Tests for the data feed gap-integrity guard.
 
 ``load_candles`` must abort (raise) when a loaded symbol contains a
-discontinuity > 48h between consecutive bars — otherwise rolling/indicator
+discontinuity > 96h between consecutive bars — otherwise rolling/indicator
 math treats the two sides of the hole as adjacent and silently corrupts the
 backtest. ``detect_gaps`` is the pure detector behind that guard.
 """
@@ -63,9 +63,9 @@ def test_detect_gaps_clean_series():
 
 
 def test_detect_gaps_reports_gap_over_threshold():
-    # 72h between bars 2 and 3.
+    # 120h between bars 2 and 3 — above the 96h DEFAULT_MAX_GAP.
     def template(_s: str) -> list[str]:
-        return _hourly("2024-01-01 00:00", "2024-01-02 00:00", "2024-01-05 00:00")
+        return _hourly("2024-01-01 00:00", "2024-01-02 00:00", "2024-01-07 00:00")
 
     df = _frame(["A"], template)
     report = detect_gaps(df, ["A"])
@@ -75,8 +75,8 @@ def test_detect_gaps_reports_gap_over_threshold():
     b = breaks[0]
     assert isinstance(b, GapBreak)
     assert b.prev_ts == pd.Timestamp("2024-01-02 00:00")
-    assert b.next_ts == pd.Timestamp("2024-01-05 00:00")
-    assert b.duration == pd.Timedelta(hours=72)
+    assert b.next_ts == pd.Timestamp("2024-01-07 00:00")
+    assert b.duration == pd.Timedelta(hours=120)
 
 
 # ── load_candles guard ─────────────────────────────────────────────────
@@ -100,12 +100,12 @@ def test_load_candles_raises_on_gap(monkeypatch):
         _load_df(
             hourly_spans={
                 "A": ("2024-01-01 00:00", "2024-01-02 00:00"),
-                "B": ("2024-01-01 00:00", "2024-01-04 00:00"),  # 72h gap
+                "B": ("2024-01-01 00:00", "2024-01-06 00:00"),  # 120h gap
             }
         ),
     )
     with pytest.raises(DataIntegrityError) as exc:
-        load_candles(["A", "B"], _ts("2024-01-01"), _ts("2024-01-05"), "1h")
+        load_candles(["A", "B"], _ts("2024-01-01"), _ts("2024-01-07"), "1h")
     assert "B" in str(exc.value)
     assert "gap" in str(exc.value)
 
@@ -131,7 +131,7 @@ def test_load_candles_max_gap_disables_guard(monkeypatch):
         "get_local_candles",
         _load_df(
             hourly_spans={
-                "A": ("2024-01-01 00:00", "2024-01-05 00:00"),  # 96h gap
+                "A": ("2024-01-01 00:00", "2024-01-07 00:00"),  # 120h gap
             }
         ),
     )
@@ -139,7 +139,7 @@ def test_load_candles_max_gap_disables_guard(monkeypatch):
     df = load_candles(
         ["A"],
         _ts("2024-01-01"),
-        _ts("2024-01-06"),
+        _ts("2024-01-08"),
         "1h",
         max_gap=pd.Timedelta.max,
     )

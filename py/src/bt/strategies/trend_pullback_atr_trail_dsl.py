@@ -26,6 +26,7 @@ from typing import cast
 
 import numpy as np
 
+from src.bt.size.pure import risk_sized_qty
 from src.bt.strategies.dsl import strategy, StrategyContext
 from src.bt.strategies.series import SeriesView
 from src.bt.strategies.types import StrategyParams
@@ -171,13 +172,19 @@ def on_candle(ctx: StrategyContext):
         if np.isnan(atr_val) or atr_val <= 0:
             continue
 
-        # Reproduce the raw strategy's ATR-risk sizing exactly:
+        # ATR-risk sizing (matches the raw strategy exactly):
         #   qty = cash * risk_pct / (ATR * atr_mult)
-        # ctx.long computes qty = size * initial_capital / price, so back-solve
-        # the size that yields the raw's absolute share count.
+        # Risk sizing is strategy-owned (risk_sized_qty); ctx.long computes
+        # qty = size * initial_capital / price, so back-solve the size that
+        # yields the raw's absolute share count.
         price = float(o.close[-1])
         cash = ctx.state.portfolio.cash
-        qty = cash * ctx.params.risk_pct / (atr_val * ctx.params.atr_mult)
+        qty = risk_sized_qty(
+            equity=cash,
+            price=price,
+            stop_dist=atr_val * ctx.params.atr_mult,
+            risk_pct=ctx.params.risk_pct,
+        )
         size = qty * price / ctx.state.portfolio.initial_capital
 
         ctx.long(

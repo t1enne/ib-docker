@@ -65,6 +65,7 @@ from src.bt.state import (
     create_risk_config,
     TradeExitReason,
 )
+from src.bt.size.pure import SizingParams, equity_of, sized_signal
 from src.bt.types import StrategyConfig, EngineWindow, BacktestResults
 from src.bt.engine.handlers import ExecutionHandler, RiskHandler
 from src.utils import parse_timestamp
@@ -82,6 +83,7 @@ class Backtest:
     window: EngineWindow = field(init=False)
     execution_params: ExecutionParams = field(init=False)
     risk_config: RiskConfig = field(init=False)
+    sizing: SizingParams = field(init=False)
 
     def __post_init__(self):
         self.window = EngineWindow(
@@ -97,6 +99,11 @@ class Backtest:
         # strategy_params). No config-level fallback: zero pct means the risk
         # module never derives SL/TP — a strategy-set level is the only source.
         self.risk_config = create_risk_config(stop_loss_pct=0.0, take_profit_pct=0.0)
+        # Shared position-sizing config, driven by strategy_params
+        # (sizing_mode / size / max_symbol_allocation). Applied by
+        # the engine to signals whose qty <= 0. Risk-targeted sizing is
+        # strategy-owned (see size.risk_sized_qty) and never routed here.
+        self.sizing = SizingParams.from_dict(self.config.strategy_params)
 
 
 def run_backtest(
@@ -195,7 +202,7 @@ def run_backtest(
 
         # Stage 3: execute pending signals (from prior candles)
         state = _execute_pending(
-            state, candle, exec_handler, config, bt.execution_params
+            state, candle, exec_handler, config, bt.execution_params, bt.sizing
         )
 
         # Stage 5: generate new signals (only on last symbol per timestamp)
@@ -217,6 +224,7 @@ def run_backtest(
             exec_handler,
             config,
             bt.execution_params,
+            bt.sizing,
             skip_next_open=True,
         )
 
@@ -357,6 +365,7 @@ def _execute_pending(
     exec_handler: ExecutionHandler,
     config: StrategyConfig,
     exec_params: ExecutionParams,
+    sizing: SizingParams,
     skip_next_open: bool = False,
 ) -> BacktestState:
     """Stage 4/6: Execute pending signals for the current symbol.
@@ -364,6 +373,10 @@ def _execute_pending(
     Reads from state.pending_signals[symbol] directly — no filtering needed.
     When skip_next_open is True (Stage 6, same-bar), signals with
     fill_at_next_open=True are deferred to the next bar's Stage 4 call.
+
+    Signals whose qty <= 0 are sized by the shared sizing layer (equity/cash/
+    fixed base, size, per-symbol cap + cash clamp) before
+    execution; explicitly-sized signals pass through unchanged.
     """
     symbol = candle.symbol
     queued = state.pending_signals.get(symbol, ())
@@ -376,6 +389,8 @@ def _execute_pending(
         if skip_next_open and signal.fill_at_next_open:
             deferred.append(signal)
             continue
+        equity = equity_of(portfolio)
+        signal = sized_signal(signal, equity, portfolio.cash, candle, sizing)
         fill = exec_handler.execute_signal(signal, candle, exec_params)
         portfolio = exec_handler.apply_fill(portfolio, fill)
 

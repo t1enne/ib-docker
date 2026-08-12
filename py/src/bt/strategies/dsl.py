@@ -58,7 +58,12 @@ class StrategyContext:
 
     Sizing: ``size`` is a 0..1 fraction of *initial* capital converted to an
     absolute share count (``size * initial_capital / close``) — a fixed-percent
-    order, not scaled by available cash. ``sl``/``tp`` are fractional
+    order, not scaled by available cash. When ``size`` is omitted, the signal is
+    emitted with ``qty=0`` and the engine's shared sizing layer computes the
+    share count from ``SizingParams`` (equity/cash base, size). Risk-targeted
+    sizing (``risk_pct`` + stop/ATR) lives in the strategy via
+    :func:`src.bt.size.pure.risk_sized_qty` and is expressed as a back-solved
+    ``size``. ``sl``/``tp`` are fractional
     percentages (e.g. ``0.04`` = 4%) converted to absolute per-trade stop/target
     prices.
     """
@@ -258,7 +263,8 @@ class StrategyContext:
         a netting adjust. ``size`` is a 0..1 fraction of *initial* capital
         converted to an absolute share count (``size * initial_capital /
         price``) before emission — a fixed-size order, not scaled by available
-        cash. When omitted, defaults to the engine's ``config.position_size``.
+        cash. When omitted, the engine's shared sizing layer sizes the position
+        from ``SizingParams`` (signal emitted with ``qty=0``).
         ``sl``/``tp`` are fractional percentages converted to absolute levels.
         ``tag`` is an optional strategy-facing lot label (Pine entry-name
         analogue, e.g. ``"spy-r1"``) stored on the :class:`Position` so
@@ -281,7 +287,8 @@ class StrategyContext:
         ``size`` is a 0..1 fraction of *initial* capital converted to an
         absolute share count (``size * initial_capital / price``) before
         emission — a fixed-size order, not scaled by available cash. When
-        omitted, defaults to the engine's ``config.position_size``. ``sl``/
+        omitted, the engine's shared sizing layer sizes the position
+        from ``SizingParams`` (signal emitted with ``qty=0``). ``sl``/
         ``tp`` are fractional percentages converted to absolute levels.
         ``tag`` is an optional strategy-facing lot label (Pine entry-name
         analogue) stored on the :class:`Position` for readable ``partial_close``
@@ -332,8 +339,9 @@ class StrategyContext:
         sl_price, tp_price = sl_tp_from_pct(
             price, sl or 0.0, tp or 0.0, is_long=is_long
         )
-        # ``size`` is a fixed 0..1 fraction of *initial* capital -> absolute
-        # share count. Not scaled by available cash (a fixed-size order).
+        # Explicit ``size`` -> fixed-size order: 0..1 fraction of *initial*
+        # capital -> absolute share count (unchanged legacy behavior).
+        # Omitted ``size`` -> qty=0, sized by the engine's shared sizing layer.
         qty = (
             0.0
             if size is None

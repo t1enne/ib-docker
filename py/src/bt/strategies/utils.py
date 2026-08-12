@@ -7,6 +7,8 @@ from src.bt.state import (
     Position,
 )
 
+from src.bt.size.pure import SizingParams, compute_qty
+
 
 def close(
     tick: Candle,
@@ -62,10 +64,15 @@ def sized_qty(cash: float, position_size: float, price: float) -> float:
     """Share quantity for ``position_size`` fraction of ``cash`` at ``price``.
 
     ``position_size`` is a 0-1 fraction of cash deployed per position/trade.
+    Delegates to the shared sizing layer (cash-based). Risk-targeted sizing
+    (``risk_pct`` + stop/ATR) is strategy-owned via :func:`size.risk_sized_qty`.
     """
-    if cash <= 0 or price <= 0 or position_size <= 0:
-        return 0.0
-    return round(cash * position_size / price, 4)
+    return compute_qty(
+        equity=cash,
+        cash=cash,
+        price=price,
+        params=SizingParams(sizing_mode="cash", size=position_size),
+    )
 
 
 def sl_tp_from_pct(

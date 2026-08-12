@@ -1,16 +1,12 @@
 """Strategy-facing online pairs Kalman owner.
 
-Complements ``PairsKalmanOnline`` (the raw model) and the engine's
-``create_kalman_pairs_updater`` model updater. The model updater wires a *single
-hidden* filter through ``config.model_updater`` and writes canned fields to
-``ModelState.kalman_*`` — so a strategy can neither own the instance, re-seed it,
-nor run multiple filters inline.
-
-``OnlinePairs`` is the strategy-level counterpart: construct one in the
-strategy's ``reset_global()``, hold it in ``GLOBAL``, and call ``observe()`` once
-per candle. It reads both legs' closes from ``CandleStore`` (cursor-safe, no
-look-ahead), OLS-warm-starts the filter, updates it, and tracks the rolling
-z-score of the Kalman spread (the tradable signal, ~±2).
+``OnlinePairs`` is the strategy-level owner of the pairs Kalman filter — the
+successor to the removed engine ``model_updater`` channel. Construct one in the
+strategy's ``reset_global()`` (or lazily in the DSL's ``ctx.shared``), hold it
+in state, and call ``observe()`` once per candle. It reads both legs' closes
+from ``CandleStore`` (cursor-safe, no look-ahead), OLS-warm-starts the filter,
+updates it, and tracks the rolling z-score of the Kalman spread (the tradable
+signal, ~±2).
 
 Usage (inside a strategy's ``on_candle``)::
 
@@ -69,8 +65,9 @@ def _rolling_zscore(deq: deque[float], current: float, window: int) -> float:
 class OnlinePairs:
     """Online pairs Kalman + rolling z-score, owned by a strategy.
 
-    Parameters mirror ``create_kalman_pairs_updater``. Re-constructing in
-    ``reset_global()`` rebuilds filter and history for a clean IS/OOS split.
+    Parameters mirror the removed engine ``model_updater`` factory. Re-constructing
+    in ``reset_global()`` (or fresh in ``ctx.shared``) rebuilds filter and history
+    for a clean IS/OOS split.
     """
 
     def __init__(

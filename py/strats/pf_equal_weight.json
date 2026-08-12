@@ -9,7 +9,6 @@
   "trading_start": "2021-01-02",
   "trading_end": "2025-01-01",
   "bars": ["1d"],
-  "model_params": {},
   "strategy_params": {
     "rebalance_days": 0
   }

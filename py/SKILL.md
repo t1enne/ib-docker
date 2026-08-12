@@ -65,8 +65,6 @@ def on_candle(
   - `state.candles.get((sym, interval))` — same, but returns `None` if missing
   - `state.candles.latest(sym, interval)` — O(1) latest close (`float | None`)
   - `state.candles.count(sym, interval)` — O(1) bar count (`int`)
-- `state.model_state.z_score` — current z-score (pairs strategies)
-- `state.model_state.price_buffers` — aligned `{sym: close}` dicts per tick
 - `state.timestamp` — current `pd.Timestamp`
 
 **Available indicators** (`from src.indicators.ta import ...`) :
@@ -141,12 +139,8 @@ Create `strats/<name>.json`:
   "trading_end": "2025-01-01",
   "commission": 0.1,
   "initial_capital": 10000,
-  "position_size": 0.2,
   "strategy_type": "momentum_regime",
-  "stop_loss": 0.2,
-  "take_profit": 0.5,
   "bars": ["1h", "4h"],
-  "model_params": {},
   "strategy_params": {
     "fast": 9,
     "slow": 30
@@ -157,15 +151,16 @@ Create `strats/<name>.json`:
 
 **Config field reference:**
 
-- `training_start`/`training_end` — model training window (currently unused by most strategies)
+- `training_start`/`training_end` — warmup window (data loaded for indicator/model warmup before trading)
 - `trading_start`/`trading_end` — actual backtest window
 - `bars` — list of bar sizes; `bars[0]` is the base signal interval, additional
   entries (e.g. `["1h", "4h"]`) are higher-timeframe bars injected alongside
   (lookahead-safe). There is no separate `htf` field.
 - `commission` — fixed commission per trade
-- `position_size` — fraction of capital deployed per trade
-- `stop_loss`/`take_profit` — percentage levels; engine enforces them globally
-- `strategy_params` — arbitrary dict forwarded verbatim to `on_candle(state, candle, params)`
+- `strategy_params` — arbitrary dict forwarded verbatim to `on_candle(state, candle, params)`;
+  position sizing, stop-loss/take-profit, and any model hyper-params live here
+  (strategy-owned, per-trade). There is **no** top-level `model_updater`/`model_params` —
+  cross-candle model state is owned by the strategy itself
 
 **Available tickers** — see `/home/nasrt/Documents/code/dev/ibkr/py/universes/*.json` for symbols with local data.
 
@@ -226,6 +221,8 @@ Use EMA convergence + ATR contraction. See `vol_extension_pullback.py` for ATR-c
 
 For multi-phase strategies (compression → breakout → pullback → entry), hold cross-call state in one module-level `GLOBAL: dict` keyed by symbol. See `vol_extension_pullback.py` and `trend_pullback_atr_*` for examples. Implement `reset_global()` that rebinds `GLOBAL` to a fresh dict — the engine calls it between split/sweep windows so state doesn't bleed across folds.
 
+**DSL strategies** (`@strategy(stateful=True)`) instead use `ctx.shared` — a per-run dict minted fresh by the engine for every window, so cross-window bleed is impossible without a manual `reset_global`. Model objects (e.g. `OnlinePairs`, `OnlineRegime`) live in `ctx.shared` and are fed per candle; there is no engine `model_updater`/`ModelState` channel.
+
 ### Always handle "no position" and "in position" paths
 
 ```python
@@ -238,7 +235,11 @@ else:
 
 ### Use htf_candles() for multi-timeframe
 
-Don't access `state.model_state.resample_cache` directly — it's internal accumulator state, not lookahead-safe. Use `state.candles.get((sym, freq))` or `htf_candles(state, freq, tick)` instead.
+Use `state.candles.get((sym, freq))` or `htf_candles(state, freq, tick)` for
+higher-timeframe bars — both are cursor-truncated and lookahead-safe. There is
+no `state.model_state` channel; cross-candle model/indicator state is owned by
+the strategy (see the `GLOBAL`/`reset_global` convention earlier in this file,
+or DSL `ctx.shared` for decorated strategies).
 
 ## Testing a Strategy
 
@@ -254,9 +255,12 @@ uv run pytest src/bt/risk/tests/ -v
 
 - **Data availability**: not all symbols in `universes/*.json` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run ibkr data query <SYMBOL>` (or `make run data query <SYMBOL>`).
 - **Bar size**: strategies expect the bar size in config to match available data. Most data is `1h`.
-- **HTF lookahead**: `state.candles.get((sym, freq))` and `htf_candles()` are both safe (cursor-truncated). Direct `state.model_state.resample_cache[freq]` is not — it contains all bars including those after current tick.
+- **HTF lookahead**: `state.candles.get((sym, freq))` and `htf_candles()` are both safe (cursor-truncated).
 - **Multiple symbols**: the engine iterates all symbols per timestamp. `on_candle` fires only on the last symbol per timestamp (so `state.candles` has all symbols' data). Signals for any symbol are valid — engine routes fills by `signal.symbol`. Pending signals for non-current symbols fill when that symbol's own `_execute_pending` stage runs (same bar cycle, later in the timestamp iteration).
-- **Pairs strategy** (`kalman_pairs`): requires exactly 2 symbols. Uses `model_state.price_buffers` for aligned close prices.
+- **Pairs strategy** (`kalman_pairs_dsl`): requires exactly 2 symbols. The Kalman
+  signal is strategy-owned — an `OnlinePairs` filter (`from src.indicators.kalman.strategy`)
+  is held in `ctx.shared` and fed once per candle from `state.candles`. No engine
+  `model_updater` is involved.
 
 ## Module Reference
 

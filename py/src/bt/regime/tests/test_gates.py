@@ -7,8 +7,6 @@ import pandas as pd
 from src.bt.regime.gates import (
     TrendGate,
     above_sma,
-    current_trend,
-    current_vol,
     series_above_sma,
     sma_trend,
     weekly_above_sma,
@@ -147,26 +145,4 @@ def test_weekly_above_sma_short_history():
     assert weekly_above_sma(st, "A", window=50, bar="1d") is False
 
 
-# ------------------------------------------------ current_trend/vol ----
-
-
-def test_current_trend_decode():
-    from dataclasses import replace
-
-    from src.bt.regime.types import TREND_LABEL_TO_INT
-
-    st = _state(["A"], {"A": _rising()})
-    st = merge_bt_state(
-        st,
-        dict(
-            model_state=replace(
-                st.model_state, current_trend=TREND_LABEL_TO_INT["BULL"]
-            )
-        ),
-    )
-    assert current_trend(st) == "BULL"
-
-
-def test_current_vol_decode_none():
-    st = _state(["A"], {"A": _rising()})
-    assert current_vol(st) is None
+# ------------------------------------------------ gates read state.candles ----

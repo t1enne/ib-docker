@@ -53,11 +53,6 @@ VOL_LABEL_TO_INT: dict[VolRegime, int] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Combined regime: what the model updater stores on ModelState
-# ---------------------------------------------------------------------------
-
-
 class RegimeDetector(Protocol):
     """Pluggable regime detector.
 

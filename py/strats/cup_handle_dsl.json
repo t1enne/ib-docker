@@ -8,7 +8,6 @@
   "initial_capital": 50000,
   "strategy_type": "cup_handle_dsl",
   "bars": ["1d"],
-  "model_params": {},
   "strategy_params": {
     "swing_lookback": 3,
     "max_cup_depth_pct": 0.4,

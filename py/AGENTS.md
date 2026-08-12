@@ -153,7 +153,7 @@ def apply_fill(portfolio: PortfolioState, fill: FillEvent) -> None:
 
 - **`replace()` for state updates.** Use `dataclasses.replace()` when modifying frozen dataclasses.
 - **Return new state, never mutate.** Every function in the pipeline takes state in, returns new state out.
-- **Compose functions,** don't chain methods. The backtest engine composes `model_updater_fn → strategy_fn → exec_handler → risk_handler`.
+- **Compose functions,** don't chain methods. The backtest engine composes `strategy_fn → exec_handler → risk_handler`.
 - **Protocol-based injection** over class inheritance. Strategy logic is a plain module with `on_candle()`. The engine type-annotates it as `StrategyFn`.
 - **No side effects in pure functions.** I/O (DB, HTTP, file) belongs at the edges.
 - **Use `merge_bt_state`** for partial state updates — it's the established pattern.
@@ -223,10 +223,10 @@ Use assertions instead of early returns where it improves clarity.
 
 ```python
 # ✅ Assert preconditions
-def on_tick(self, state: BacktestState, tick: Tick, params: dict) -> list[TradeSignal]:
-    z = state.model_state.z_score
-    assert z is not None, "Z-score must be computed before signal generation"
-    assert tick.symbol in params["symbols"], f"Unexpected symbol: {tick.symbol}"
+def on_candle(state: BacktestState, candle: Candle, params: dict) -> list[TradeSignal]:
+    close = state.candles.latest(candle.symbol, candle.interval or "1d")
+    assert close is not None, "price must be available before signal generation"
+    assert candle.symbol in params["symbols"], f"Unexpected symbol: {candle.symbol}"
     # ... logic
 ```
 
@@ -264,7 +264,7 @@ invocation would see incomplete data (later symbols haven't been appended yet).
 
 #### Parameter reference
 
-- **`state: BacktestState`** — full snapshot (portfolio, model_state, candles, pending_signals)
+- **`state: BacktestState`** — full snapshot (portfolio, pending_signals, candles)
 - **`candle: Candle`** — the OHLCV bar for the last symbol at current timestamp. Has `.symbol`, `.interval` (`"1h"`, `"4h"`, etc.), `.open`, `.high`, `.low`, `.close`, `.volume`
 - **`params`** — typed dataclass (`StrategyParams` subclass) resolved by `resolve_params(config.strategy_type, config.strategy_params)`; or raw `dict` if no typed params registered
 
@@ -287,8 +287,18 @@ n     = state.candles.count("AAPL", "4h")        # int
 `on_candle` invocation. `__getitem__` and `get` build DataFrames truncated to
 rows ≤ cursor. `latest()` and `count()` ignore the cursor (absolute latest).
 
-**Do NOT** access `state.model_state.resample_cache` directly — it's internal
-accumulator state and not lookahead-safe.
+#### Strategy-owned state: `shared` / `GLOBAL`
+
+There is **no** `ModelState` and no engine-level `model_updater`. Cross-candle
+state is fully strategy-owned:
+
+- **DSL strategies** (`@strategy(stateful=True)`) hold state in `ctx.shared` —
+  a per-run dict minted fresh by the engine for every split/sweep window, so
+  cross-window bleed is impossible. Read/write `ctx.shared["key"]`.
+- **Raw `on_candle` strategies** use the `GLOBAL` dict + `reset_global()`
+  convention (see section 4). Model objects (e.g.
+  `src.indicators.kalman.strategy.OnlinePairs`, `src.indicators.hmm.strategy.OnlineRegime`)
+  live in strategy state and are fed per candle; there is no hidden engine channel.
 
 #### HTF (higher-timeframe) access pattern
 
@@ -310,7 +320,7 @@ def on_candle(state, candle, params):
 
 HTF-only candles (where `candle.interval != base_interval`) **skip the
 pipeline** — they are appended to the accumulator but never trigger
-`on_candle`, model updates, signal execution, or risk checks.
+`on_candle`, signal execution, or risk checks.
 
 #### Multi-symbol strategy pattern
 

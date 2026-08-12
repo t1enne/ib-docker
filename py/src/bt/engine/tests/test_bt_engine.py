@@ -46,7 +46,6 @@ def test_run_backtest_no_crash():
         trading_end="2025-12-31",
         bars=["1h"],
         strategy_params={"position_size": 0.2, "stop_loss": 0.05, "take_profit": 0.1},
-        model_params={},
     )
     bt = Backtest(cfg)
     df = _make_multi_idx_df(["AAPL"])
@@ -83,7 +82,6 @@ def test_build_benchmark_curves_slices_and_normalizes():
         trading_end="2025-01-05",
         bars=["1d"],
         strategy_params={"position_size": 0.2, "stop_loss": 0.05, "take_profit": 0.1},
-        model_params={},
         benchmark_symbols=["SPY"],
     )
     curves = build_benchmark_curves(
@@ -116,7 +114,6 @@ def test_build_benchmark_curves_empty_when_fewer_than_two_points():
         trading_end="2025-01-03",
         bars=["1d"],
         strategy_params={"position_size": 0.2, "stop_loss": 0.05, "take_profit": 0.1},
-        model_params={},
         benchmark_symbols=["SPY"],
     )
     # window has a single point -> <2 -> excluded

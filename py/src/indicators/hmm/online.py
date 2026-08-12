@@ -5,13 +5,12 @@ Since hmmlearn has no partial_fit, we simulate online behaviour:
 - Between refits, predict the current regime from the latest feature row.
 - The ``update()`` method returns the current regime label (0/1/2).
 
-Usage in the backtest engine's model_updater_fn::
+Usage (strategy-owned; via :class:`src.indicators.hmm.strategy.OnlineRegime`):
 
     hmm = MarketRegimeHMMOnline(retrain_interval=50, window_size=500)
     ...
     for each tick:
-        regime = hmm.update(price)
-        state.model_state.current_regime = regime
+        regime = hmm.update(price)   # 0/1/2, held by the strategy itself
 """
 
 from __future__ import annotations

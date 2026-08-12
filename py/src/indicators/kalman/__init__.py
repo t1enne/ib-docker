@@ -13,9 +13,6 @@ Pairs-trading filter (batch):
 Pairs-trading filter (online / backtest hot path):
     PairsKalmanOnline             — from src.indicators.kalman.online
 
-Model updater (backtest engine):
-    create_kalman_pairs_updater   — from src.indicators.kalman.model_updater
-
 Strategy-level owner:
     OnlinePairs                   — from src.indicators.kalman.strategy
 """
@@ -24,7 +21,6 @@ from __future__ import annotations
 
 from src.indicators.kalman.pure import run_filter, compute_stats, run_pairs_kalman
 from src.indicators.kalman.online import PairsKalmanOnline
-from src.indicators.kalman.model_updater import create_kalman_pairs_updater
 from src.indicators.kalman.strategy import OnlinePairs, OnlinePairsResult
 from src.indicators.kalman.types import (
     KalmanConfig,
@@ -39,7 +35,6 @@ __all__ = [
     "compute_stats",
     "run_pairs_kalman",
     "PairsKalmanOnline",
-    "create_kalman_pairs_updater",
     "OnlinePairs",
     "OnlinePairsResult",
     "KalmanConfig",

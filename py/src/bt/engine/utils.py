@@ -173,7 +173,6 @@ def candle_generator(
 def merge_bt_state(a: BacktestState, b: dict):
     return BacktestState(
         portfolio=b.get("portfolio", a.portfolio),
-        model_state=b.get("model_state", a.model_state),
         timestamp=b.get("timestamp", a.timestamp),
         pending_signals=b.get("pending_signals", a.pending_signals),
         risk_events=b.get("risk_events", a.risk_events),

@@ -8,7 +8,7 @@ These classes manage internal state via explicit init / update methods.
 No filterpy dependency in the hot path — Kalman math uses 2×2 matrix
 arithmetic directly.
 
-Usage in the backtest engine's model_updater_fn::
+Usage (strategy-owned; via :class:`src.indicators.kalman.strategy.OnlinePairs`):
 
     cfg = PairsKalmanConfig(process_noise=1e-4, measurement_noise=1e-3)
     kf = PairsKalmanOnline(config=cfg)
@@ -16,9 +16,7 @@ Usage in the backtest engine's model_updater_fn::
     kf.init_from_ols(log_p1_arr, log_p2_arr)
     ...
     for each tick:
-        t = kf.update(log_p1_t, log_p2_t)
-        state.model_state.z_score = t       # t_stat IS the trading signal
-        state.model_state.hedge_beta = kf.beta
+        kf.update(log_p1_t, log_p2_t)   # results read on kf.spread / kf.beta by the strategy
 
 Note on batch vs. online numerical differences
 -----------------------------------------------

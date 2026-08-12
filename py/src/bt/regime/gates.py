@@ -1,10 +1,11 @@
 """Strategy-facing trend gates.
 
-The model updater (``create_dual_online_updater`` etc.) writes a single global
-``ModelState.current_trend`` / ``current_vol`` as bare ints, so strategies end up
-hand-decoding them via ``TREND_INT_TO_LABEL`` and re-implementing the same
-SMA-crossover / price-vs-SMA / weekly filter logic over and over. This module is
-the shared layer that removes that duplication.
+The regime layer hands strategies typed, cursor-safe trend gates computed
+directly from ``state.candles``. The DSL replaces the old engine ``ModelState``
+channel entirely: a strategy holds its own model object (e.g.
+``src.indicators.hmm.strategy.OnlineRegime``) in ``ctx.shared`` and reads its
+signal inline, instead of relying on an engine ``model_updater`` writing canned
+fields to ``ModelState``.
 
 Design:
 
@@ -26,7 +27,6 @@ Sources with distinct trend concepts:
   sma_trend              SMA fast/slow crossover (+ range threshold)
   above_sma              single price vs SMA (per symbol / proxy symbol)
   weekly_above_sma       weekly close vs weekly SMA (structural trend)
-  current_trend / vol    whatever the configured model updater wrote to ModelState
   =====================  ======================================================
 """
 
@@ -36,12 +36,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from src.bt.regime.types import (
-    TrendRegime,
-    TREND_INT_TO_LABEL,
-    VOL_INT_TO_LABEL,
-    VolRegime,
-)
+from src.bt.regime.types import TrendRegime
 from src.bt.state import BacktestState
 
 # Caching key separator for strategy-owned cache dicts.
@@ -286,26 +281,3 @@ def _weekly_vals(closes: pd.Series, window: int) -> list[float]:
     arr = arr.reshape(window, 5)
     # Every bucket's last close, newest week first.
     return [float(arr[-i - 1][-1]) for i in range(window)]
-
-
-def current_trend(state: BacktestState) -> TrendRegime | None:
-    """Trend label written by the configured model updater (ModelState).
-
-    Decodes ``current_trend`` (bare int) to a ``TrendRegime`` label so
-    strategies stop touching ``TREND_INT_TO_LABEL`` directly.
-    """
-    v = state.model_state.current_trend
-    if v is None:
-        return None
-    return TREND_INT_TO_LABEL.get(v)
-
-
-def current_vol(state: BacktestState) -> VolRegime | None:
-    """Vol label written by the configured model updater (ModelState).
-
-    Decodes ``current_vol`` (bare int) to a ``VolRegime`` label.
-    """
-    v = state.model_state.current_vol
-    if v is None:
-        return None
-    return VOL_INT_TO_LABEL.get(v)

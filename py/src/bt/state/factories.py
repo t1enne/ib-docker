@@ -7,8 +7,6 @@ import pandas as pd
 from src.bt.engine.candle_store import CandleStore
 from src.bt.state.types import (
     PortfolioState,
-    MarketDataState,
-    ModelState,
     BacktestState,
     EquityPoint,
     ExecutionParams,
@@ -36,32 +34,6 @@ def create_initial_portfolio(
     )
 
 
-def create_empty_market_data(symbols: List[str]) -> MarketDataState:
-    """Create empty market data state."""
-    return MarketDataState(symbols=tuple(symbols))
-
-
-def create_initial_model_state(
-    symbols: List[str], rolling_window_size: Optional[int] = None
-) -> ModelState:
-    """Create initial model state."""
-    return ModelState(
-        z_score=None,
-        current_regime=None,
-        price_buffers=(),
-        market_data=create_empty_market_data(symbols),
-        hedge_beta=1.0,
-        resample_cache={},
-        resample_anchor={},
-        resample_partial={},
-        kalman_spread=None,
-        kalman_z_score=None,
-        kalman_beta=None,
-        kalman_alpha=None,
-        kalman_n_steps=0,
-    )
-
-
 def create_initial_backtest_state(
     symbols: List[str],
     initial_capital: float,
@@ -73,7 +45,6 @@ def create_initial_backtest_state(
         portfolio=create_initial_portfolio(initial_capital, start_timestamp),
         timestamp=None,
         pending_signals={},
-        model_state=create_initial_model_state(symbols, rolling_window_size),
         risk_events=(),
         candles=CandleStore({}),
     )

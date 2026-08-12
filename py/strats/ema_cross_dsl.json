@@ -9,7 +9,6 @@
   "trading_start": "2024-01-01",
   "trading_end": "2025-01-01",
   "bars": ["1d"],
-  "model_params": {},
   "strategy_params": {
     "fast": 9,
     "slow": 21,

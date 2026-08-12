@@ -41,7 +41,6 @@ def _cfg(
             "stop_loss": 0.15,
             "take_profit": 0.3,
         },
-        model_params={},
     )
 
 

@@ -8,8 +8,6 @@
   "initial_capital": 100000,
   "strategy_type": "shannons_demon_dsl",
   "bars": ["1d"],
-  "model_params": {},
-  "model_updater": false,
   "benchmark_symbols": ["SPY", "GLD"],
   "strategy_params": {
     "rebalance_frequency": 2,

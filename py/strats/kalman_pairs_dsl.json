@@ -8,19 +8,6 @@
   "initial_capital": 100000,
   "strategy_type": "kalman_pairs_dsl",
   "bars": ["1d"],
-  "model_params": {},
-  "model_updater": {
-    "type": "kalman_pairs",
-    "kalman_pairs": {
-      "process_noise": 0.0001,
-      "measurement_noise": 0.001,
-      "ols_warmup": 50,
-      "adaptive": true,
-      "vol_window": 20,
-      "z_window": 60,
-      "warmup_bars": 150
-    }
-  },
   "benchmark_symbols": ["XLE", "TLT"],
   "strategy_params": {
     "z_entry": 2.0,
@@ -29,7 +16,13 @@
     "stop_loss": 0.5,
     "take_profit": 1.0,
     "regime_gate": false,
-    "warmup_bars": 150
+    "warmup_bars": 150,
+    "process_noise": 0.0001,
+    "measurement_noise": 0.001,
+    "ols_warmup": 50,
+    "adaptive": true,
+    "vol_window": 20,
+    "z_window": 60
   },
   "symbols": ["XLE", "TLT"]
 }

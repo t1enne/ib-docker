@@ -1,16 +1,11 @@
 """Strategy-facing online HMM owner.
 
-Complements ``MarketRegimeHMMOnline`` (the raw model) and the engine's
-``create_dual_online_updater`` / ``create_hmm_online_updater`` model updaters.
-Those wire a *single hidden* HMM through ``config.model_updater`` and write a
-canned label to ``ModelState.current_regime`` — so a strategy can neither own its
-own per-symbol instances nor drive them inline.
-
-``OnlineRegime`` is the strategy-level counterpart: construct one in the
-strategy's ``reset_global()``, hold it in ``GLOBAL``, and call ``observe()``
-once per candle. It lazily maintains a per-symbol ``MarketRegimeHMMOnline``
-behind a scoped ``O(1)`` latest-close read over ``CandleStore`` (cursor-safe, no
-look-ahead). Re-constructing in ``reset_global()`` gives clean IS/OOS reset.
+``OnlineRegime`` is the strategy-level owner of the online HMM — the successor
+to the removed engine ``model_updater`` channel. Construct one in ``reset_global``
+(or lazily in the DSL's ``ctx.shared``), and call ``observe()`` once per candle.
+It lazily maintains a per-symbol ``MarketRegimeHMMOnline`` behind a scoped
+``O(1)`` latest-close read over ``CandleStore`` (cursor-safe, no look-ahead).
+Re-constructing in ``reset_global()`` gives clean IS/OOS reset.
 
 Usage (inside a strategy's ``on_candle``)::
 

@@ -54,7 +54,6 @@ def _cfg(symbols=("AAPL", "MSFT")) -> StrategyConfig:
             "stop_loss": 0.04,
             "take_profit": 0.08,
         },
-        model_params={},
     )
 
 
@@ -186,8 +185,6 @@ def test_dsl_matches_raw_on_candle_pnl():
     dsl_res = run(bt, df, strat_mod=init_strat("ema_cross"))
 
     # Raw run: drive run_backtest directly (raw strategies don't need ta).
-    from src.bt.engine.backtest import _resolve_model_updater
-
     from src.bt.engine.utils import candle_generator
 
     bt2 = Backtest(cfg)
@@ -197,7 +194,6 @@ def test_dsl_matches_raw_on_candle_pnl():
         gen,
         default_execution_handler(),
         default_risk_handler(),
-        model_updater_fn=_resolve_model_updater(bt2.config),
         strategy_mod=_RawMod(),
     )
 

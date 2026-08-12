@@ -32,7 +32,7 @@ Pure functions + immutable state. No classes, no side effects in the hot path.
 ### Pipeline (per candle)
 
 ```
-append_candle → update_model → execute_pending → generate_signals
+append_candle → execute_pending → generate_signals
      → execute_pending (same-bar) → check_risk → mark_to_market
 ```
 
@@ -59,7 +59,7 @@ With `symbols: ["AAPL", "GOOGL", "MSFT"]` and `bars: ["1h", "4h"]` each
 1h timestamp produces:
 
 ```
-AAPL:1h  → full pipeline (append, model, signals, risk, mtm)
+AAPL:1h  → full pipeline (append, signals, risk, mtm)
 GOOGL:1h → full pipeline
 MSFT:1h  → full pipeline
 AAPL:4h  → append only (if 4h boundary)
@@ -238,13 +238,11 @@ make test-fast   # quick tests
 @dataclass
 class StrategyConfig:
     name: str; strategy_type: str; symbols: list[str]
-    stop_loss: float; take_profit: float
-    initial_capital: float; position_size: float; commission: float
+    initial_capital: float; commission: float
     training_start: str; training_end: str
     trading_start: str; trading_end: str
-    bars: list[str]; strategy_params: dict; model_params: dict
-    model_updater: dict | bool; rolling_window_size: int | None
-    hmm_floating_window: int | None; hmm_retrain_interval: int | None
+    bars: list[str]; strategy_params: dict
+    rolling_window_size: int | None
     benchmark_symbols: list[str]
 
 # BacktestResults — returned by run()

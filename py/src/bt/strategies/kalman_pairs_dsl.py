@@ -1,30 +1,33 @@
 """Kalman-filter pairs trading — DSL adapter.
 
-The Kalman signal does **not** live in the strategy — it is produced by an
-engine-level ``model_updater_fn`` (``model_updater.kalman_pairs`` in the
-config) that runs the ``OnlinePairs`` filter on every candle and writes
-``state.model_state.kalman_z_score`` / ``kalman_beta`` before the strategy sees
-the state. That layer is orthogonal to the strategy DSL.
+The Kalman signal is **strategy-owned**: the filter lives in ``ctx.shared``
+(a per-run dict, fresh for every split/sweep window) as an
+:class:`src.indicators.kalman.strategy.OnlinePairs` instance, fed once per
+candle from the pair's closes in ``state.candles`` (cursor-safe). This replaces
+the old engine ``model_updater`` channel that wrote ``ModelState.kalman_*``
+ahead of the strategy — the DSL holds cross-candle state itself, so no
+engine-level model pipeline is needed.
 
-So the DSL port is deliberately thin: it wraps the same entry/exit decision
-logic on the declarative ``StrategyContext`` surface, but reads the Kalman
-z-score / beta from ``ctx.state.model_state`` (the raw ``BacktestState`` the
-DSL exposes to power users) because ``ctx.ta`` does not run the Kalman filter.
-
-The DSL adds no data-access advantage here — this port exists to show that a
-model-driven strategy (z-score from a Kalman filter) composes with the DSL by
-reading through ``ctx.state``, while the position-management calls are the
-declarative ``ctx.long/short/close``.
+Sizing matching the raw strategy: ``ctx.long(size=...)`` sizes a 0..1 fraction
+of *initial* capital. The migration back-solves ``size`` from
+``result.z_score``/``beta`` exactly as the raw strategy did, and the per-leg
+hedge ``size * abs(beta)`` for the second leg is unchanged. The pair, warmup,
+stop/target params all come from ``Params`` via ``strategy_params`` (the config
+no longer carries a ``model_updater`` block).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.indicators.kalman.strategy import OnlinePairs
 from src.bt.strategies.dsl import strategy, StrategyContext
 from src.bt.strategies.types import StrategyParams
 
 STRATEGY_TYPE = "kalman_pairs_dsl"
+
+# Key under which the strategy-owned OnlinePairs filter is held in ctx.shared.
+_KF_SHARED_KEY = "kf"
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,14 @@ class Params(StrategyParams):
     regime_gate: bool = False
     warmup_bars: int = 150
     pair: tuple[str, str] | None = None
+    # Kalman filter hyper-params (previously configured via the removed
+    # ``model_updater.kalman_pairs`` config block).
+    process_noise: float = 1e-4
+    measurement_noise: float = 1e-3
+    ols_warmup: int = 50
+    adaptive: bool = True
+    vol_window: int = 20
+    z_window: int = 20
 
 
 def _pair(ctx: StrategyContext, params: Params) -> tuple[str, str] | None:
@@ -49,18 +60,39 @@ def _pair(ctx: StrategyContext, params: Params) -> tuple[str, str] | None:
     return None
 
 
-@strategy(bars="1d")
+def _filter(ctx: StrategyContext, params: Params) -> OnlinePairs:
+    """Strategy-owned OnlinePairs held in ctx.shared (lazily minted)."""
+    shared = ctx.shared
+    kf = shared.get(_KF_SHARED_KEY)
+    if not isinstance(kf, OnlinePairs):
+        kf = OnlinePairs(
+            process_noise=params.process_noise,
+            measurement_noise=params.measurement_noise,
+            ols_warmup=params.ols_warmup,
+            adaptive=params.adaptive,
+            vol_window=params.vol_window,
+            z_window=params.z_window,
+            warmup_bars=params.warmup_bars,
+        )
+        shared[_KF_SHARED_KEY] = kf
+    return kf
+
+
+@strategy(bars="1d", stateful=True)
 def on_candle(ctx: StrategyContext):
     pair = _pair(ctx, ctx.params)
     if pair is None:
         return
     s1, s2 = pair
 
-    # Kalman signal is produced by the engine model_updater (see docstring).
-    z = ctx.state.model_state.kalman_z_score
-    beta = ctx.state.model_state.kalman_beta
-    if z is None or beta is None:
+    # The Kalman signal is strategy-owned (see docstring) — read it from the
+    # OnlinePairs filter held in ctx.shared, not from any engine ModelState.
+    result = _filter(ctx, ctx.params).observe(ctx.state, s1, s2, ctx.interval)
+    if not result.ready or result.z_score is None or result.beta is None:
         return
+
+    z = result.z_score
+    beta = result.beta
 
     p1 = ctx.price(s1)
     p2 = ctx.price(s2)

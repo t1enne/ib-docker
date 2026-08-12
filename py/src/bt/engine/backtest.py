@@ -2,7 +2,6 @@
 
 Candle processing pipeline (per-candle stages, in order):
   _append_candle       – stash every candle (base + HTF) in accumulator
-  _update_model        – run model_updater_fn if provided (base only)
   _execute_pending     – fill signals queued for current symbol from prior candles
   _generate_signals    – run strategy on the last symbol per timestamp,
                           bucket returned signals by symbol into pending dict
@@ -112,7 +111,6 @@ def run_backtest(
     exec_handler: ExecutionHandler,
     risk_handler: RiskHandler,
     initial_state: Optional[BacktestState] = None,
-    model_updater_fn: Any = None,
     strategy_mod: Any = None,
     benchmark_curves: Optional[Mapping[str, pd.Series]] = None,
     ta: Optional[TaContext] = None,
@@ -129,7 +127,6 @@ def run_backtest(
         exec_handler: Execution handler with execute_signal, execute_risk_event, apply_fill
         risk_handler: Risk handler with check_risk
         initial_state: Optional initial state (default: create from config)
-        model_updater_fn: Optional function to update model state
         strategy_mod: Optional strategy module (must have on_candle(state, candle, params))
         benchmark_curves: Optional pre-sliced benchmark curves to reuse across
             windows (avoids a per-window benchmark DB reload). When omitted,
@@ -195,10 +192,6 @@ def run_backtest(
         # HTF-only candles: accumulate and skip rest of pipeline
         if not is_base:
             continue
-
-        # Stage 2: update models
-        if model_updater_fn:
-            state = model_updater_fn(state, candle)
 
         # Stage 3: execute pending signals (from prior candles)
         state = _execute_pending(
@@ -473,43 +466,6 @@ def _mark_to_market(
     return merge_bt_state(state, dict(portfolio=portfolio, timestamp=candle.timestamp))
 
 
-def _update_price_buffers(
-    rows: CandleRows,
-    state: BacktestState,
-    candle: Candle,
-    symbols: list[str],
-    base_interval: str,
-) -> BacktestState:
-    """Append aligned {sym: close} pair when all base-interval symbols share timestamp."""
-    if candle.symbol != (symbols[-1] if symbols else None):
-        return state
-
-    candle_ts_ns = np.datetime64(candle.timestamp.to_datetime64())
-
-    for sym in symbols:
-        key = (sym, base_interval)
-        sym_rows = rows.get(key)
-        if sym_rows is None:
-            return state
-        n = int(sym_rows["_len"][0])
-        if n == 0:
-            return state
-        if sym_rows["timestamp"][n - 1] != candle_ts_ns:
-            return state
-
-    pair: dict[str, float] = {}
-    for sym in symbols:
-        key = (sym, base_interval)
-        n = int(rows[key]["_len"][0])
-        pair[sym] = float(rows[key]["close"][n - 1])
-
-    new_ms = replace(
-        state.model_state,
-        price_buffers=state.model_state.price_buffers + (pair,),
-    )
-    return merge_bt_state(state, dict(model_state=new_ms))
-
-
 def _append_candle(
     rows: CandleRows,
     state: BacktestState,
@@ -604,90 +560,6 @@ def _finalize(
     )
 
 
-def _resolve_model_updater(config: "StrategyConfig") -> Any | None:
-    """Build a model_updater_fn from config.model_updater if present."""
-    mu = config.model_updater
-    if not mu or not isinstance(mu, dict):
-        return None
-
-    mu_type = mu.get("type")
-    if mu_type == "dual_online":
-        from src.bt.regime.model_updater import create_dual_online_updater
-
-        cfg_d = mu.get("dual_online", {})
-        return create_dual_online_updater(
-            n_regimes=cfg_d.get("n_regimes", 3),
-            window_size=cfg_d.get("window_size", 252),
-            vol_window=cfg_d.get("vol_window", 20),
-            momentum_window=cfg_d.get("momentum_window", 10),
-            retrain_interval=cfg_d.get("retrain_interval", 50),
-            random_state=cfg_d.get("random_state", 42),
-            trend_fast=cfg_d.get("trend_fast", 50),
-            trend_slow=cfg_d.get("trend_slow", 200),
-            range_threshold_pct=cfg_d.get("range_threshold_pct", 0.005),
-            trend_bar=cfg_d.get("trend_bar"),
-            vol_bar=cfg_d.get("vol_bar"),
-        )
-
-    if mu_type == "hmm_online":
-        from src.bt.regime.model_updater import create_hmm_online_updater
-
-        hmm_cfg = mu.get("hmm_online", {})
-        return create_hmm_online_updater(
-            n_regimes=hmm_cfg.get("n_regimes", 3),
-            window_size=hmm_cfg.get("window_size", 500),
-            vol_window=hmm_cfg.get("vol_window", 20),
-            momentum_window=hmm_cfg.get("momentum_window", 10),
-            retrain_interval=hmm_cfg.get("retrain_interval", 50),
-            random_state=hmm_cfg.get("random_state", 42),
-        )
-
-    if mu_type == "sma":
-        from src.bt.regime.model_updater import create_regime_model_updater
-        from src.bt.regime.detectors import create_sma_detector
-
-        sma_cfg = mu.get("sma", {})
-        detector = create_sma_detector(
-            fast_window=sma_cfg.get("fast_window", 20),
-            slow_window=sma_cfg.get("slow_window", 50),
-            range_threshold_pct=sma_cfg.get("range_threshold_pct", 0.005),
-        )
-        return create_regime_model_updater(detector)
-
-    if mu_type == "volatility":
-        from src.bt.regime.model_updater import create_regime_model_updater
-        from src.bt.regime.detectors import create_volatility_detector
-
-        vol_cfg = mu.get("volatility", {})
-        detector = create_volatility_detector(
-            vol_window=vol_cfg.get("vol_window", 20),
-            low_vol_pctile=vol_cfg.get("low_vol_pctile", 0.25),
-            high_vol_pctile=vol_cfg.get("high_vol_pctile", 0.75),
-            direction_window=vol_cfg.get("direction_window", 50),
-        )
-        return create_regime_model_updater(detector)
-
-    if mu_type == "kalman_pairs":
-        from src.indicators.kalman.model_updater import create_kalman_pairs_updater
-
-        kp_cfg = mu.get("kalman_pairs", {})
-        pair = kp_cfg.get("pair")
-        if pair is not None and isinstance(pair, list) and len(pair) == 2:
-            pair = (str(pair[0]), str(pair[1]))
-        return create_kalman_pairs_updater(
-            pair=pair,
-            process_noise=kp_cfg.get("process_noise", 1e-4),
-            measurement_noise=kp_cfg.get("measurement_noise", 1e-3),
-            ols_warmup=kp_cfg.get("ols_warmup", 50),
-            adaptive=kp_cfg.get("adaptive", True),
-            vol_window=kp_cfg.get("vol_window", 20),
-            z_window=kp_cfg.get("z_window", 20),
-            warmup_bars=kp_cfg.get("warmup_bars", 150),
-        )
-
-    return None
-
-
 def run(
     bt: Backtest,
     data: pd.DataFrame,
@@ -696,15 +568,14 @@ def run(
 ) -> BacktestResults:
     """Convenience function for running backtest with defaults.
 
-    This creates default handlers, resolves model_updater from config,
-    and runs the backtest.  Use run_backtest() for full control.
+    This creates default handlers and runs the backtest.  Use run_backtest()
+    for full control.
     """
     from src.bt.engine.handlers import default_execution_handler, default_risk_handler
 
     gen = candle_generator(data, bt.config)
     exec_handler = default_execution_handler()
     risk_handler = default_risk_handler()
-    model_updater_fn = _resolve_model_updater(bt.config)
 
     # Prefetch the cursor-safe TaContext ONLY for DSL strategies (identified by
     # the marker exposed on the adapter produced by ``@strategy``). Raw
@@ -731,7 +602,6 @@ def run(
         gen,
         exec_handler,
         risk_handler,
-        model_updater_fn=model_updater_fn,
         strategy_mod=strat_mod,
         benchmark_curves=benchmark_curves,
         ta=ta,

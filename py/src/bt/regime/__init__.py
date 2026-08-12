@@ -15,12 +15,6 @@ create_sma_detector          — price vs SMA cross (trend)
 create_volatility_detector   — rolling vol percentile (trend)
 create_hmm_vol_detector      — HMM vol-ranked (vol)
 
-Model updaters
---------------
-create_regime_model_updater   — single detector → current_regime
-create_dual_online_updater    — SMA trend + online HMM vol → current_trend + current_vol
-create_hmm_online_updater     — online HMM → current_regime
-
 Gates (strategy-facing)
 -----------------------
 TrendGate            — typed BULL/BEAR/RANGE with allows_long/short + hostile_to
@@ -28,7 +22,15 @@ sma_trend            — SMA fast/slow crossover → TrendGate
 above_sma            — last close vs N-SMA (bool)
 series_above_sma     — stateless close series vs N-SMA (bool)
 weekly_above_sma     — weekly close vs weekly N-SMA (structural trend, bool)
-current_trend / vol  — decode ModelState.current_trend/current_vol to labels
+
+State ownership
+---------------
+Regimes are strategy-owned. Instead of an engine ``model_updater`` writing
+``ModelState`` fields, a strategy holds its own model object in
+``ctx.shared`` and reads its signal inline — e.g.
+``src.indicators.hmm.strategy.OnlineRegime`` for a per-symbol online HMM, or
+the stateless ``sma_trend``/``weekly_above_sma`` gates computed from
+``state.candles``.
 """
 
 from src.bt.regime.types import (
@@ -47,15 +49,8 @@ from src.bt.regime.detectors import (
     current_trend_label,
     current_vol_label,
 )
-from src.bt.regime.model_updater import (
-    create_regime_model_updater,
-    create_hmm_online_updater,
-    create_dual_online_updater,
-)
 from src.bt.regime.gates import (
     TrendGate,
-    current_trend,
-    current_vol,
     sma_trend,
     above_sma,
     series_above_sma,
@@ -77,16 +72,10 @@ __all__ = [
     "create_volatility_detector",
     "current_trend_label",
     "current_vol_label",
-    # Updaters
-    "create_regime_model_updater",
-    "create_hmm_online_updater",
-    "create_dual_online_updater",
     # Gates
     "TrendGate",
     "sma_trend",
     "above_sma",
     "series_above_sma",
     "weekly_above_sma",
-    "current_trend",
-    "current_vol",
 ]

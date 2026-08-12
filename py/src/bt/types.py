@@ -58,12 +58,7 @@ class StrategyConfig:
     # Position sizing + stop-loss/take-profit live here (strategy-owned,
     # per-trade). They are NOT config-level fields.
     strategy_params: dict
-    model_params: dict = field(default_factory=dict)
-    model_updater: dict | bool = False
-    # the rolling_window_size will be used to retrain the models
     rolling_window_size: Optional[int] = None
-    hmm_floating_window: Optional[int] = None
-    hmm_retrain_interval: Optional[int] = None
     benchmark_symbols: list[str] = field(default_factory=lambda: ["SPY"])
 
 
@@ -79,16 +74,6 @@ class StrategyFn(Protocol):
         tick: Candle,
         params: Dict[str, Any],
     ) -> List[TradeSignal]: ...
-
-
-class ModelUpdaterFn(Protocol):
-    """Protocol for model state update function."""
-
-    def __call__(
-        self,
-        state: BacktestState,
-        tick: Candle,
-    ) -> BacktestState: ...
 
 
 class ExecutionFn(Protocol):
@@ -122,15 +107,6 @@ class RiskCheckFn(Protocol):
         tick: Candle,
         risk_config: RiskConfig,
     ) -> Tuple[Tuple[StateRiskEvent, ...], PortfolioState]: ...
-
-
-class ZScoreFn(Protocol):
-    """Protocol for z-score calculation."""
-
-    def __call__(
-        self,
-        price_buffers: Tuple[Dict[str, float], ...],
-    ) -> Tuple[float, float]: ...
 
 
 class DataLoaderFn(Protocol):

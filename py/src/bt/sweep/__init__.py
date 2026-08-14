@@ -20,6 +20,8 @@ from dataclasses import dataclass, fields
 from itertools import product
 from typing import Any, Callable
 
+import pandas as pd
+
 from src.bt.types import StrategyConfig, PortfolioResult
 
 
@@ -98,6 +100,14 @@ def build_config(cfg: StrategyConfig, merge: dict) -> StrategyConfig:
     return StrategyConfig(**merged)
 
 
+def _combo_data_span(conf: StrategyConfig) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Return the (train_start, test_end) load span a combo needs."""
+    from src.bt.engine.backtest import Backtest
+
+    b = Backtest(conf)
+    return b.window.train_start, b.window.test_end
+
+
 def run_sweep(
     cfg: StrategyConfig,
     merge: dict,
@@ -108,8 +118,14 @@ def run_sweep(
     """Sweep ``merge`` (partial config JSON) over ``cfg``, ranked by sort_metric.
 
     List-valued leaves in ``merge`` are swept (cartesian). Scalar leaves
-    override once. Candles load once over the window and are reused across
-    combos; strategy module state resets between runs.
+    override once. Strategy module state resets between runs.
+
+    Data loading is grouped by symbol set: for each distinct ``symbols`` list
+    across combos, candles load once over the *union* of all that set's spans
+    (train_start..test_end), then each combo's window is sliced from that feed
+    via ``window_df`` — no per-combo reload, and sweeping top-level
+    ``symbols`` / ``training_start`` / ``trading_start`` / ``trading_end``
+    now works correctly.
 
     ``on_result`` (optional) is called with (index, total, flat_overrides, pf)
     as each combo finishes, letting callers stream results live instead of
@@ -125,27 +141,37 @@ def run_sweep(
     from src.bt.engine.backtest import Backtest, run
     from src.bt.data_feed import load_candles
     from src.bt.strategies import init_strat
+    from src.bt.window import window_df
 
     strat_mod = init_strat(cfg.strategy_type)
     reset = getattr(strat_mod, "reset_global", None)
 
     combos = grid_combos(merge)
-    data = None
     results: list[SweepResult] = []
 
-    for patch in combos:
-        conf = build_config(cfg, patch)
-        if data is None:
-            bt_probe = Backtest(conf)
-            data = load_candles(
-                conf.symbols,
-                bt_probe.window.train_start,
-                bt_probe.window.test_end,
-                conf.bars[0],
-            )
+    # Bucket combos by (symbol set, bar) so each distinct set loads exactly once.
+    confs = [build_config(cfg, patch) for patch in combos]
+    by_key: dict[tuple[tuple[str, ...], str], list[StrategyConfig]] = {}
+    for conf in confs:
+        by_key.setdefault((tuple(conf.symbols), conf.bars[0]), []).append(conf)
+
+    # Load once per key over the union of that set's spans (train_start..test_end).
+    feed_cache: dict[tuple[tuple[str, ...], str], pd.DataFrame] = {}
+    for (symbols, bar), conf_list in by_key.items():
+        spans = [_combo_data_span(c) for c in conf_list]
+        load_start = min(s for s, _ in spans)
+        load_end = max(e for _, e in spans)
+        feed_cache[(symbols, bar)] = load_candles(
+            list(symbols), load_start, load_end, bar
+        )
+
+    for patch, conf in zip(combos, confs):
+        bt = Backtest(conf)
+        data = window_df(
+            feed_cache[(tuple(conf.symbols), conf.bars[0])], bt.window.test_end
+        )
         if reset is not None:
             reset()
-        bt = Backtest(conf)
         res = run(bt, data, strat_mod=strat_mod)
 
         # Flatten swept leaf values for reporting (dot-joined path = value).

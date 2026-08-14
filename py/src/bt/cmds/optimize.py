@@ -36,6 +36,12 @@ from src.bt.cmds._shared import cli_ts, parse_param_grid
     help="PortfolioResult metric maximized on each fold's IS window.",
 )
 @click.option(
+    "--workers",
+    type=int,
+    default=1,
+    help="Parallelize folds across N worker processes (default 1).",
+)
+@click.option(
     "--format",
     "-F",
     "fmt",
@@ -50,6 +56,7 @@ def optimize(
     folds,
     min_is_years,
     sort_by: str,
+    workers: int,
     fmt: str,
 ):
     """Walk-forward optimize: tune params per fold's IS, validate on its OOS.
@@ -73,7 +80,6 @@ def optimize(
     """
     from src.bt import load_strategy
     from src.bt.optimize import (
-        _flat_overrides,
         optimize_report_to_json,
         render_optimize_report,
         run_optimize,
@@ -82,10 +88,8 @@ def optimize(
 
     cfg = load_strategy(strategy_file)
 
-    def _stream_fold(fold, best_patch: dict, is_metrics: dict, oos) -> None:
-        params_desc = " ".join(
-            f"{k}={v}" for k, v in _flat_overrides(grid, best_patch).items()
-        )
+    def _stream_fold(fold, best_params: dict, is_metrics: dict, oos) -> None:
+        params_desc = " ".join(f"{k}={v}" for k, v in best_params.items())
         click.echo(
             f"[fold {fold.index + 1}]  "
             f"IS {fold.is_start.date()}→{fold.is_end.date()} | "
@@ -118,6 +122,7 @@ def optimize(
             grid,
             sort_metric=sort_by,
             on_result=_stream_fold,
+            workers=workers,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc

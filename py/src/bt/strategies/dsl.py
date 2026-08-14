@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import sys
 from types import FunctionType
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable
 
 from src.bt.state import ActionType, TradeSignal, BacktestState, Candle, Position
 from src.bt.strategies.series import SeriesView

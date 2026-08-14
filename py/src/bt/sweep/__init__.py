@@ -100,6 +100,17 @@ def build_config(cfg: StrategyConfig, merge: dict) -> StrategyConfig:
     return StrategyConfig(**merged)
 
 
+def _flat_overrides(merge: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a patch's swept leaf values to {dot-joined-path: value}."""
+    overrides: dict[str, Any] = {}
+    for path, _ in _expand_leaves(merge):
+        node: Any = patch
+        for segment in path:
+            node = node[segment]
+        overrides[".".join(path)] = node
+    return overrides
+
+
 def _combo_data_span(conf: StrategyConfig) -> tuple[pd.Timestamp, pd.Timestamp]:
     """Return the (train_start, test_end) load span a combo needs."""
     from src.bt.engine.backtest import Backtest
@@ -108,12 +119,49 @@ def _combo_data_span(conf: StrategyConfig) -> tuple[pd.Timestamp, pd.Timestamp]:
     return b.window.train_start, b.window.test_end
 
 
+def _sweep_worker(task: tuple[tuple[str, ...], str, dict[str, Any]]) -> SweepResult:
+    """Run one sweep combo inside a worker process (or sequentially).
+
+    Task is ``(symbols, bar, patch)``; the candle feed + base config + merge
+    come from the per-worker ``WORKER_STATE`` cache (populated by the pool
+    initializer) so the shared feed is pickled once per worker, not per combo.
+    """
+    from src.bt.engine.backtest import Backtest, run
+    from src.bt.strategies import init_strat
+    from src.bt.window import window_df
+
+    from src.bt.parallel import WORKER_STATE
+
+    symbols, bar, patch = task
+    cfg = WORKER_STATE["cfg"]
+    merge = WORKER_STATE["merge"]
+    feeds = WORKER_STATE["feeds"]
+
+    strat_mod = init_strat(cfg.strategy_type)
+    reset = getattr(strat_mod, "reset_global", None)
+    if reset is not None:
+        reset()
+
+    conf = build_config(cfg, patch)
+    bt = Backtest(conf)
+    data = window_df(feeds[(symbols, bar)], bt.window.test_end)
+    res = run(bt, data, strat_mod=strat_mod)
+
+    overrides = _flat_overrides(merge, patch)
+    return SweepResult(
+        overrides=overrides,
+        params=dict(conf.strategy_params),
+        pf=res.pf,
+    )
+
+
 def run_sweep(
     cfg: StrategyConfig,
     merge: dict,
     sort_metric: str = "annual_return",
     on_result: Callable[[int, int, dict[str, Any], PortfolioResult], None]
     | None = None,
+    workers: int = 1,
 ) -> list[SweepResult]:
     """Sweep ``merge`` (partial config JSON) over ``cfg``, ranked by sort_metric.
 
@@ -130,6 +178,11 @@ def run_sweep(
     ``on_result`` (optional) is called with (index, total, flat_overrides, pf)
     as each combo finishes, letting callers stream results live instead of
     waiting for the full ranking.
+
+    ``workers`` parallelizes combo backtests over a process pool (default 1 =
+    sequential). With ``workers > 1`` each combo runs in a worker process;
+    results and ``on_result`` order are unaffected. The shared candle feed is
+    pickled once per worker, not once per combo.
     """
     metric_names = {f.name for f in fields(PortfolioResult)}
     if sort_metric not in metric_names:
@@ -138,16 +191,11 @@ def run_sweep(
             f"{', '.join(sorted(metric_names))}"
         )
 
-    from src.bt.engine.backtest import Backtest, run
     from src.bt.data_feed import load_candles
-    from src.bt.strategies import init_strat
-    from src.bt.window import window_df
-
-    strat_mod = init_strat(cfg.strategy_type)
-    reset = getattr(strat_mod, "reset_global", None)
+    from src.bt.parallel import run_in_processes
 
     combos = grid_combos(merge)
-    results: list[SweepResult] = []
+    total = len(combos)
 
     # Bucket combos by (symbol set, bar) so each distinct set loads exactly once.
     confs = [build_config(cfg, patch) for patch in combos]
@@ -165,33 +213,24 @@ def run_sweep(
             list(symbols), load_start, load_end, bar
         )
 
+    # One task per combo: (symbols, bar, patch). The shared feed, base config
+    # and merge travel in WORKER_STATE so they pickle once, not per combo.
+    tasks: list[tuple[tuple[str, ...], str, dict[str, Any]]] = []
     for patch, conf in zip(combos, confs):
-        bt = Backtest(conf)
-        data = window_df(
-            feed_cache[(tuple(conf.symbols), conf.bars[0])], bt.window.test_end
-        )
-        if reset is not None:
-            reset()
-        res = run(bt, data, strat_mod=strat_mod)
+        feed_key = (tuple(conf.symbols), conf.bars[0])
+        tasks.append((*feed_key, patch))
 
-        # Flatten swept leaf values for reporting (dot-joined path = value).
-        overrides: dict[str, Any] = {}
-        for path, _ in _expand_leaves(merge):
-            node: Any = patch
-            for segment in path:
-                node = node[segment]
-            overrides[".".join(path)] = node
-
+    def _stream(i: int, sr: SweepResult) -> None:
         if on_result is not None:
-            on_result(len(results), len(combos), overrides, res.pf)
+            on_result(i, total, sr.overrides, sr.pf)
 
-        results.append(
-            SweepResult(
-                overrides=overrides,
-                params=dict(conf.strategy_params),
-                pf=res.pf,
-            )
-        )
+    results = run_in_processes(
+        _sweep_worker,
+        tasks,
+        workers=workers,
+        init_data={"cfg": cfg, "merge": merge, "feeds": feed_cache},
+        on_complete=_stream,
+    )
 
     # Higher is better for every PortfolioResult metric we order by
     # (max_drawdown is negative, so ascending = descending here too).

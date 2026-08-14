@@ -166,7 +166,10 @@ src/
 uv run ibkr bt run <strategy.json> [--format jsonl]
 uv run ibkr bt split <strategy.json> --folds 4          # IS/OOS walk-forward
 uv run ibkr bt split <strategy.json> --is-end 2020-12-31  # single anchor split
+uv run ibkr bt sweep <strategy.json> '{...grid...}'     # hyperparameter sweep
 uv run ibkr bt optimize <strategy.json> '{...grid...}' --folds 4  # per-fold IS tune → OOS validate
+# All three parallelize units across worker processes with:
+#   --workers N   (default 1 = sequential)
 
 # Data
 uv run ibkr data query AAPL --from 2024-01-01
@@ -174,6 +177,22 @@ uv run ibkr data query AAPL --from 2024-01-01
 # Pipe workflows
 uv run ibkr data query AAPL --from 2024-01-01 | uv run ibkr bt run strategy.json
 ```
+
+### `bt sweep` — hyperparameter sweep
+
+Sweeps a param grid over a strategy and ranks every combo by a chosen metric
+(`--sort-by`, default `annual_return`). `PARAM_GRID` is a partial-config JSON
+that deep-merges into the strategy config; any value that is a **list** is
+swept (cartesian product over all sweepable leaves), scalars override once.
+
+```bash
+uv run ibkr bt sweep strat.json '{"strategy_params":{"position_size":[0.8,0.95],"drift_tolerance":[0.01,0.05]}}'
+uv run ibkr bt sweep strat.json '{...grid...}' --sort-by sharpe_ratio --limit 5 --format json
+```
+
+Candle data loads once per distinct (symbol set, bar) and is window-sliced per
+combo — no per-combo reload. Ranked by `--sort-by`; use `--limit` to show only
+the top N.
 
 ### `bt split` — in-sample vs out-of-sample validation
 
@@ -191,6 +210,10 @@ Options: `--min-is-years` (walk-forward first-fold history floor, default 5.0),
 `--train-start` (warmup override), `--format text|json`. Does **not** re-tune
 params per fold — it answers _"given these locked params, how does performance
 hold up out-of-sample?"_
+
+Run folds in parallel across worker processes with `--workers N`. Each fold
+(IS+OOS window pair) is independent; the shared candle + benchmark feeds pickle
+once per worker, not per fold.
 
 ### `bt optimize` — walk-forward parameter optimization
 
@@ -211,6 +234,51 @@ window, and the OOS result prices that cost. If mean OOS Sharpe holds up across
 folds, the edge is likely real; if IS is strong but OOS collapses, the grid is
 fitting noise. Reports per-fold chosen params + IS/OOS metrics and an aggregate
 of mean/min OOS Sharpe.
+
+Run folds in parallel across worker processes with `--workers N` — each fold
+tunes its own IS window and validates its OOS independently (combos inside a
+fold stay sequential).
+
+### Parallelism (`--workers`)
+
+`bt sweep`, `bt split` and `bt optimize` all accept `--workers N` (default `1` =
+sequential) to parallelize their independent units of work — grid combos
+(sweep) or folds (split, optimize) — across a **process pool** (`multiprocessing`
+/ `concurrent.futures`), not threads. Backtests are CPU-bound, and because
+their engine is pure over immutable inputs, separate worker processes get
+isolation for free. The shared candle feed is pickled once per worker, and
+deterministic streaming order is preserved for `--format text`. Effective
+workers are capped at the unit count, so `--workers` larger than the number of
+combos/folds wastes nothing.
+
+#### When to use `--workers`
+
+`--workers` is a throughput knob, not a correctness one — every count returns
+**identical** results. The question is only whether a process pool is *faster*.
+There is a **fixed cost of ~2s per pooled run** (spawning a `forkserver` + worker
+processes on Python 3.14), so the pool wins only when the units it parallelizes
+are cheap by comparison. Roughly: if total compute is under a few seconds, keep
+`--workers 1`; the pool starts paying off around many-combo sweeps and
+many-fold splits over heavy feeds.
+
+- **`bt sweep` — biggest win.** Parallelize the cartesian grid of combos. On a
+  198-combo sweep this measured **≈3x faster with `--workers 8`** (41s → 14s).
+  Reach for `--workers` whenever the grid has dozens of combos or the feed is
+  large.
+- **`bt split` — only with many folds / heavy feeds.** It parallelizes across
+  folds, and each fold is just an IS+OOS pair. With a handful of folds on a
+  small daily feed the ~2s spawn cost exceeds the compute, so `--workers 4`
+  was **slower** (3s → 6s CLI wall-clock) than the default `1`. `--workers`
+  helps here only for high `--folds` (e.g. 10+) or large intraday feeds.
+- **`bt optimize` — same as split.** Fold-level parallelism; inside a fold the
+  IS sweep stays sequential. Use `--workers` for many folds + a large grid.
+  A single optimize is heavier than a split (grid × folds), so it benefits at
+  lower fold counts than split.
+
+**Rule of thumb:** default `--workers 1`; raise it when a single unrunnable run
+would take more than a few seconds (many combos, many folds, or heavy
+per-candle data). When in doubt, time `--workers 1` first — if it is already
+fast (<~2s), more workers will only add overhead.
 
 All commands usable via `make run <subcommand> <args>`.
 

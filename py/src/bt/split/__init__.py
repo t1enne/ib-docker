@@ -16,7 +16,6 @@ from typing import Callable, Mapping
 
 import pandas as pd
 
-from src.bt.strategies import init_strat
 from src.bt.types import StrategyConfig, PortfolioResult
 from src.bt.window import run_window, window_has_data
 from src.utils import parse_timestamp
@@ -232,28 +231,53 @@ def walk_forward_folds(
 # ---------------------------------------------------------------------------
 
 
+def _split_fold_worker(fold: TestFold) -> FoldMetrics:
+    """Run one fold's IS+OOS windows inside a worker (or sequentially).
+
+    The shared candle feed, benchmark feed and strategy config come from the
+    per-worker WORKER_STATE cache (pool initializer) so they pickle once per
+    worker, not per fold.
+    """
+    from src.bt.parallel import WORKER_STATE
+    from src.bt.strategies import init_strat
+
+    cfg = WORKER_STATE["cfg"]
+    data = WORKER_STATE["data"]
+    bm_df = WORKER_STATE.get("bm_df")
+
+    strat_mod = init_strat(cfg.strategy_type)
+    is_result = run_window(cfg, strat_mod, data, bm_df, fold.is_start, fold.is_end)
+    oos_result = run_window(cfg, strat_mod, data, bm_df, fold.oos_start, fold.oos_end)
+    return FoldMetrics(fold=fold, in_sample=is_result, out_of_sample=oos_result)
+
+
 def run_split(
     cfg: StrategyConfig,
     folds: list[TestFold],
     on_result: Callable[[TestFold, PortfolioResult, PortfolioResult], None]
     | None = None,
+    workers: int = 1,
 ) -> SplitReport:
     """Run one backtest per IS and OOS window of every fold.
 
     - strategy_params are NEVER mutated across folds (locked params).
     - Loads candles once over [train_start, trading_end], window-sliced per
-      fold via trading-window overrides (no per-fold data reload).
-    - Resets module-level strategy state before EVERY window run.
+      fold via trading-window overrides (no per-fold data reload). DSL
+      strategies get fresh per-run ``ctx.shared`` state minted by the engine
+      each window, so folds are independent and parallelizable.
 
     ``on_result`` (optional) pulls (fold, is_result, oos_result) as each fold
     completes, letting callers stream results live.
-    """
-    from src.bt.data_feed import load_candles
 
+    ``workers`` parallelizes folds over a process pool (default 1 = sequential).
+    The shared candle + benchmark feeds pickle once per worker, not per fold.
+    """
     if not folds:
         raise ValueError("No folds to run — check the split windows")
 
-    strat_mod = init_strat(cfg.strategy_type)
+    from src.bt.data_feed import load_candles
+    from src.bt.parallel import run_in_processes
+
     load_start = min(
         parse_timestamp(cfg.training_start),
         min(f.is_start for f in folds),
@@ -275,11 +299,12 @@ def run_split(
             cfg.bars[0],
         )
 
-    fold_metrics: list[FoldMetrics] = []
+    # Fail fast on windows that fall in a data gap before dispatching workers.
     for fold in folds:
-        is_end, is_start = fold.is_end, fold.is_start
-        oos_start, oos_end = fold.oos_start, fold.oos_end
-        windows = [("IS", is_start, is_end), ("OOS", oos_start, oos_end)]
+        windows = [
+            ("IS", fold.is_start, fold.is_end),
+            ("OOS", fold.oos_start, fold.oos_end),
+        ]
         missing = [
             f"{label} [{start}→{end}]"
             for label, start, end in windows
@@ -291,13 +316,18 @@ def run_split(
                 + ", ".join(missing)
                 + " — the split may fall in a data gap or past the loaded range."
             )
-        is_result = run_window(cfg, strat_mod, data, bm_df, is_start, is_end)
-        oos_result = run_window(cfg, strat_mod, data, bm_df, oos_start, oos_end)
+
+    def _stream(i: int, fm: FoldMetrics) -> None:
         if on_result is not None:
-            on_result(fold, is_result, oos_result)
-        fold_metrics.append(
-            FoldMetrics(fold=fold, in_sample=is_result, out_of_sample=oos_result)
-        )
+            on_result(fm.fold, fm.in_sample, fm.out_of_sample)
+
+    fold_metrics = run_in_processes(
+        _split_fold_worker,
+        list(folds),
+        workers=workers,
+        init_data={"cfg": cfg, "data": data, "bm_df": bm_df},
+        on_complete=_stream,
+    )
 
     return SplitReport(
         config_name=cfg.name,

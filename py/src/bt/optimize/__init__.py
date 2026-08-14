@@ -27,7 +27,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from src.bt.split import TestFold
-from src.bt.sweep import build_config, grid_combos
+from src.bt.sweep import build_config, _flat_overrides, grid_combos
 from src.bt.types import StrategyConfig, PortfolioResult
 from src.bt.window import run_window, window_has_data
 
@@ -84,17 +84,54 @@ def _best_combo_on_window(
     return best_patch, best_pf
 
 
-def _flat_overrides(merge: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """Flatten a patch's swept leaf values to {dot-joined-path: value}."""
-    from src.bt.sweep import _expand_leaves
+def _is_metrics(pf: PortfolioResult) -> dict[str, float]:
+    """Serialize a PortfolioResult's numeric fields for reporting."""
+    return {
+        f.name: float(getattr(pf, f.name))
+        for f in fields(PortfolioResult)
+        if isinstance(getattr(pf, f.name), (int, float))
+        and not isinstance(getattr(pf, f.name), bool)
+    }
 
-    overrides: dict[str, Any] = {}
-    for path, _ in _expand_leaves(merge):
-        node: Any = patch
-        for segment in path:
-            node = node[segment]
-        overrides[".".join(path)] = node
-    return overrides
+
+def _optimize_fold_worker(fold: TestFold) -> OptimizeResult:
+    """Run one fold's IS sweep + OOS validation inside a worker (or seq).
+
+    The shared candle feed, benchmark feed, base config, merge and the IS
+    sort metric come from the per-worker WORKER_STATE cache (pool initializer)
+    so they pickle once per worker, not per fold.
+    """
+    from src.bt.parallel import WORKER_STATE
+    from src.bt.strategies import init_strat
+    from src.bt.window import run_window
+
+    cfg = WORKER_STATE["cfg"]
+    merge = WORKER_STATE["merge"]
+    merged_patches = WORKER_STATE["merged_patches"]
+    sort_metric = WORKER_STATE["sort_metric"]
+    data = WORKER_STATE["data"]
+    bm_df = WORKER_STATE.get("bm_df")
+
+    strat_mod = init_strat(cfg.strategy_type)
+    best_patch, is_pf = _best_combo_on_window(
+        cfg,
+        merged_patches,
+        strat_mod,
+        data,
+        bm_df,
+        fold.is_start,
+        fold.is_end,
+        sort_metric,
+    )
+    best_conf = build_config(cfg, best_patch)
+    oos_pf = run_window(best_conf, strat_mod, data, bm_df, fold.oos_start, fold.oos_end)
+
+    return OptimizeResult(
+        fold=fold,
+        best_params=_flat_overrides(merge, best_patch),
+        is_metrics=_is_metrics(is_pf),
+        oos=oos_pf,
+    )
 
 
 def run_optimize(
@@ -103,6 +140,7 @@ def run_optimize(
     merge: dict[str, Any],
     sort_metric: str = "sharpe_ratio",
     on_result: Callable[..., None] | None = None,
+    workers: int = 1,
 ) -> tuple[list[OptimizeResult], dict[str, float]]:
     """Walk-forward optimize: tune params per fold's IS, validate on its OOS.
 
@@ -115,7 +153,11 @@ def run_optimize(
     Returns:
         (per-fold OptimizeResult, aggregate summary dict).
         Candles load once over the full window; every IS sweep and OOS run
-        reuses them. Strategy module state resets before each window run.
+        reuses them. DSL strategies get fresh per-run ``ctx.shared`` state per
+        window, so folds are independent and parallelizable.
+
+    ``workers`` parallelizes folds over a process pool (default 1 = sequential).
+    The shared candle + benchmark feeds pickle once per worker, not per fold.
     """
     if sort_metric not in _metric_names():
         raise ValueError(
@@ -125,12 +167,11 @@ def run_optimize(
 
     from src.bt.engine.backtest import Backtest
     from src.bt.data_feed import load_candles
-    from src.bt.strategies import init_strat
+    from src.bt.parallel import run_in_processes
 
     if not folds:
         raise ValueError("No folds to run — check the split windows")
 
-    strat_mod = init_strat(cfg.strategy_type)
     merged_patches = grid_combos(merge)
 
     # Load once over the full span — per-window runs slice it, no per-run reload.
@@ -168,41 +209,59 @@ def run_optimize(
                     "— the split may fall in a data gap or past the loaded range."
                 )
 
-    results: list[OptimizeResult] = []
-    for fold in folds:
-        best_patch, is_pf = _best_combo_on_window(
-            cfg,
-            merged_patches,
-            strat_mod,
-            data,
-            bm_df,
-            fold.is_start,
-            fold.is_end,
-            sort_metric,
-        )
-        best_conf = build_config(cfg, best_patch)
-        oos_pf = run_window(
-            best_conf, strat_mod, data, bm_df, fold.oos_start, fold.oos_end
-        )
-
-        # Best combo's IS metrics (not rebuilt — reuse to avoid a 3rd run).
-        best_is: dict[str, float] = {
-            f.name: float(getattr(is_pf, f.name))
-            for f in fields(PortfolioResult)
-            if isinstance(getattr(is_pf, f.name), (int, float))
-            and not isinstance(getattr(is_pf, f.name), bool)
-        }
-
-        results.append(
-            OptimizeResult(
-                fold=fold,
-                best_params=_flat_overrides(merge, best_patch),
-                is_metrics=best_is,
-                oos=oos_pf,
-            )
-        )
+    def _stream(i: int, r: OptimizeResult) -> None:
         if on_result is not None:
-            on_result(fold, best_patch, best_is, oos_pf)
+            on_result(r.fold, r.best_params, r.is_metrics, r.oos)
+
+    if workers <= 1:
+        # Sequential path: reuse module-level names so monkeypatched
+        # `run_window` / `init_strat` in tests keep working. `best_params` is
+        # already flattened, matching the pooled `on_result` contract.
+        from src.bt.strategies import init_strat
+
+        strat_mod = init_strat(cfg.strategy_type)
+        results: list[OptimizeResult] = []
+        for fold in folds:
+            best_patch, is_pf = _best_combo_on_window(
+                cfg,
+                merged_patches,
+                strat_mod,
+                data,
+                bm_df,
+                fold.is_start,
+                fold.is_end,
+                sort_metric,
+            )
+            best_conf = build_config(cfg, best_patch)
+            oos_pf = run_window(
+                best_conf, strat_mod, data, bm_df, fold.oos_start, fold.oos_end
+            )
+            best_is = _is_metrics(is_pf)
+            results.append(
+                OptimizeResult(
+                    fold=fold,
+                    best_params=_flat_overrides(merge, best_patch),
+                    is_metrics=best_is,
+                    oos=oos_pf,
+                )
+            )
+            if on_result is not None:
+                on_result(fold, _flat_overrides(merge, best_patch), best_is, oos_pf)
+    else:
+        results = run_in_processes(
+            _optimize_fold_worker,
+            list(folds),
+            workers=workers,
+            init_data={
+                "cfg": cfg,
+                "merge": merge,
+                "merged_patches": merged_patches,
+                "sort_metric": sort_metric,
+                "data": data,
+                "bm_df": bm_df,
+            },
+            on_complete=_stream,
+        )
 
     agg = {
         "mean_oos_sharpe": (

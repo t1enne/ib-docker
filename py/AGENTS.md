@@ -26,6 +26,20 @@ make run bt run strats/trend.json          # Make shortcut
 make check                                 # lint + format + typecheck + test
 make test                                  # all tests
 make test-fast                             # quick tests
+
+# Sweep/split/optimize parallelize their independent units (grid combos or
+# folds) over a process pool. Add --workers N (>1) to speed up CPU-bound runs:
+uv run ibkr bt sweep strats/trend.json '{...grid...}' --workers 8
+uv run ibkr bt split strats/trend.json --folds 4 --workers 4
+uv run ibkr bt optimize strats/trend.json '{...grid...}' --folds 4 --workers 4
+# WHEN to use --workers: it is a throughput knob, never a correctness one (all
+# counts return identical results). There is a ~2s fixed spawn cost per pooled
+# run, so keep --workers 1 for trivial workloads (a few combos/folds on a small
+# feed) — the spawn overhead then exceeds the savings. Prefer --workers when a
+# run would take more than a few seconds: many combos (sweep benefits most;
+# a ~200-combo sweep measured ~3x faster at --workers 8), many folds (split /
+# optimize, esp. --folds 10+), or heavy intraday feeds. Effective workers are
+# capped at the unit count, so oversized --workers is harmless.
 ```
 
 ## Language & Toolchain
@@ -158,36 +172,31 @@ def apply_fill(portfolio: PortfolioState, fill: FillEvent) -> None:
 - **No side effects in pure functions.** I/O (DB, HTTP, file) belongs at the edges.
 - **Use `merge_bt_state`** for partial state updates — it's the established pattern.
 
-##### Mutable strategy state: the `GLOBAL` + `reset_global()` convention
+##### Mutable strategy state: hold it in the stateful DSL's `ctx.shared`
 
-Strategies are modules, so any cross-call mutable state (cooldowns, trails,
-cache dicts, sets, bar counters, last-timestamp markers) is module scope and
-persists across runs. The backtest engine never resets it, so state bleeds
-between walks/windows unless the strategy opts into a reset. Use this
-convention everywhere strategy runtime state exists:
+Strategies that carry cross-call state (cooldowns, trails, cache dicts, sets,
+bar counters, model objects like `OnlinePairs`/`OnlineRegime`) must hold it in
+`ctx.shared`, using the **stateful DSL** (`@strategy(stateful=True)`). The
+engine mints a **fresh `ctx.shared` dict per run/window**, so cross-window
+bleed is impossible by construction:
 
 ```python
-GLOBAL: dict = {"cooldown": {}, "regime_ts": None}
-
-def reset_global() -> None:
-    global GLOBAL
-    GLOBAL = {"cooldown": {}, "regime_ts": None}
+@strategy(bars="1d", stateful=True)
+def on_candle(ctx: StrategyContext):
+    cooldowns = ctx.shared.setdefault("cooldowns", {})
+    trails = ctx.shared.setdefault("trails", {})
+    ...
 ```
 
-- Keep **all** cross-call state in one module-level `GLOBAL: dict` — no
-  scattered `_COOLDOWNS`/`_TRAILS`/`_last` module globals.
-- `GLOBAL` may hold non-dict members (`set`, `int`, `Timestamp | None`, ...).
-  That's fine — reset **rebinds** `GLOBAL` to a fresh dict rather than
-  clearing members with heuristics.
-- Mutate members in place inside strategy logic (`GLOBAL["cooldown"][sym] = x`,  
-  `GLOBAL["bar_idx"] += 1`); no `global` statement is needed unless you rebind  
-  `GLOBAL` itself (only `reset_global` does).
-- Provide `reset_global()` that rebuilds `GLOBAL` with correct defaults. The  
-  split engine calls it via `_reset_strategy_state()` before every IS/OOS  
-  window. Stateless strategies simply omit it.
-- Don't hand-roll a heuristic reset (e.g. clearing only uppercase dict-like  
-  globals) — it silently misses non-dict state and lowercase names and is a  
-  source of cross-fold bleed (see `split.py` history).
+- All cross-call state lives under `ctx.shared` — nothing at module scope.
+  This is what makes strategies safe to run concurrently across
+  `sweep`/`split`/`optimize` **worker processes** without global races.
+- Do **not** write module-level `GLOBAL` dicts with a hand-rolled
+  `reset_global()`; per-run `ctx.shared` removes the need to reset, and
+  discarding module globals avoids silent cross-fold bleed entirely.
+- The DSL attaches a no-op `reset_global()` back-compat shim; the runner
+  calls it defensively between units, but you should not rely on it — state is
+  already per-run.
 
 #### Size constraints (from README)
 
@@ -287,18 +296,16 @@ n     = state.candles.count("AAPL", "4h")        # int
 `on_candle` invocation. `__getitem__` and `get` build DataFrames truncated to
 rows ≤ cursor. `latest()` and `count()` ignore the cursor (absolute latest).
 
-#### Strategy-owned state: `shared` / `GLOBAL`
+#### Strategy-owned state: `ctx.shared`
 
 There is **no** `ModelState` and no engine-level `model_updater`. Cross-candle
-state is fully strategy-owned:
-
-- **DSL strategies** (`@strategy(stateful=True)`) hold state in `ctx.shared` —
-  a per-run dict minted fresh by the engine for every split/sweep window, so
-  cross-window bleed is impossible. Read/write `ctx.shared["key"]`.
-- **Raw `on_candle` strategies** use the `GLOBAL` dict + `reset_global()`
-  convention (see section 4). Model objects (e.g.
-  `src.indicators.kalman.strategy.OnlinePairs`, `src.indicators.hmm.strategy.OnlineRegime`)
-  live in strategy state and are fed per candle; there is no hidden engine channel.
+state is fully strategy-owned via the stateful DSL's `ctx.shared` —
+per-run dict minted fresh by the engine for every split/sweep window, so
+cross-window bleed is impossible and strategies are safe across concurrent
+worker processes. Read/write `ctx.shared["key"]`. Model objects (e.g.
+`src.indicators.kalman.strategy.OnlinePairs`, `src.indicators.hmm.strategy.OnlineRegime`)
+live in `ctx.shared` and are fed per candle; there is no hidden engine channel.
+See section 4 for the full convention.
 
 #### HTF (higher-timeframe) access pattern
 

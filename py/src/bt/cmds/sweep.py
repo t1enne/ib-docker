@@ -25,6 +25,12 @@ from src.bt.cmds._shared import parse_param_grid
     help="Show only the top N combos (default: all).",
 )
 @click.option(
+    "--workers",
+    type=int,
+    default=1,
+    help="Parallelize combo backtests across N worker processes (default 1).",
+)
+@click.option(
     "--format",
     "-F",
     "fmt",
@@ -33,7 +39,12 @@ from src.bt.cmds._shared import parse_param_grid
     help="Report format.",
 )
 def sweep(
-    strategy_file: str, param_grid: str, sort_by: str, top_n: int | None, fmt: str
+    strategy_file: str,
+    param_grid: str,
+    sort_by: str,
+    top_n: int | None,
+    workers: int,
+    fmt: str,
 ):
     """Sweep a strategy's params over a grid and rank backtest results.
 
@@ -70,7 +81,9 @@ def sweep(
             f"maxdd={pf.max_drawdown:.2%}  trades={len(pf.trades)}"
         )
 
-    results = run_sweep(cfg, grid, sort_metric=sort_by, on_result=_stream_result)
+    results = run_sweep(
+        cfg, grid, sort_metric=sort_by, on_result=_stream_result, workers=workers
+    )
 
     if fmt == "json":
         click.echo(json.dumps(sweep_report_to_json(results), indent=2))

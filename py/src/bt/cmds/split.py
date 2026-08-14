@@ -37,6 +37,12 @@ from src.bt.cmds._shared import cli_ts
     help="Override warmup start before IS.",
 )
 @click.option(
+    "--workers",
+    type=int,
+    default=1,
+    help="Parallelize folds across N worker processes (default 1).",
+)
+@click.option(
     "--format",
     "-F",
     "fmt",
@@ -50,6 +56,7 @@ def split(
     folds,
     min_is_years,
     train_start,
+    workers: int,
     fmt: str,
 ):
     """Walk-forward / single-split in-sample vs out-of-sample validation.
@@ -96,7 +103,7 @@ def split(
                 "Provide one of --is-end (single split) or --folds (walk-forward)."
             )
 
-        report = run_split(cfg, folds_list, on_result=_stream_fold)
+        report = run_split(cfg, folds_list, on_result=_stream_fold, workers=workers)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 

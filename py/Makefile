@@ -35,7 +35,7 @@ typecheck:
 	uv run ty check $(SRC)
 
 test:
-	uv run pytest $(SRC_DIRS) tests -v
+	uv run pytest $(SRC_DIRS) tests -v -m slow
 
 test-fast:
 	uv run pytest $(SRC_DIRS) tests --no-header -q

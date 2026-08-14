@@ -44,7 +44,10 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-addopts = ["--import-mode=importlib"]
+addopts = ["--import-mode=importlib", "-m not slow"]
+markers = [
+	"slow: long-running or process-pool-spawning tests, skipped by default (run with `pytest -m slow`)",
+]
 
 [dependency-groups]
 dev = [

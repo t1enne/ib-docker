@@ -219,9 +219,19 @@ Use EMA convergence + ATR contraction. See `vol_extension_pullback.py` for ATR-c
 
 ### Statefulness within strategy
 
-For multi-phase strategies (compression → breakout → pullback → entry), hold cross-call state in one module-level `GLOBAL: dict` keyed by symbol. See `vol_extension_pullback.py` and `trend_pullback_atr_*` for examples. Implement `reset_global()` that rebinds `GLOBAL` to a fresh dict — the engine calls it between split/sweep windows so state doesn't bleed across folds.
+Write strategies that need cross-call state on the **stateful DSL**
+(`@strategy(stateful=True)`): hold it in `ctx.shared`, a fresh dict the engine
+mints **per run/window**, so cross-window bleed is impossible and strategies are
+safe to run concurrently (including across `sweep`/`split`/`optimize` worker
+processes). Model objects (e.g. `OnlinePairs`, `OnlineRegime`) live in
+`ctx.shared` and are fed per candle; there is no engine `model_updater`/
+`ModelState` channel.
 
-**DSL strategies** (`@strategy(stateful=True)`) instead use `ctx.shared` — a per-run dict minted fresh by the engine for every window, so cross-window bleed is impossible without a manual `reset_global`. Model objects (e.g. `OnlinePairs`, `OnlineRegime`) live in `ctx.shared` and are fed per candle; there is no engine `model_updater`/`ModelState` channel.
+Legacy raw `on_candle` strategies may still hold state in a module-level
+`GLOBAL: dict` and expose `reset_global()` (which rebinds `GLOBAL` to a fresh
+dict). The runner calls `reset_global()` defensively before each unit of work
+for back-compat, but prefer the DSL — module-level state is shared across every
+run in a process and is the thing the per-run `ctx.shared` holder replaces.
 
 ### Always handle "no position" and "in position" paths
 
@@ -238,8 +248,7 @@ else:
 Use `state.candles.get((sym, freq))` or `htf_candles(state, freq, tick)` for
 higher-timeframe bars — both are cursor-truncated and lookahead-safe. There is
 no `state.model_state` channel; cross-candle model/indicator state is owned by
-the strategy (see the `GLOBAL`/`reset_global` convention earlier in this file,
-or DSL `ctx.shared` for decorated strategies).
+the strategy (see `ctx.shared` for the stateful DSL earlier in this file).
 
 ## Testing a Strategy
 
@@ -269,7 +278,21 @@ All CLI groups under the `py` root command — also callable via `make run <subc
 | Group  | Commands                   | Description                                                        |
 | ------ | -------------------------- | ------------------------------------------------------------------ |
 | `data` | `dl`, `query`, `preview`   | Sync/download OHLCV from IBKR, query local DB                      |
-| `bt`   | `run`, `split`, `optimize` | Backtesting engine + IS/OOS validation + walk-forward param tuning |
+| `bt`   | `run`, `sweep`, `split`, `optimize` | Backtesting engine, hyperparam sweep, IS/OOS validation, walk-forward tuning |
+
+### `bt sweep` — hyperparameter sweep
+
+Sweeps a `PARAM_GRID` over a strategy and ranks every combo by a chosen metric
+(`--sort-by`, default `annual_return`). Any list-valued leaf in the grid is
+swept (cartesian); scalars override once. Shown `--limit` top N if given.
+
+```bash
+uv run ibkr bt sweep strat.json '{"strategy_params":{"position_size":[0.8,0.95]}}'
+uv run ibkr bt sweep strat.json '{...grid...}' --sort-by sharpe_ratio --limit 5 --format json
+```
+
+Candle data loads once per distinct (symbol set, bar) and is window-sliced per
+combo — no per-combo reload.
 
 ### `bt split` — IS/OOS walk-forward validation
 
@@ -289,6 +312,9 @@ summary of mean/min OOS Sharpe and OOS→IS degradation. Useful to check whether
 a strategy's edge survives out-of-sample rather than being curve-fit to the
 training window.
 
+Run folds in parallel with `--workers N` — each IS/OOS window pair is an
+independent unit of work.
+
 ### `bt optimize` — per-fold IS tune → OOS validate
 
 Bridges `bt sweep` (tune params, whole window) and `bt split` (locked params).
@@ -306,3 +332,38 @@ Honest about overfitting: per-fold tuning curve-fits the IS window, and the OOS
 result prices that cost. If mean OOS Sharpe holds up across folds the edge is
 likely real; if IS is strong but OOS collapses, the grid is fitting noise.
 Reports perf-fold chosen params + IS/OOS metrics, plus mean/min OOS Sharpe.
+
+Run folds in parallel with `--workers N` — each fold tunes its IS and
+validates its OOS independently (combos inside a fold stay sequential).
+
+### Parallelism (`--workers`)
+
+`bt sweep`, `bt split` and `bt optimize` each accept `--workers N` (default `1` =
+sequential) to parallelize their independent units of work — grid combos
+(sweep) or folds (split, optimize) — over a **process pool** via
+`concurrent.futures.ProcessPoolExecutor`, not threads (`src/bt/parallel.py`).
+The engine is pure over immutable inputs, so separate worker processes get
+isolation for free; the shared candle feed pickles once per worker, and
+streaming output order is preserved.
+
+**When to use `--workers`** (every count returns identical results; it is a
+throughput knob, not a correctness one):
+
+- There is a **fixed ~2s spawn cost** per pooled run (forkserver + workers on
+  Py 3.14). The pool only helps when the units it parallelizes are expensive
+  by comparison — so keep `--workers 1` for trivial runs (a few combos/folds on
+  a small daily feed), where the spawn cost exceeds any savings.
+- **`bt sweep`: biggest win** — parallelizes the cartesian grid. A 198-combo
+  sweep measured **≈3x faster with `--workers 8`** (41s → 14s). Use it whenever
+  the grid has dozens of combos or a large feed.
+- **`bt split`: only with many folds / heavy feeds** — each fold is just an
+  IS+OOS pair, and the spawn overhead dwarfs a few folds (a 4-fold daily split
+  was *slower* pooled: 3s → 6s). Reach for `--workers` at `--folds 10+` or on
+  large intraday feeds.
+- **`bt optimize`: same as split** — fold-level parallelism (the in-fold IS
+  sweep stays sequential). It is heavier than split (grid × folds), so it
+  pays off at lower fold counts.
+
+Effective workers are capped at the unit count, so `--workers` much larger
+than the number of combos/folds wastes nothing. Rule of thumb: raise `--workers`
+only once a single run would take more than a few seconds.

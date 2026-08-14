@@ -1,13 +1,15 @@
 {
   "name": "cup-handle-breakout-dsl",
-  "training_start": "2015-01-02",
-  "training_end": "2015-01-03",
-  "trading_start": "2015-01-03",
+  "training_start": "2020-01-01",
+  "training_end": "2020-01-01",
+  "trading_start": "2020-01-02",
   "trading_end": "2025-01-01",
   "commission": 0.1,
   "initial_capital": 50000,
   "strategy_type": "cup_handle_dsl",
-  "bars": ["1d"],
+  "bars": [
+    "1d"
+  ],
   "strategy_params": {
     "swing_lookback": 3,
     "max_cup_depth_pct": 0.4,
@@ -20,6 +22,9 @@
     "volume_confirm_breakout": true,
     "per_symbol_size": 0.15,
     "max_risk_pct": 0.035,
+    "sizing_mode": "equity",
+    "size": 0.15,
+    "max_symbol_allocation": 0.15,
     "min_stop_atr": 0.5,
     "trail_atr_period": 14,
     "trail_atr_mult": 2.5,
@@ -32,5 +37,12 @@
     "cooldown_bars": 5,
     "profit_target_mult": 1.2
   },
-  "symbols": ["GLD", "SPY", "QQQ", "AMZN", "GOOG", "META"]
+  "symbols": [
+    "QQQ",
+    "XLK",
+    "GOOG",
+    "META",
+    "NVDA",
+    "AAPL"
+  ]
 }

@@ -5,7 +5,7 @@ detector + breakout entry + ratcheting ATR trail), expressed on the
 declarative :class:`StrategyContext` DSL.
 
 * The pure geometric detector + trend helpers (``detect_cup_and_handle``,
-  ``cap_stop_dist``, ``per_symbol_qty``, ``is_uptrend``, ``uptrend_aligned``,
+  ``cap_stop_dist``, ``is_uptrend``, ``uptrend_aligned``,
   ``is_bull_market``) are inlined here so the module is self-contained.
 * Data is read cursor-safe through ``ctx.ohlcv`` (cursor-truncated numpy
   arrays -> ``pd.Series`` for the pure detector) and ``ctx.ta.atr`` (one
@@ -16,10 +16,12 @@ declarative :class:`StrategyContext` DSL.
 
 Sizing / SL-TP semantics (DSL convention):
 
-* ``ctx.long(size=...)`` sizes a fraction of *initial* capital, i.e.
-  ``qty = size * initial_capital / price``. Passing ``size=per_symbol_size``
-  reproduces the original's ``per_symbol_qty(initial_capital, per_symbol_size,
-  price)`` exactly.
+* ``ctx.long(...)`` omits ``size`` so the engine's **shared sizing layer**
+  (``SizingParams``: ``sizing_mode`` / ``size`` / ``max_symbol_allocation`` in
+  ``strategy_params``) computes the equity-based share count
+  (``qty = base*size/price``, capped by cash and per-symbol allocation). The
+  strategy still bounds its stop distance to the risk budget via
+  ``cap_stop_dist`` against the equity-scaled notional.
 * ``ctx.long(sl=, tp=)`` interprets its args as *fractional percentages* of
   entry converted via ``sl_tp_from_pct`` (absolute = entry*(1±pct)), NOT as
   absolute prices. The original computes absolute ``stop_loss``/``target``
@@ -77,15 +79,6 @@ class CupHandleResult:
     entry_ok: bool
     handle: Optional[Handle]
     reason: str
-
-
-def per_symbol_qty(
-    initial_capital: float, per_symbol_size: float, price: float
-) -> float:
-    """Shares for a fixed ``per_symbol_size`` fraction of total capital."""
-    if initial_capital <= 0 or price <= 0 or per_symbol_size <= 0:
-        return 0.0
-    return round(initial_capital * per_symbol_size / price, 4)
 
 
 def cap_stop_dist(
@@ -481,8 +474,14 @@ def _maybe_enter(ctx: StrategyContext, sym: str, arr: dict[str, pd.Series]) -> N
     if atr_val <= 0:
         atr_val = max(handle.cup_depth * 0.1, 1e-9)
 
+    # Equity-scaled notional used to bound the stop distance to the risk
+    # budget. Mirrors the engine's shared equity sizing (`base*size/price`)
+    # so the stop cap tracks the share count the engine will actually fill.
     initial = ctx.state.portfolio.initial_capital
-    qty = per_symbol_qty(initial, params.per_symbol_size, entry_price)
+    equity = ctx.state.portfolio.cash  # conservative proxy post-commit
+    if equity <= 0 or entry_price <= 0:
+        return
+    qty = equity * params.per_symbol_size / entry_price
     if qty <= 0 or ctx.state.portfolio.cash <= 0:
         return
 
@@ -515,9 +514,11 @@ def _maybe_enter(ctx: StrategyContext, sym: str, arr: dict[str, pd.Series]) -> N
 
     ctx.shared["handle_lows"][sym] = handle.low
     ctx.shared["cooldowns"][sym] = params.cooldown_bars
+    # No explicit ``size``: the engine's shared sizing layer (``SizingParams``)
+    # computes the equity-based share count from ``sizing_mode``/``size``/
+    # ``max_symbol_allocation`` in the strategy config.
     ctx.long(
         sym,
-        size=params.per_symbol_size,
         sl=sl_pct,
         tp=tp_pct,
         reason=(

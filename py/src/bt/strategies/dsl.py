@@ -38,13 +38,10 @@ import sys
 from types import FunctionType
 from typing import Any, Callable, TYPE_CHECKING
 
-from src.bt.state import ActionType, TradeSignal
+from src.bt.state import ActionType, TradeSignal, BacktestState, Candle, Position
 from src.bt.strategies.series import SeriesView
 from src.bt.strategies.ta_context import OhlcvView, TaContext
 from src.bt.strategies.utils import sl_tp_from_pct
-
-if TYPE_CHECKING:
-    from src.bt.state import BacktestState, Candle, Position
 
 
 class StrategyContext:
@@ -81,8 +78,8 @@ class StrategyContext:
 
     def __init__(
         self,
-        state: "BacktestState",
-        candle: "Candle",
+        state: BacktestState,
+        candle: Candle,
         params: Any,
         ta: TaContext,
         symbols: tuple[str, ...],

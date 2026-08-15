@@ -104,7 +104,7 @@ async def download(
 @click.option(
     "--universe",
     "-U",
-    help="Universe file name (e.g. 'nsdq', 'sector'). Overrides positional SYMBOLS.",
+    help="Universe file PATH (e.g. 'universes/nsdq.json'). Overrides positional SYMBOLS.",
 )
 @click.option(
     "--from", "-f", "from_date", required=True, help="Start date (YYYY-MM-DD)"

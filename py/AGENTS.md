@@ -42,6 +42,82 @@ uv run ibkr bt optimize strats/trend.json '{...grid...}' --folds 4 --workers 4
 # capped at the unit count, so oversized --workers is harmless.
 ```
 
+## Local Data — the candle DB (verify presence here, don't snoop)
+
+~All ~300 tickers plus ~1.8M hourly candles already live in the local candle DB.
+Before assuming data is missing, check it here first — most "is data present?"
+questions are answered by one query.
+
+### The database
+
+- **Path:** SQLite at `../data/db.sqlite` — **relative to the repo's parent**
+  (`/home/nasrt/Documents/code/dev/ibkr/data/db.sqlite`), NOT inside this `py/`
+  dir. ~166 MB, `journal_mode=wal`.
+  - `src/data/db.py::_DEFAULT_DB_PATH` resolves it file-relative
+  (correct — use this).
+  - `src/data/types.py::db_path` resolves it via
+  `os.getcwd()/../data/...`, so it depends on the CWD being the repo's parent.
+  Prefer `query_candles`/`get_connection` from `src.data.db` over the peewee
+  instance.
+- `sqlite3` CLI may not be installed. Query with Python instead:
+  `python -c "import sqlite3; c=sqlite3.connect('../data/db.sqlite')"`, or use
+  the CLI below.
+
+### Schema
+
+- **`symbol`**: `conid` (PK), `ticker`, `name`, `market`, `currency`. ~309 rows.
+- **`candle`**: `id` (PK autoincrement), `ticker`, `conid`, `timestamp` (ms epoch),
+  `open`, `high`, `low`, `close`, `volume`. Indexed on `(ticker, timestamp)` —
+  always filter by `ticker`, never join through `symbol.conid` (that join is
+  unindexed and ~20x slower). `ticker` is stored UPPERCASE.
+- Two migration tables (`kysely_migration`) — schema versioning, ignore.
+
+### Quick verification
+
+```bash
+uv run ibkr data query SPY                    # recap: date range, rows, gaps>48h
+uv run ibkr data query AAPL --bar 1d          # resampled agg
+uv run ibkr data query --universe universes/nsdq.json   # whole universe recap
+# Note: --universe/-U takes a FILE PATH (e.g. universes/nsdq.json), not a bare
+# universe name. `ibkr data query/dl/preview` all go through
+# load_universe_config() which opens the string as a path verbatim.
+# Raw CLI: `ibkr data` subcommands are dl / preview / query (see src/data/cli.py)
+```
+
+### What's actually in there (snapshot as of 2026-08-15)
+
+- **201 symbols with candle data**, ~**1,822,306** rows total.
+- **Native granularity is 1h** for every symbol (median gap = 3600000 ms). Other
+  bars (1d, 4h, …) are **resampled on read** from 1h by `src.data/resample.py`,
+  never stored separately.
+- **Deepest history**: SPY from **2004-01-23** (40,882 rows); many core tickers
+  (AAPL, MSFT, NVDA, GOOGL, etc.) go back to **2019-11** (~11.8k rows, ~12k for
+  META). Long-history tickers (~20k rows, back to **2014**) include SPY, QQQ,
+  GDX, GL.D, SLV, UNG, USO, UUP, XLE/XLF/XLK/XLU/XLV/XLY/XLB, SHV, DBA, REET.
+- **Full-core group** (~11.77k rows, 2019-11-15 → 2026-08-07): AAPL, ADBE, ADI,
+  AMAT, AMD, AMGN, AMZN, AVGO, BKNG, BKR, CCEP, CDNS, CMCSA, COST, CRWD, CSCO,
+  CSX, CTAS, DDOG, DXCM, EXC, FANG, FAST, FTNT, GEHC-partial, GILD, GOOG/GOOGL,
+  HON, IDXX, INTC, INTU, ISRG, KDP, KHC, KLAC, LIN, LITE, LRCX, MAR, MCHP,
+  MDLZ, MELI, MNST, MPWR, MRVL, MSFT, MSTR, MU, NFLX, NVDA, NXPI, ODFL, ORLY,
+  PANW, PAYX, PCAR, PDD, PEP, PYPL, QCOM, REGN, ROP, ROST, SBUX, SHOP, SNPS,
+  STX, TER, TMUS, TRI, TSLA, TTWO, TXN, VRTX, WBD, WDAY, WDC, WMT, XEL.
+- **Early-window group** since their IPO / later synced (fewer rows than the
+  core): ABNB (2020-12), APP (2021-04), ARM (2023-09), BTC (2024-07), CEG
+  (2022-01), COIN (2023-11), DASH (2020-12), PLTR (2020-09), RKLB (2020-11),
+  GTLB (2021-12), ALAB (2024-03), NBIS (2024-10), CRWV (2025-03), SNDK
+  (2025-02), HONA (2026-06), SPCX (2026-06), FER (2024-05).
+- **Short-2000-row group (~2024-12-26 → 2026-02-20)**, mostly ETFs/bonds recently
+  synced with a 2000-row cap: AGG, BIL, BND, BNDX, BSV, DFAC, DGRO, EFA, IBIT,
+  IEMG, IJH, ITOT, IVE, IVV, IVW, IWB, IWD, IWF, IWR, IXUS, JEPI, IWM (11k),
+  MBB, MUB, QQQM, RSP, SCHD, SCHF, SCHG, SCHX, SGOV, SMH (2742), SPDW, SPYG,
+  SPYM, VB, VCSH, VEA, VEU, VGIT, VGT, VIG, VNQ-err VNQ full, VO, VOO, VTI,
+  VTV, VUG, VV, VXUS, VYM. Several end earlier (2026-02-20 vs the 08-07 core) —
+  these are the most likely to need a refresh via `ibkr data dl`.
+
+Don't re-derive this list from the DB per task; trust the snapshot above. If you
+need a fresh one: `SELECT ticker, COUNT(*), MIN(timestamp), MAX(timestamp) FROM
+candle GROUP BY ticker ORDER BY ticker`.
+
 ## Language & Toolchain
 
 - **Python 3.14+** (required)

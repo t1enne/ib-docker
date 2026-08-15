@@ -19,6 +19,14 @@ from src.indicators.ta import (
     adx,
 )
 
+from src.indicators.volume_profile import (
+    volume_profile,
+    VolumeProfile,
+    OnlineVolumeProfile,
+    VolumeProfileSnapshot,
+    OnlineVP,
+)
+
 from src.indicators.kalman.pure import run_filter, compute_stats, run_pairs_kalman
 from src.indicators.kalman.online import PairsKalmanOnline
 from src.indicators.kalman.strategy import OnlinePairs, OnlinePairsResult
@@ -54,6 +62,12 @@ __all__ = [
     "plus_di",
     "minus_di",
     "adx",
+    # Volume Profile
+    "volume_profile",
+    "VolumeProfile",
+    "OnlineVolumeProfile",
+    "VolumeProfileSnapshot",
+    "OnlineVP",
     # Kalman
     "run_filter",
     "compute_stats",

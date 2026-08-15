@@ -131,6 +131,12 @@ def load_candles(
     # timestamps.
     df = df.sort_index()
 
+    # ``pd.Timedelta.max`` is the documented "skip the check" sentinel — don't
+    # scan for gaps when the caller explicitly opted out. (NB: pandas returns a
+    # fresh ``Timedelta.max`` object per access, so compare by value, not id.)
+    if max_gap == pd.Timedelta.max:
+        return df
+
     report = detect_gaps(df, list(symbols), max_gap=max_gap)
     if report:
         lines = [

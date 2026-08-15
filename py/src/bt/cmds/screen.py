@@ -3,12 +3,68 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import click
 import pandas as pd
 
 from src.bt.cmds._shared import cli_ts, parse_param_grid
 from src.bt.table import render_from_dicts
+
+if TYPE_CHECKING:
+    from src.bt.screen.types import ScreenResult, ScreenState
+
+#: Common per-symbol metrics shown as extra table columns, uniform across screens.
+COMMON_COLS = ["ema_50", "ema_100", "atr_14", "rsi_14", "hi_52w", "lo_52w"]
+
+
+#: Column order for the printed table (common metrics appended after the core).
+TABLE_COLS = [
+    "interval",
+    "symbol",
+    "action",
+    "score",
+    "signals",
+    "timestamp",
+    *COMMON_COLS,
+]
+
+
+def _fmt(v: object) -> str:
+    """Format a metric value; NaN/None renders as empty."""
+    if v is None:
+        return ""
+    if not isinstance(v, (int, float, str)):
+        return ""
+    try:
+        f = float(v)
+    except ValueError:
+        return ""
+    if not pd.isna(f):
+        return f"{f:.2f}"
+    return ""
+
+
+def _common_metrics_for(
+    r: "ScreenResult", states: dict[str, "ScreenState"]
+) -> dict[str, str]:
+    """Pull the common metrics for ``r`` into ``{key: formatted}``.
+
+    Single-interval results already carry them in ``model_features``. The
+    multi-interval (TF-merged) results do not, so we fall back to computing
+    them from the first per-interval state that holds a frame for ``r.symbol``.
+    """
+    feats = getattr(r, "model_features", {}) or {}
+    if all(k in feats for k in COMMON_COLS):
+        return {k: _fmt(feats.get(k)) for k in COMMON_COLS}
+    for state in states.values():
+        frame = state.frame(r.symbol)
+        if frame is not None:
+            from src.bt.screen.metrics import common_metrics
+
+            m = common_metrics(frame)
+            return {k: _fmt(m.get(k)) for k in COMMON_COLS}
+    return {k: "" for k in COMMON_COLS}
 
 
 @click.command(name="screen")
@@ -92,6 +148,7 @@ def screen(
                 "score": f"{r.score:.3f}",
                 "signals": ", ".join(r.signals),
                 "timestamp": str(r.timestamp),
+                **_common_metrics_for(r, states),
             }
             for r in merged
         ]
@@ -99,6 +156,7 @@ def screen(
         rows = []
         for iv, state in states.items():
             for r in run_screen(state, screen_name, parsed_params):
+                feats = r.model_features or {}
                 rows.append(
                     {
                         "interval": iv,
@@ -107,6 +165,7 @@ def screen(
                         "score": f"{r.score:.3f}",
                         "signals": ", ".join(r.signals),
                         "timestamp": str(r.timestamp),
+                        **{k: _fmt(feats.get(k)) for k in COMMON_COLS},
                     }
                 )
         if top is not None:
@@ -116,11 +175,7 @@ def screen(
         click.echo("No signals.")
         return
 
-    for line in render_from_dicts(
-        ["interval", "symbol", "action", "score", "signals", "timestamp"],
-        rows,
-        align="<",
-    ):
+    for line in render_from_dicts(TABLE_COLS, rows, align="<"):
         click.echo(line)
 
 

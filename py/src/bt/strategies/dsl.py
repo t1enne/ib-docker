@@ -452,13 +452,20 @@ class _StrategyAdapter:
                     "holder per window) so `state.candles.strategy_state` is a "
                     f"dict for module {self.ctx_fn.__module__}."
                 )
+        # The engine only fires on_candle on base-interval candles (HTF-only
+        # candles skip signal generation), so ``candle.interval`` is the true
+        # signal interval at every call -- i.e. ``config.bars[0]`` regardless of
+        # the (per-strategy) decorator ``bars``. Derive the context interval from
+        # the candle so a config using a non-``bars`` base bar (e.g. "1h") stays
+        # consistent with the TaContext base interval. ``self.interval`` is kept
+        # for introspection/back-compat only.
         ctx = StrategyContext(
             state=state,
             candle=candle,
             params=params,
             ta=ta,
             symbols=symbols_from(state),
-            interval=self.interval,
+            interval=candle.interval or self.interval,
         )
         if holder is not None:
             ctx.shared = holder

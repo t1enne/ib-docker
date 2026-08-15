@@ -344,6 +344,93 @@ def test_symbols_from_dedups_across_intervals():
 
 
 # ---------------------------------------------------------------------------
+# non-1d base interval: context interval must track the candle, not the decorator
+# ---------------------------------------------------------------------------
+
+
+def _make_1h_state(df, idx=40):
+    """Build a real state+store+TaContext keyed on the ``1h`` interval (base).
+
+    Mirrors the engine's setup for a config whose ``bars[0]`` is ``1h``: the
+    TaContext base interval and the store/candle interval are ``1h``, while the
+    DSL strategy decorator still declares ``bars="1d"``.
+    """
+    from src.bt.engine.candle_store import CandleStore
+    from src.bt.engine.utils import merge_bt_state
+    from src.bt.state import create_initial_backtest_state
+    from src.bt.strategies.ta_context import TaContext
+
+    ta = TaContext.from_data(df, ("AAPL", "MSFT"), "1h")
+    n = len(df)
+    rows: dict = {}
+    for s in ("AAPL", "MSFT"):
+        arr = {
+            k: (np.empty(n) if k != "_len" else np.array([n]))
+            for k in ("timestamp", "open", "high", "low", "close", "volume", "_len")
+        }
+        arr["timestamp"] = df.index.to_numpy().astype("datetime64[ms]")
+        for f in ("open", "high", "low", "close", "volume"):
+            arr[f] = df[(s, f)].to_numpy(dtype=float)
+        rows[(s, "1h")] = arr
+    store = CandleStore(rows)
+    store.attach_ta(ta)
+    ta.bind(store)
+    store.advance(df.index[idx])
+    state = create_initial_backtest_state(
+        symbols=["AAPL", "MSFT"],
+        initial_capital=10000.0,
+        start_timestamp=df.index[0],
+        rolling_window_size=None,
+    )
+    state = merge_bt_state(state, dict(candles=store))
+    candle = Candle(
+        timestamp=df.index[idx],
+        symbol="MSFT",
+        open=float(df[("AAPL", "open")].iloc[idx]),
+        high=float(df[("AAPL", "high")].iloc[idx]),
+        low=float(df[("AAPL", "low")].iloc[idx]),
+        close=float(df[("AAPL", "close")].iloc[idx]),
+        volume=1000.0,
+        interval="1h",
+    )
+    return state, candle
+
+
+def test_adapter_context_tracks_candle_interval_for_1h():
+    """A DSL strategy decorated ``bars="1d"`` serving a ``1h`` base candle must
+    build a StrategyContext whose interval is ``1h`` (matching the TaContext base
+    interval), so ohlcv/price/close do not raise the TaContext interval mismatch.
+    """
+    from src.bt.strategies.dsl import _StrategyAdapter
+
+    captured: dict = {}
+
+    @strategy(bars="1d")  # decorator interval intentionally differs from the base bar
+    def _probe_1h(ctx: StrategyContext):
+        captured["ctx"] = ctx
+        ctx.ta.ema("AAPL", 9)
+
+    adapter = _probe_1h
+    assert isinstance(adapter, _StrategyAdapter)
+    df = _df(60)
+    state, candle = _make_1h_state(df, idx=30)
+
+    signals = adapter(state, candle, object())
+    assert signals == []
+    assert candle.interval == "1h"
+
+    # The context the adapter built tracked the candle interval, not the "1d"
+    # decorator, so the 1h base is served without a TaContext mismatch.
+    ctx = captured["ctx"]
+    assert ctx.interval == "1h"
+    view = ctx.ohlcv("AAPL")
+    assert len(view.close) > 0
+    assert ctx.price("AAPL") > 0
+    # Regression guard: the old bug surfaced here (ValueError from TaContext).
+    assert len(ctx.ta.ema("AAPL", 9)) > 0
+
+
+# ---------------------------------------------------------------------------
 # stateful mode: ctx.shared persists across candles, resets between runs
 # ---------------------------------------------------------------------------
 

@@ -43,10 +43,17 @@ _SNAP_KEY = "vp_snaps"  # dict[sym -> VolumeProfileSnapshot] (once/bar)
 _COOLDOWN_KEY = "cooldowns"
 
 SizingMode = Literal["risk", "alloc"]
+Direction = Literal["long", "short", "both"]
 
 
 @dataclass(frozen=True)
 class Params(StrategyParams):
+    # -- direction gating --
+    # Which side of the VP breakouts the strategy may trade. "both" keeps the
+    # original long+short behaviour; "long"/"short" restrict entries so the
+    # same code path serves the long leg, the bear (short) leg, and the
+    # combined book — the plan's A/B design (no fork).
+    direction: Direction = "both"
     # -- online volume profile --
     vp_window: int = 100
     num_bins: int = 50
@@ -299,6 +306,10 @@ def _enter(ctx: StrategyContext, sym: str, params: Params) -> None:
     )
     long_breakout = long_breakout and _regime_ok(ctx, sym, True, params)
     short_breakdown = short_breakdown and _regime_ok(ctx, sym, False, params)
+    # Direction gating ("short" suppresses long entries, "long" suppresses
+    # short entries, "both" lets both through).
+    long_breakout = long_breakout and params.direction in ("long", "both")
+    short_breakdown = short_breakdown and params.direction in ("short", "both")
     if not long_breakout and not short_breakdown:
         return
 

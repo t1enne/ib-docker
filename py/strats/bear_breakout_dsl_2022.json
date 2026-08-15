@@ -1,0 +1,32 @@
+{
+  "name": "bear-breakout-dsl-2022",
+  "training_start": "2019-06-01",
+  "training_end": "2021-12-31",
+  "trading_start": "2022-01-01",
+  "trading_end": "2025-12-31",
+  "commission": 0.05,
+  "initial_capital": 100000,
+  "strategy_type": "vp_breakout_dsl",
+  "bars": ["1d"],
+  "benchmark_symbols": ["SPY"],
+  "symbols": ["SPY", "QQQ", "IWM", "DIA", "TLT", "GLD"],
+  "strategy_params": {
+    "direction": "both",
+    "vp_window": 350,
+    "num_bins": 50,
+    "value_area_pct": 0.7,
+    "vp_warmup": 60,
+    "vol_period": 20,
+    "vol_expand_mult": 1.0,
+    "wick_check": 0.5,
+    "trend_lookback": 50,
+    "regime_lookback": 20,
+    "regime_er": 0.1,
+    "sizing_mode": "risk",
+    "symbol_alloc": 0.2,
+    "atr_period": 14,
+    "atr_mult": 1.5,
+    "risk_pct": 0.03,
+    "cooldown_bars": 5
+  }
+}

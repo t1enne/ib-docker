@@ -7,12 +7,23 @@
   "commission": 0.05,
   "initial_capital": 100000,
   "strategy_type": "vp_breakout_dsl",
-  "bars": ["1d"],
-  "benchmark_symbols": ["SPY"],
-  "symbols": ["SPY", "QQQ", "IWM", "DIA", "TLT", "GLD"],
+  "bars": [
+    "1d"
+  ],
+  "benchmark_symbols": [
+    "SPY"
+  ],
+  "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "TLT",
+    "GLD"
+  ],
   "strategy_params": {
     "direction": "both",
-    "vp_window": 350,
+    "vp_window": 300,
     "num_bins": 50,
     "value_area_pct": 0.7,
     "vp_warmup": 60,
@@ -21,7 +32,7 @@
     "wick_check": 0.5,
     "trend_lookback": 50,
     "regime_lookback": 20,
-    "regime_er": 0.1,
+    "regime_er": 0.15,
     "sizing_mode": "risk",
     "symbol_alloc": 0.2,
     "atr_period": 14,

@@ -247,8 +247,25 @@ class OnlineVolumeProfile:
 
     def _snapshot(self) -> VolumeProfileSnapshot:
         ready = self._bin_volume is not None and len(self._candles) >= self._warmup_bars
-        assert self._bin_lo is not None and self._bin_hi is not None
-        assert self._mids is not None and self._bin_volume is not None
+        # No valid candle has ever been fed (e.g. virgin profile, or only NaNs).
+        if (
+            self._bin_lo is None
+            or self._bin_hi is None
+            or self._mids is None
+            or self._bin_volume is None
+        ):
+            return VolumeProfileSnapshot(
+                bin_price=np.array([], dtype=float),
+                volume=np.array([], dtype=float),
+                total_volume=self._total,
+                poc=None,
+                poc_volume=0.0,
+                vah=None,
+                val=None,
+                value_volume=0.0,
+                n_candles=len(self._candles),
+                ready=False,
+            )
 
         if not ready:
             return VolumeProfileSnapshot(

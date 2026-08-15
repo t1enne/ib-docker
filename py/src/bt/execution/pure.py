@@ -19,8 +19,24 @@ def execute_signal(
     When signal.fill_at_next_open is True, uses tick.open as the base price
     (realistic: signals generated at close fill at next bar's open).
     Otherwise uses signal.price (same-bar fill at signal generation price).
+
+    A next-open **close** that models an intra-bar stop trigger
+    (``fill_guard_price`` set) fills at the adverse worse-of the guard and the
+    next open, mirroring :func:`execute_risk_event` gap-through math: a long
+    close (sell) fills at ``min(guard, open)`` (the stop level, or lower if the
+    bar gapped down through it), a short close (buy) at ``max(guard, open)``.
     """
     base_price = tick.open if signal.fill_at_next_open else signal.price
+    if (
+        signal.action == ActionType.close
+        and signal.fill_at_next_open
+        and signal.fill_guard_price is not None
+        and signal.fill_guard_is_long is not None
+    ):
+        if signal.fill_guard_is_long:
+            base_price = min(signal.fill_guard_price, tick.open)
+        else:
+            base_price = max(signal.fill_guard_price, tick.open)
     spread_bps = params.spread_bps or 0.01
     base_spread = base_price * (spread_bps / 10000)
 

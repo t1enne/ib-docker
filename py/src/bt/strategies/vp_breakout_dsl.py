@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Mapping
 
 import numpy as np
 
+from src.bt.state.types import Position
 from src.indicators.volume_profile.strategy import OnlineVP
 from src.bt.size.pure import risk_sized_qty
 from src.bt.strategies.dsl import strategy, StrategyContext
@@ -73,6 +74,9 @@ class Params(StrategyParams):
     atr_period: int = 14
     atr_mult: float = 2.0  # stop = atr_mult * ATR against entry
     risk_pct: float = 0.005
+    max_gross_exposure: float = (
+        1.0  # aggregate |notional| cap, fraction of initial capital
+    )
     # -- misc --
     cooldown_bars: int = 5
 
@@ -163,6 +167,25 @@ def _snap(ctx: StrategyContext, sym: str) -> object:
     return ctx.shared.get(_SNAP_KEY, {}).get(sym)
 
 
+def _gross_exposure(
+    initial_capital: float,
+    positions: Mapping[str, tuple[Position, ...]],
+) -> float:
+    """Aggregate |gross notional| across all open lots / initial capital.
+
+    Sums ``abs(qty) * last_price`` for every open lot (longs and shorts both
+    count positively — gross exposure is the capital at work, not net). Pure,
+    so a strategy can call it directly on ``ctx.state.portfolio``.
+    """
+    if initial_capital <= 0:
+        return 0.0
+    total = 0.0
+    for lots in positions.values():
+        for pos in lots:
+            total += abs(float(pos.qty)) * float(pos.last_price)
+    return total / initial_capital
+
+
 def _size(ctx: StrategyContext, params: Params, price: float, atr_val: float) -> float:
     """0..1 capital fraction to deploy per ``sizing_mode``."""
     if params.sizing_mode == "alloc":
@@ -214,9 +237,16 @@ def on_candle(ctx: StrategyContext):
         vah = getattr(snap, "vah", None)
         val = getattr(snap, "val", None)
         is_long = pos.qty >= 0
-        reason = _exit(ctx, sym, is_long, close, vah, val, params)
-        if reason:
-            ctx.close(sym, reason=reason)
+        outcome = _exit(ctx, sym, is_long, close, vah, val, params)
+        if outcome:
+            reason, guard = outcome
+            if guard is None:
+                ctx.close(sym, reason=reason)
+            else:
+                # Model the intra-bar stop touch honestly: the engine fills a
+                # guarded close at the adverse worse-of (stop, next open) rather
+                # than delaying to next open and letting a gap blur the risk cap.
+                ctx.close(sym, reason=reason, guard_price=guard)
             shared[_COOLDOWN_KEY][sym] = params.cooldown_bars
 
     # ---- Entries -----------------------------------------------------------
@@ -238,8 +268,14 @@ def _exit(
     vah: object,
     val: object,
     params: Params,
-) -> str | None:
-    """Revert into the value area (tag stop) or an ATR stop."""
+) -> tuple[str, float | None] | None:
+    """Revert into the value area (tag stop) or an ATR stop.
+
+    Returns ``(reason, stop_guard)``; ``stop_guard`` is only set for the
+    ATR-stop exit (the level the engine must fill at or worse — see
+    ``execute_signal``). Direction is derived from the position inside the
+    DSL's ``close``.
+    """
     # Manual ATR stop (engine SL fields are informational).
     pos = ctx.position(sym)
     if pos is None:
@@ -253,14 +289,14 @@ def _exit(
     o = ctx.ohlcv(sym)
     if is_long:
         if float(o.low[-1]) <= pos.entry_price - stop_dist:
-            return "[stop] ATR stop hit"
+            return ("[stop] ATR stop hit", pos.entry_price - stop_dist)
         if isinstance(vah, float) and close < vah:
-            return "[tag] long reverted into value area"
+            return ("[tag] long reverted into value area", None)
     else:
         if float(o.high[-1]) >= pos.entry_price + stop_dist:
-            return "[stop] ATR stop hit"
+            return ("[stop] ATR stop hit", pos.entry_price + stop_dist)
         if isinstance(val, float) and close > val:
-            return "[tag] short reverted into value area"
+            return ("[tag] short reverted into value area", None)
     return None
 
 
@@ -316,6 +352,22 @@ def _enter(ctx: StrategyContext, sym: str, params: Params) -> None:
     size = _size(ctx, params, price, atr_val)
     if size <= 0:
         return
+
+    # Aggregate gross-exposure cap (Priority 4, "portfolio construction"). The
+    # per-position size only risks ``risk_pct`` of *current cash* per name, so
+    # without this the book has no portfolio-level notional ceiling when several
+    # names are up concurrently. Skip this entry if it would push total |gross|
+    # notional (incl. the candidate lot) past ``max_gross_exposure``.
+    if params.max_gross_exposure < 1.0 and params.max_gross_exposure > 0.0:
+        if (
+            _gross_exposure(
+                ctx.state.portfolio.initial_capital,
+                ctx.state.portfolio.positions,
+            )
+            + size
+            >= params.max_gross_exposure
+        ):
+            return
 
     if long_breakout:
         ctx.long(

@@ -293,12 +293,19 @@ class StrategyContext:
         """
         self._emit(ActionType.short, sym, size, sl, tp, reason, tag)
 
-    def close(self, sym: str, reason: Any = "close") -> None:
+    def close(
+        self, sym: str, reason: Any = "close", guard_price: float | None = None
+    ) -> None:
         """Close **every** open lot in ``sym`` (invoke-all).
 
         Emits one position-targeted ``close`` signal per open lot — matching
         the design's "``close`` = invoke-all, ``long`` = always-new" rule with no
         ``exclusive_orders`` ambiguity. A no-op when ``sym`` is flat.
+
+        ``guard_price``, when given, models an intra-bar stop trigger: each
+        close signal carries it plus the position side so the engine fills at
+        the adverse worse-of ``(guard, next_open)`` (see ``execute_signal``)
+        instead of naively at next open.
 
         The multiple emits share a symbol bucket; each carries its own
         ``position_id`` and fills at next bar's open, so the engine's per-symbol
@@ -318,6 +325,10 @@ class StrategyContext:
                     price=price,
                     reason=reason,
                     position_id=pos.position_id,
+                    fill_guard_price=guard_price,
+                    fill_guard_is_long=(
+                        None if guard_price is None else pos.type == ActionType.long
+                    ),
                 )
             )
 

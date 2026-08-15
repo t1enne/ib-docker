@@ -76,17 +76,30 @@ class OnlineVP:
         symbol: str,
         interval: str,
     ) -> VolumeProfileSnapshot:
-        """Feed ``symbol``'s latest candle at ``interval`` into the profile.
+        """Feed ``symbol``'s candles *up to* (not including) the latest bar.
 
-        Reads the newest cursor-safe bar for ``(symbol, interval)`` from
-        ``state.candles`` and calls :meth:`OnlineVolumeProfile.observe`. If the
-        symbol has no candles yet, returns the current snapshot unchanged.
+        Reads the cursor-safe ``(symbol, interval)`` frame from ``state.candles``
+        (which the engine truncates to include the current bar) and feeds only
+        the **prior** bars into the profile, then returns the derived snapshot.
+
+        This guarantees no same-bar lookahead: the strategy tests the current
+        bar's close against a Value Area built from bars strictly *before* it,
+        so a sharp current bar cannot drag VAH/VAL toward its own extreme and
+        self-confirm a breakout. See the Priority-1 regression test for the
+        minimal-data proof that this removes the dependency.
+
+        If the symbol has fewer than two candles yet (or none), the profile is
+        left unchanged and the current snapshot is returned.
         """
         df = state.candles.get((symbol, interval))
         if df is None or len(df) < 1:
             return self._profile.snapshot()
 
-        last = cast(pd.Series, df.iloc[-1])
+        feed = df.iloc[:-1]  # exclude the current bar -> prior-bar profile
+        if len(feed) < 1:
+            return self._profile.snapshot()
+
+        last = cast(pd.Series, feed.iloc[-1])
         high = float(last["high"])
         low = float(last["low"])
         volume = float(last["volume"])

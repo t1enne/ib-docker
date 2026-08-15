@@ -133,6 +133,14 @@ class TradeSignal:
     stop_loss: Optional[float] = None  # explicit SL for new positions
     take_profit: Optional[float] = None  # explicit TP for new positions
     tag: str = ""  # optional strategy-facing lot label (stored on the Position)
+    # For next-open **close** signals that model an intra-bar stop trigger: the
+    # level the stop fired at, plus the position side. When both are set,
+    # ``execute_signal`` fills at the adverse worse-of the stop level and the
+    # next open (mirroring ``execute_risk_event`` gap-through math) instead of
+    # naively at next open — so a gap through the stop is not understated and a
+    # delayed fill never improves on the intended intra-bar stop exit.
+    fill_guard_price: Optional[float] = None
+    fill_guard_is_long: Optional[bool] = None
 
 
 @dataclass(frozen=True)

@@ -4,14 +4,9 @@ Only functions with >= 1 consumer remain. Visualization, live-trading, and ORM h
 were moved to their respective modules or deleted.
 """
 
-import os
-
-from pathlib import Path
-
 from typing import Any, Dict, List, Optional, Union, cast
 import pandas as pd
 import numpy as np
-import sqlite3
 
 from src.data.resample import resample_ohlcv
 
@@ -26,30 +21,32 @@ def get_local_candles(
     end_date: Optional[pd.Timestamp] = None,
     bar: str = "1h",
 ) -> pd.DataFrame:
-    con = sqlite3.connect("../data/db.sqlite")
+    from src.data.db import get_connection  # lazy: avoid src.data pkg-init cycle
+
+    con = get_connection()
     cur = con.cursor()
     _start = start_date if start_date else _DEFAULT_START
     _end = end_date if end_date else _DEFAULT_END
     _start = cast(pd.Timestamp, _start)
     _end = cast(pd.Timestamp, _end)
-    _sd = int(_start.timestamp() * 1000)
+    _sd = int(_start.timestamp() * 1000) if _start else 0
     _ed = int(_end.timestamp() * 1000)
-    from_filter = f"and c.timestamp >= {_sd}" if _sd else ""
-    to_filter = f"and c.timestamp <= {_ed}" if _ed else ""
-    q = f"""select s.ticker as symbol,
-                c.timestamp,
-                c.open,
-                c.high,
-                c.low,
-                c.close,
-                c.volume
-            from candle c left join symbol s
-            on c.conid = s.conid
-            where s.ticker = UPPER('{symbol}')
-            {from_filter}
-            {to_filter}
-            """
-    res = cur.execute(q)
+
+    q = """
+        select ticker as symbol,
+               timestamp,
+               open,
+               high,
+               low,
+               close,
+               volume
+        from candle
+        where ticker = UPPER(?)
+          and timestamp >= ?
+          and timestamp <= ?
+        order by timestamp asc
+    """
+    res = cur.execute(q, (symbol, _sd, _ed))
     data = res.fetchall()
     con.close()
     columns = pd.Index(

@@ -266,11 +266,18 @@ def mfi(
     money_flow_sign = np.sign(typical_price.diff())
     signed_money_flow = raw_money_flow * money_flow_sign
 
+    # Positive and negative flows are both expressed as *magnitudes* (>= 0);
+    # negative flow sums the absolute size of the money-flow that left on
+    # down-bars. Negating before the mask keeps the denominator positive so
+    # ``money_ratio`` stays in [0, inf) and MFI is bounded to 0..100.
     positive_flow = (
         signed_money_flow.where(signed_money_flow > 0, 0).rolling(window=window).sum()
     )
     negative_flow = (
-        signed_money_flow.where(signed_money_flow < 0, 0).rolling(window=window).sum()
+        (-signed_money_flow)
+        .where(signed_money_flow < 0, 0)
+        .rolling(window=window)
+        .sum()
     )
 
     money_ratio = positive_flow / negative_flow

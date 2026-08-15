@@ -40,18 +40,20 @@ def query_candles(
     _sd = int(start_ts.timestamp() * 1000) if start_ts else None
     _ed = int(end_ts.timestamp() * 1000) if end_ts else None
 
-    from_clause = f"AND c.timestamp >= {_sd}" if _sd else ""
-    to_clause = f"AND c.timestamp <= {_ed}" if _ed else ""
+    from_clause = f"AND timestamp >= {_sd}" if _sd else ""
+    to_clause = f"AND timestamp <= {_ed}" if _ed else ""
 
+    # Query candle.ticker directly (indexed, uppercase as stored) rather than a
+    # join through the symbol table: the candle.conid -> symbol.conid lookup is
+    # unindexed and makes the load ~20x slower.
     q = f"""
-        SELECT s.ticker AS symbol,
-               c.timestamp,
-               c.open, c.high, c.low, c.close, c.volume
-        FROM candle c
-        LEFT JOIN symbol s ON c.conid = s.conid
-        WHERE s.ticker = UPPER('{symbol}')
+        SELECT ticker AS symbol,
+               timestamp,
+               open, high, low, close, volume
+        FROM candle
+        WHERE ticker = UPPER('{symbol}')
         {from_clause} {to_clause}
-        ORDER BY c.timestamp ASC
+        ORDER BY timestamp ASC
     """
     rows = cur.execute(q).fetchall()
     con.close()

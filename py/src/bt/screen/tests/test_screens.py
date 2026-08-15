@@ -109,6 +109,10 @@ def test_run_screen_warmup_flat():
     assert len(results) == 1
     assert results[0].action == "flat"
     assert results[0].score == 0.0
+    # flat results still expose the common metric set
+    assert {"ema_50", "ema_100", "atr_14", "rsi_14", "hi_52w", "lo_52w"} <= set(
+        results[0].model_features.keys()
+    )
 
 
 def test_run_screen_scores_bullish_entry():
@@ -122,6 +126,10 @@ def test_run_screen_scores_bullish_entry():
     assert r.symbol == "A"
     assert r.action in ("long", "short", "flat")
     assert 0.0 <= r.score <= 1.0
+    # common metric set is always present
+    assert {"ema_50", "ema_100", "atr_14", "rsi_14", "hi_52w", "lo_52w"} <= set(
+        r.model_features.keys()
+    )
 
 
 def test_rank_sorts_desc_and_caps():

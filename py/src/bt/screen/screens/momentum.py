@@ -25,6 +25,7 @@ from typing import cast
 
 import pandas as pd
 
+from src.bt.screen.metrics import with_common_metrics
 from src.bt.screen.types import (
     ScreenParams,
     ScreenResult,
@@ -165,7 +166,7 @@ def on_state(state: ScreenState, params: Params) -> tuple[ScreenResult, ...]:
             continue
         closes = cast(pd.Series, df["close"])
         if len(closes) < params.warmup_bars or len(closes) < params.slow:
-            results.append(_flat(state.ts, symbol))
+            results.append(_flat(state.ts, symbol, df))
             continue
 
         trend = _trend_label(
@@ -209,10 +210,13 @@ def on_state(state: ScreenState, params: Params) -> tuple[ScreenResult, ...]:
                 score=score,
                 action=action,
                 signals=tuple(signals),
-                model_features={
-                    "momentum": mom if mom is not None else 0.0,
-                    "vol_ratio": _vol_ratio(closes),
-                },
+                model_features=with_common_metrics(
+                    {
+                        "momentum": mom if mom is not None else 0.0,
+                        "vol_ratio": _vol_ratio(closes),
+                    },
+                    df,
+                ),
             )
         )
     return tuple(results)
@@ -231,12 +235,12 @@ def _vol_ratio(closes: pd.Series) -> float:
     return float(v.iloc[-1] / (closes.mean() + 1e-9))
 
 
-def _flat(ts: pd.Timestamp, symbol: str) -> ScreenResult:
+def _flat(ts: pd.Timestamp, symbol: str, frame: pd.DataFrame) -> ScreenResult:
     return ScreenResult(
         symbol=symbol,
         timestamp=ts,
         score=0.0,
         action="flat",
         signals=("flat",),
-        model_features={},
+        model_features=with_common_metrics({}, frame),
     )

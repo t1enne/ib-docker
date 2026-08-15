@@ -227,12 +227,6 @@ processes). Model objects (e.g. `OnlinePairs`, `OnlineRegime`) live in
 `ctx.shared` and are fed per candle; there is no engine `model_updater`/
 `ModelState` channel.
 
-Legacy raw `on_candle` strategies may still hold state in a module-level
-`GLOBAL: dict` and expose `reset_global()` (which rebinds `GLOBAL` to a fresh
-dict). The runner calls `reset_global()` defensively before each unit of work
-for back-compat, but prefer the DSL — module-level state is shared across every
-run in a process and is the thing the per-run `ctx.shared` holder replaces.
-
 ### Always handle "no position" and "in position" paths
 
 ```python
@@ -275,9 +269,9 @@ uv run pytest src/bt/risk/tests/ -v
 
 All CLI groups under the `py` root command — also callable via `make run <subcommand> <args>`:
 
-| Group  | Commands                   | Description                                                        |
-| ------ | -------------------------- | ------------------------------------------------------------------ |
-| `data` | `dl`, `query`, `preview`   | Sync/download OHLCV from IBKR, query local DB                      |
+| Group  | Commands                            | Description                                                                  |
+| ------ | ----------------------------------- | ---------------------------------------------------------------------------- |
+| `data` | `dl`, `query`, `preview`            | Sync/download OHLCV from IBKR, query local DB                                |
 | `bt`   | `run`, `sweep`, `split`, `optimize` | Backtesting engine, hyperparam sweep, IS/OOS validation, walk-forward tuning |
 
 ### `bt sweep` — hyperparameter sweep
@@ -358,7 +352,7 @@ throughput knob, not a correctness one):
   the grid has dozens of combos or a large feed.
 - **`bt split`: only with many folds / heavy feeds** — each fold is just an
   IS+OOS pair, and the spawn overhead dwarfs a few folds (a 4-fold daily split
-  was *slower* pooled: 3s → 6s). Reach for `--workers` at `--folds 10+` or on
+  was _slower_ pooled: 3s → 6s). Reach for `--workers` at `--folds 10+` or on
   large intraday feeds.
 - **`bt optimize`: same as split** — fold-level parallelism (the in-fold IS
   sweep stays sequential). It is heavier than split (grid × folds), so it

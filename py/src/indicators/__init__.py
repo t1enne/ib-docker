@@ -44,6 +44,13 @@ from src.indicators.hmm.types import RegimeStats
 
 from src.indicators.macro import deflated_log_prices, init_macro_indicator
 
+from src.indicators.adaptive_entropy import (
+    adaptive_entropy,
+    OnlineAdaptiveEntropy,
+    AdaptiveEntropyConfig,
+    AdaptiveEntropyResult,
+)
+
 __all__ = [
     # TA
     "ema",
@@ -89,4 +96,9 @@ __all__ = [
     # Macro assets
     "init_macro_indicator",
     "deflated_log_prices",
+    # Adaptive entropy trend
+    "adaptive_entropy",
+    "OnlineAdaptiveEntropy",
+    "AdaptiveEntropyConfig",
+    "AdaptiveEntropyResult",
 ]

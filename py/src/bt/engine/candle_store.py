@@ -142,6 +142,30 @@ class CandleStore(Mapping[tuple[str, str], "DataFrame"]):
             return 0
         return int(cols["_len"][0])
 
+    def prior_ohlcv(self, sym: str, interval: str) -> dict[str, float] | None:
+        """OHLCV of the bar immediately *before* the cursor — O(1), no allocation.
+
+        Returns ``{open, high, low, close, volume}`` for the bar one behind the
+        current cursor bar, or ``None`` when fewer than two bars are visible.
+        This is the fast-path replacement for
+        ``store.get((sym, interval)).iloc[:-1].iloc[-1]`` (which builds a full
+        DataFrame per call) — the pre-cursor read the online volume profile
+        needs, so it no longer allocates a pandas frame per symbol per bar in
+        the backtest hot path. Indexing matches ``_build_df`` truncation: with
+        ``n = cursor_count`` visible rows, row ``n-1`` is the current cursor bar
+        and row ``n-2`` is the prior one.
+        """
+        cols = self._rows.get((sym, interval))
+        if cols is None:
+            return None
+        n = self.cursor_count(sym, interval)
+        if n < 2:
+            return None
+        i = n - 2
+        return {
+            f: float(cols[f][i]) for f in ("open", "high", "low", "close", "volume")
+        }
+
     # -- Mapping interface (full DataFrame, built on demand) ------------
 
     def _build_df(self, key: tuple[str, str]) -> DataFrame:

@@ -91,6 +91,16 @@ class OnlineVP:
         If the symbol has fewer than two candles yet (or none), the profile is
         left unchanged and the current snapshot is returned.
         """
+        # Fast path: read the prior bar straight off the numpy accumulator
+        # (O(1), no DataFrame build) — this is the strategy hot path and the
+        # full ``get().iloc[:-1].iloc[-1]`` allocates a frame per symbol/bar.
+        prior = getattr(state.candles, "prior_ohlcv", None)
+        if callable(prior):
+            row = prior(symbol, interval)
+            if row is None:
+                return self._profile.snapshot()
+            return self._profile.observe(row["low"], row["high"], row["volume"])
+
         df = state.candles.get((symbol, interval))
         if df is None or len(df) < 1:
             return self._profile.snapshot()

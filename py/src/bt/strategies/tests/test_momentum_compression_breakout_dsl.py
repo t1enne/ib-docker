@@ -14,6 +14,7 @@ from src.bt.engine.backtest import Backtest, run
 from src.bt.strategies import init_strat
 from src.bt.strategies.momentum_compression_breakout_dsl import (
     _big_move_ok,
+    open_position_count,
     Params,
 )
 from src.bt.strategies.series import SeriesView
@@ -185,3 +186,153 @@ def test_atr_stop_exit_fires_on_trap():
     assert len(trades) > 0, "trap data must open (then stop out) at least one trade"
     stop_reasons = [t for t in trades if "stop" in str(getattr(t, "close_reason", ""))]
     assert stop_reasons, "expected an ATR stop exit on the trap pattern"
+
+
+# ---------------------------------------------------------------------------
+# adaptive-entropy market-regime gate
+# ---------------------------------------------------------------------------
+
+
+def _regime_cfg(regime: str) -> StrategyConfig:
+    """Config with an observer ``regime`` symbol + AE market gate."""
+    cfg = _cfg()
+    d = dict(cfg.strategy_params)
+    d.update(
+        {
+            "regime_symbol": regime,
+            "regime_trend_min": 1,
+            "regime_min_strength": 0.0,
+            "ae_lookback": 10,
+            "ae_num_bins": 8,
+        }
+    )
+    # observer index's data must be fed so the AE gate can read it.
+    return StrategyConfig(
+        name=cfg.name,
+        strategy_type=cfg.strategy_type,
+        symbols=list(cfg.symbols) + [regime],
+        initial_capital=cfg.initial_capital,
+        commission=cfg.commission,
+        training_start=cfg.training_start,
+        training_end=cfg.training_end,
+        trading_start=cfg.trading_start,
+        trading_end=cfg.trading_end,
+        bars=cfg.bars,
+        strategy_params=d,
+    )
+
+
+def _regime_series(bull: bool, n: int = 300) -> np.ndarray:
+    """A monotonic index run: bull = rising (trend=+1), bear = falling."""
+    base = np.linspace(100.0, 160.0 if bull else 60.0, n)
+    # Small alternating walk so the entropy window is defined (rng > 0).
+    rng = np.random.default_rng(7)
+    walk = base + rng.normal(0, 0.6, n)
+    return np.maximum(walk, 1.0)
+
+
+def _two_symbol_bt(regime_bull: bool):
+    """Run strategy + AE gate on the AAPL setup with a bull or bear index."""
+    aapl = _mom_data(430)
+    idx = aapl.index
+    reg = _regime_series(regime_bull, n=len(idx))
+    reg_df = {
+        ("QQQ", "open"): reg * (1 - 0.001),
+        ("QQQ", "high"): reg + 0.4,
+        ("QQQ", "low"): reg - 0.4,
+        ("QQQ", "close"): reg,
+        ("QQQ", "volume"): np.full(len(reg), 1500.0),
+    }
+    reg_frame = pd.DataFrame(reg_df, index=idx)
+    reg_frame.columns = pd.MultiIndex.from_tuples(reg_frame.columns)
+    # Inner join on the shared timestamp grid so the observer index lines up 1:1
+    # with the AAPL 1d feed.
+    return aapl.join(reg_frame, how="left")
+
+
+def test_ae_gate_blocks_entry_in_bear_regime():
+    """A bearish index (rising stock would otherwise break out) must be gated out."""
+    df = _two_symbol_bt(regime_bull=False)
+    cfg = _regime_cfg("QQQ")
+    res = run(Backtest(cfg), df, strat_mod=init_strat(STRAT))
+    trades = res.pf.trades
+    # The strategy should not have opened length positions against a bear index.
+    assert len(trades) == 0, (
+        f"expected 0 trades with bearish AE gate, got {len(trades)}"
+    )
+
+
+def test_ae_gate_allows_entry_in_bull_regime():
+    """A bullish index must let the macro setup trade (control for the gate)."""
+    df = _two_symbol_bt(regime_bull=True)
+    cfg = _regime_cfg("QQQ")
+    res = run(Backtest(cfg), df, strat_mod=init_strat(STRAT))
+    trades = res.pf.trades
+    assert len(trades) > 0, "expected trades with a bullish AE regime gate"
+    # The observer index itself is never traded.
+    syms = {t.symbol for t in trades}
+    assert "QQQ" not in syms
+
+
+# ---------------------------------------------------------------------------
+# capital-allocation guards (max concurrent positions + notional cap)
+# ---------------------------------------------------------------------------
+
+
+def test_open_position_count_helper():
+    from dataclasses import replace
+    import pandas as pd
+    from src.bt.state import ActionType, create_initial_backtest_state, Position
+
+    state = create_initial_backtest_state(
+        symbols=["AAPL"],
+        initial_capital=100000.0,
+        start_timestamp=pd.Timestamp("2020-01-01"),  # ty: ignore[invalid-argument-type]
+    )
+    assert open_position_count(state.portfolio) == 0
+    pos = Position(
+        symbol="AAPL",
+        qty=10.0,
+        entry_price=100.0,
+        entry_time=pd.Timestamp("2020-01-02"),  # ty: ignore[invalid-argument-type]
+        stop_loss=None,
+        take_profit=None,
+        last_price=100.0,
+        type=ActionType.long,
+    )
+    p2 = replace(state.portfolio, positions={"AAPL": (pos,)})
+    assert open_position_count(p2) == 1
+
+
+def _replace_params(cfg: StrategyConfig, d: dict) -> StrategyConfig:
+    return StrategyConfig(
+        name=cfg.name,
+        strategy_type=cfg.strategy_type,
+        symbols=cfg.symbols,
+        initial_capital=cfg.initial_capital,
+        commission=cfg.commission,
+        training_start=cfg.training_start,
+        training_end=cfg.training_end,
+        trading_start=cfg.trading_start,
+        trading_end=cfg.trading_end,
+        bars=cfg.bars,
+        strategy_params=d,
+    )
+
+
+def test_max_positions_caps_concurrent_exposure():
+    """With max_positions capped, the strategy must not stack more concurrent
+    positions than the cap on a setup that produces many simultaneous breakouts."""
+    df = _two_symbol_bt(regime_bull=True)
+    cfg = _regime_cfg("QQQ")
+    d = dict(cfg.strategy_params)
+    d["max_positions"] = 3
+    cfg = _replace_params(cfg, d)
+    res = run(Backtest(cfg), df, strat_mod=init_strat(STRAT))
+    trades = res.pf.trades
+    life = [(t.entry_time, t.exit_time or t.entry_time) for t in trades]
+    times = sorted({ts for s, e in life for ts in (s, e)})
+    maxc = 0
+    for day in times:
+        maxc = max(maxc, sum(1 for s, e in life if s <= day < e))
+    assert maxc <= 3, f"max concurrent positions {maxc} exceeded cap 3"

@@ -30,15 +30,21 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.bt.size.pure import risk_sized_qty
+
+from src.bt.state import PortfolioState
+from src.bt.size.pure import equity_of, risk_sized_qty
 from src.bt.strategies.dsl import strategy, StrategyContext
 from src.bt.strategies.series import SeriesView
 from src.bt.strategies.types import StrategyParams
+from src.indicators.adaptive_entropy.online import OnlineAdaptiveEntropy
+from src.indicators.adaptive_entropy.types import AdaptiveEntropyConfig
+
 
 STRATEGY_TYPE = "momentum_compression_breakout_dsl"
 
 _BOX_KEY = "comp_boxes"  # ctx.shared[sym] -> _Box
 _COOLDOWN_KEY = "cooldowns"
+_REGIME_KEY = "ae_regime"  # ctx.shared[_REGIME_KEY] -> {'model', 'fed', 'result'}
 
 
 @dataclass(frozen=True)
@@ -65,6 +71,22 @@ class Params(StrategyParams):
     risk_pct: float = 0.01  # risk of current cash per trade
     warmup_bars: int = 80
     cooldown_bars: int = 5  # bars to wait after an exit before a re-entry
+    max_positions: int = (
+        8  # hard cap on concurrent open positions (aggregate risk bound)
+    )
+    max_position_notional: float = (
+        0.25  # single position's value cap (fraction of equity)
+    )
+    # -- adaptive-entropy market-regime gate ---------------------------------
+    # The AE indicator computed on ``regime_symbol`` (an index like QQQ/SPY)
+    # acts as an entry gate: longs only open while the index is in an
+    # AE-confirmed bull regime. ``regime_symbol`` is fed as an observer (it is
+    # never traded itself).
+    regime_symbol: str = "QQQ"  # index whose AE gates every entry
+    regime_trend_min: int = 1  # require AE trend >= this (1 = bullish) to enter
+    regime_min_strength: float = 0.0  # optional min trend strength (0 disables)
+    ae_lookback: int = 25  # AE entropy lookback
+    ae_num_bins: int = 10  # AE log-return histogram bins
 
 
 @dataclass
@@ -252,7 +274,7 @@ def _update_box(
 def _exit_reason(
     ctx: StrategyContext, sym: str, params: Params, entry_price: float
 ) -> tuple[str, float | None] | None:
-    """Manual exits: ATR stop (guard) or close < slowing-down 10 SMA.
+    """Manual exits: ATR stop (guard) or close < down-sloping 10 SMA.
 
     Returns ``(reason, stop_guard)``; ``stop_guard`` is None for the trend
     exit (fill at next open) and the stop level for the ATR exit.
@@ -277,6 +299,74 @@ def _exit_reason(
 
 
 # ---------------------------------------------------------------------------
+# adaptive-entropy market-regime gate
+# ---------------------------------------------------------------------------
+
+
+def open_position_count(portfolio: PortfolioState) -> int:
+    """Number of distinct symbols currently holding at least one open lot."""
+    return sum(1 for lots in portfolio.positions.values() if lots)
+
+
+def _regime_model(ctx: StrategyContext) -> OnlineAdaptiveEntropy:
+    """Return the per-run online AE model, minted once and fed per bar."""
+    shared = ctx.shared
+    holder = shared.setdefault(_REGIME_KEY, {})
+    model = holder.get("model")
+    if model is None:
+        cfg = AdaptiveEntropyConfig(
+            lookback=ctx.params.ae_lookback,
+            num_bins=ctx.params.ae_num_bins,
+        )
+        model = OnlineAdaptiveEntropy(cfg)
+        holder["model"] = model
+    return model
+
+
+def _regime_allows_entry(ctx: StrategyContext) -> bool:
+    """Gate: is the index in an AE-confirmed bull regime?
+
+    Feeds every new bar of ``params.regime_symbol`` into the online AE model
+    (chronological, gap-safe: only unseen bars are fed) and returns ``True``
+    when the index's current AE trend is at least ``regime_trend_min`` and,
+    when configured, its trend strength clears ``regime_min_strength``.
+
+    The observer symbol is never itself a tradeable entry (handled by the caller
+    skipping it in the trade loop).
+    """
+    params: Params = ctx.params
+    o = ctx.ohlcv(params.regime_symbol)
+    n_total: int = len(o.close)
+    if n_total < params.ae_lookback + 1:
+        # Not enough history to warm the entropy window: stay out.
+        return False
+    model = _regime_model(ctx)
+    holder = ctx.shared[_REGIME_KEY]
+    fed: int = holder.get("fed", 0)
+    # Feed any new bars since the last call (chronological, gap-safe: only
+    # bars beyond ``fed`` are fed, so a regime symbol that skips a timestamp
+    # never gets a stale/duplicate bar).
+    if n_total > fed:
+        close_arr = o.close.to_array()
+        high_arr = o.high.to_array()
+        low_arr = o.low.to_array()
+        for i in range(fed, n_total):
+            holder["result"] = model.observe(close_arr[i], high_arr[i], low_arr[i])
+        holder["fed"] = n_total
+    res = holder.get("result")
+    if res is None:
+        return False
+    if res.trend < params.regime_trend_min:
+        return False
+    if (
+        params.regime_min_strength > 0.0
+        and res.trend_strength < params.regime_min_strength
+    ):
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # strategy
 # ---------------------------------------------------------------------------
 
@@ -286,8 +376,20 @@ def on_candle(ctx: StrategyContext):
     params: Params = ctx.params
     shared = ctx.shared
     shared.setdefault(_COOLDOWN_KEY, {})
+    shared.setdefault(_REGIME_KEY, {})
+
+    # Compute the market-regime gate once per timestamp (before the trade loop)
+    # so every symbol sees the same gate for the bar. When ``regime_symbol`` is
+    # not in the feed (legacy config), fall back to no gating (un-gated mode).
+    regime_ok = True
+    if params.regime_symbol in ctx.symbols:
+        regime_ok = _regime_allows_entry(ctx)
 
     for sym in ctx.symbols:
+        # The regime/observer symbol is never traded itself.
+        if sym == params.regime_symbol:
+            continue
+
         o = ctx.ohlcv(sym)
         lots = ctx.position_ids(sym)
 
@@ -345,6 +447,27 @@ def on_candle(ctx: StrategyContext):
         if not (close > live.high and sma_f > sma_s):
             continue  # breakout must be real and trend must be intact
 
+        # Adaptive-entropy market-regime gate: only enter while the index (QQQ
+        # /SPY) is in an AE-confirmed bull regime. A technically-valid breakout
+        # in a wrong regime stays armed (box not consumed) for a later regime
+        # turn rather than chasing into a downtrend/choppiness.
+        if not regime_ok:
+            continue
+
+        # Aggregate capital-allocation guard: never stack more than
+        # ``max_positions`` concurrent positions. Without a cap the strategy
+        # opens every co-occurring breakout during a bull regime, concentrating
+        # notional in a correlated momentum basket (measured at 5x+ capital).
+        if open_position_count(ctx.state.portfolio) >= params.max_positions:
+            continue
+
+        # Per-position exposure cap: bound a single position's notional value to
+        # ``max_position_notional`` * current equity so no one name can dominate
+        # the book (the gate's bull regimes otherwise fund a few correlated names
+        # with oversized share counts).
+        equity = equity_of(ctx.state.portfolio)
+        notional_cap = params.max_position_notional * equity if equity > 0 else 0.0
+
         # ATR-risk sizing (strategy-owned): back-solve ctx.long's 0..1 size
         # from the absolute share count that risks ``risk_pct`` of cash.
         price = close
@@ -354,6 +477,11 @@ def on_candle(ctx: StrategyContext):
         stop_dist = params.atr_mult * live.stop_atr
         qty = risk_sized_qty(
             equity=cash, price=price, stop_dist=stop_dist, risk_pct=params.risk_pct
+        )
+        if qty <= 0:
+            continue
+        qty = (
+            min(qty, notional_cap / price) if (price > 0 and notional_cap > 0) else qty
         )
         if qty <= 0:
             continue

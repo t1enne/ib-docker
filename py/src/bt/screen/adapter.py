@@ -110,11 +110,18 @@ def state_from_feed(
     start: pd.Timestamp,
     end: pd.Timestamp,
     bar: str,
+    benchmarks: list[str] | None = None,
 ) -> ScreenState:
     """Load latest OHLCV and build a ready-to-score ScreenState.
 
     The latest timestamp across every symbol's frame is used as ``ts``, so a
     screen called on the returned state scores the most recent bar.
+
+    ``benchmarks`` (optional) names reference symbols (e.g. SPY/QQQ) NOT in
+    ``symbols`` to load and embed for relative screens. Each benchmark is loaded
+    over the same ``start``-``end`` window as the traded universe and truncated
+    to the universe's ``latest`` timestamp so the reference never reaches into
+    the future past the scored bar — no lookahead.
     """
     frames = frames_from_feed(symbols, start, end, bar)
     latest = max(
@@ -122,7 +129,8 @@ def state_from_feed(
         default=pd.Timestamp(end),
     )
     assert isinstance(latest, pd.Timestamp)
-    return build_state(latest, frames)
+    merged = _embed_benchmarks(frames, benchmarks, start, end, bar, latest)
+    return build_state(latest, merged)
 
 
 def state_per_interval(
@@ -130,12 +138,17 @@ def state_per_interval(
     start: pd.Timestamp,
     end: pd.Timestamp,
     intervals: list[str],
+    benchmarks: list[str] | None = None,
 ) -> dict[str, ScreenState]:
     """Build a ready-to-score ScreenState per requested interval.
 
     Symbol frames that resampled to zero rows (e.g. a symbol whose source bars
     collapse after ``dropna``) are dropped so an empty frame's index never
     crashes the ``latest`` lookup.
+
+    ``benchmarks`` (optional) names reference symbols (e.g. SPY/QQQ) NOT in
+    ``symbols`` to load and embed for relative screens, truncated to each
+    interval's ``latest`` traded timestamp (no lookahead).
     """
     by_iv = frames_by_interval(symbols, start, end, intervals)
     states: dict[str, ScreenState] = {}
@@ -146,5 +159,65 @@ def state_per_interval(
             default=pd.Timestamp(end),
         )
         assert isinstance(latest, pd.Timestamp)
-        states[iv] = build_state(latest, tuple(nonempty))
+        merged = _embed_benchmarks(tuple(nonempty), benchmarks, start, end, iv, latest)
+        states[iv] = build_state(latest, merged)
     return states
+
+
+def _embed_benchmarks(
+    frames: tuple[tuple[str, pd.DataFrame], ...],
+    benchmarks: list[str] | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    bar: str,
+    max_ts: pd.Timestamp,
+) -> tuple[tuple[str, pd.DataFrame], ...]:
+    """Append benchmark reference frames to an interval's frames.
+
+    Only benchmarks not already present in ``frames`` are loaded (so an explicit
+    SPY in the universe is used as-is, never double-loaded). Each benchmark is
+    fetched as raw candles over ``start``-``end`` and clipped to rows
+    ``<= max_ts`` — the traded universe's latest timestamp — so it cannot leak
+    future data into the scored bar (no lookahead).
+    """
+    if not benchmarks:
+        return frames
+    existing = {s for s, _ in frames}
+    extra: list[tuple[str, pd.DataFrame]] = []
+    for symbol in benchmarks:
+        upper = symbol.upper()
+        if upper in existing:
+            continue
+        bf = _benchmark_at_interval(upper, start, end, bar, max_ts)
+        if bf is not None:
+            extra.append(bf)
+    return frames + tuple(extra)
+
+
+def _benchmark_at_interval(
+    symbol: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    bar: str,
+    max_ts: pd.Timestamp,
+) -> tuple[str, pd.DataFrame] | None:
+    """Load one benchmark symbol's raw candles at ``bar``, clipped to ``max_ts``.
+
+    Reuses the same lenient hourly source + resample path as the traded
+    universe (over the same ``start``-``end`` window), so a benchmark frame is
+    directly comparable to the symbols it is scored against. Returns ``None``
+    when the symbol has no usable bars, and the frame is never allowed to
+    contain rows after ``max_ts`` (no lookahead).
+    """
+    raw = _per_symbol(
+        _load_lenient([symbol], start, end, "1h"), [symbol], drop_gappy=False
+    )
+    if not raw:
+        return None
+    sym_df = raw[0][1]
+    if bar != "1h":
+        sym_df = resample_ohlcv(sym_df, bar)
+    sym_df = sym_df[sym_df.index <= max_ts]
+    if sym_df.empty or "close" not in sym_df.columns:
+        return None
+    return (symbol, sym_df)

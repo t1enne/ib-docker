@@ -82,7 +82,15 @@ def _common_metrics_for(
     default=("1d",),
     help="Bar interval to score (1h, 4h, 1d, ...); repeatable for multiple TFs",
 )
-@click.option("--from", "from_dt", type=click.DateTime(), help="Start date")
+@click.option(
+    "--from",
+    "-f",
+    "lookback_days",
+    type=int,
+    default=365,
+    show_default=True,
+    help="Load this many days of history (in place of a start date)",
+)
 @click.option("--to", "to_dt", type=click.DateTime(), help="End date")
 @click.option(
     "--params",
@@ -96,7 +104,7 @@ def screen(
     symbols: tuple[str, ...],
     universe: str | None,
     interval: tuple[str, ...],
-    from_dt: datetime | None,
+    lookback_days: int,
     to_dt: datetime | None,
     params: str,
     top: int | None,
@@ -107,20 +115,25 @@ def screen(
     condition fired — it is NOT a profit expectation (pre-cost by design).
     """
     parsed_params = parse_param_grid(params) if isinstance(params, str) else {}
-    from_ts: pd.Timestamp = (
-        cli_ts(from_dt)
-        if from_dt
-        else cli_ts(pd.Timestamp.now() - pd.Timedelta(days=365))
+    from_ts: pd.Timestamp = cli_ts(
+        pd.Timestamp.now() - pd.Timedelta(days=lookback_days)
     )
     to_ts: pd.Timestamp = cli_ts(to_dt) if to_dt else cli_ts(pd.Timestamp.now())
 
-    from src.bt.screen.screens import init_screen
+    from src.bt.screen.screens import init_screen, resolve_screen_params
     from src.bt.screen import run_screen
     from src.bt.screen.adapter import state_per_interval
     from src.bt.screen.runner import DivergenceParams, rank_divergence
 
     # Fail fast on an unknown screen before touching the feed.
     init_screen(screen_name)
+
+    # Resolve the screen's typed params (defaults included) so a reference
+    # default such as ``relative_strength.benchmark = QQQ`` is honoured even
+    # when the user did not pass an explicit value.
+    resolved = resolve_screen_params(screen_name, parsed_params)
+    benchmark = str(getattr(resolved, "benchmark", "")).upper().strip()
+    benchmarks = [benchmark] if benchmark else None
 
     from src.data import load_universe_config
 
@@ -132,10 +145,17 @@ def screen(
     else:
         raise click.UsageError("provide --symbols or --universe/-U")
 
+    # The adapter clips the benchmark to the traded universe's latest bar to
+    # avoid lookahead. (For the RS screen the embedded benchmark frame is purely
+    # a reference — ``on_state`` never scores it.) The history window is bounded
+    # by ``--from/-f`` (default 365 days), applied uniformly to symbols +
+    # benchmarks.
+    states = state_per_interval(
+        syms, from_ts, to_ts, sorted(set(interval)), benchmarks=benchmarks
+    )
     # Multi-interval: merge per-TF states into a cross-timeframe consensus rank
     # so each symbol appears ONCE, ranked by trend alignment (TF divergence).
     # Single-interval: fall back to the per-state screen rank.
-    states = state_per_interval(syms, from_ts, to_ts, sorted(set(interval)))
     if len(states) > 1:
         merged = rank_divergence(
             states, DivergenceParams(alignment_threshold=0.5), top=top

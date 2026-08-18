@@ -134,7 +134,7 @@ def resolve_symbol_list(symbols: tuple[str, ...], universe: Optional[str]) -> li
     if universe:
         return load_universe_config(universe).symbols
     if symbols:
-        return list(symbols)
+        return list(map(str.upper, symbols))
     raise click.UsageError("provide SYMBOLS or --universe/-U")
 
 

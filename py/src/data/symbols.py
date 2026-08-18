@@ -109,7 +109,7 @@ def load_universe_config(file_path: str) -> UniverseConf:
         )
 
     return UniverseConf(
-        symbols=symbols,
+        symbols=[sym.upper() for sym in symbols],
         from_date=data.get("from_date"),
         to_date=data.get("to_date"),
         bar=data.get("bar", "1h"),

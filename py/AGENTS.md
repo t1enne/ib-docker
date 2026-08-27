@@ -42,7 +42,40 @@ uv run ibkr bt optimize strats/trend.json '{...grid...}' --folds 4 --workers 4
 # capped at the unit count, so oversized --workers is harmless.
 ```
 
-## Local Data — the candle DB (verify presence here, don't snoop)
+## Running Screens (no CLI — run via Python)
+
+Screens are scoring layers that return 0..1 `ScreenResult`
+(`score` + `action` long/short/flat + reasons + `model_features`), NEVER fills.
+No `ibkr screen` CLI.
+
+- **Code:** `src/bt/screen/` (`types.py`, `runner.py`, `adapter.py`, `screens/*.py`).
+- **Discovery:** any `screens/*.py` with `SCREEN_TYPE` + `on_state(state, params)` — auto-`_discover()`ed, no registry.
+- **The 6:** `momentum`, `macd_divergence`, `mfi_divergence`, `obv_divergence`, `rsi_divergence` (fresh signals) + `rs` (relative strength — cross-sectional ranking; fires by construction, so DON'T count it as corroboration).
+- **Benchmarks:** `rs` needs its benchmark in-state (raises otherwise); `momentum` gates on `QQQ`. Pass `benchmarks=['QQQ','SPY']`.
+
+### Run all screens over a universe (ready-made)
+
+```bash
+uv run python scripts/run_screens.py   # nsdq + QQQ/SPY, latest 1d bar, convergence view
+```
+
+Loads `universes/nsdq.json`, runs every discovered screen, separates
+**absolute-screen convergence** (2+ fresh-signal screens, same direction) from
+the `rs` overlay. Extend this script before writing a new one.
+
+### Wire-up
+
+```python
+from src.bt.screen.screens import init_screen, resolve_screen_params
+from src.bt.screen.adapter import state_per_interval   # or state_from_feed
+
+daily = state_per_interval(symbols, start, end, ["1d","4h"], benchmarks=["QQQ","SPY"])["1d"]
+results = init_screen("mfi_divergence").on_state(daily, resolve_screen_params("mfi_divergence", {}))
+```
+
+For a cursor-safe walk across history use `screen_over_history(...)`.
+
+
 
 ~All ~300 tickers plus ~1.8M hourly candles already live in the local candle DB.
 Before assuming data is missing, check it here first — most "is data present?"

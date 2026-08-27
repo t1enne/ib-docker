@@ -189,8 +189,8 @@ def on_state(state: ScreenState, params: Params) -> tuple[ScreenResult, ...]:
             elif pct < params.top_pct:
                 action = "short"
             base = m["excess_ret"] if params.mode == "excess" else m["return"]
-            label = f"rs pct {pct:.0%}"
-            direction = "outperforming" if base >= 0 else "lagging"
+            label = f"RS-{pct:.0%}"
+            direction = "↑" if base >= 0 else "↓"
             signals = [
                 f"bench {params.benchmark}",
                 label,
@@ -199,7 +199,7 @@ def on_state(state: ScreenState, params: Params) -> tuple[ScreenResult, ...]:
             if action != "flat":
                 signals.append(f"top{int(params.top_pct * 100)}%")
         else:
-            signals = ["warmup/inactive"]
+            signals = ["WARMUP"]
 
         results.append(
             ScreenResult(

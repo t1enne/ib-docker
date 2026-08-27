@@ -2,12 +2,26 @@
 
 SHORT-only order-flow breakdown, built on the Volume Profile
 (``vp_breakout_dsl``'s short leg) and gated everywhere by the
-**adaptive-entropy regime gate**. A short is entered when the per-symbol
-adaptive-entropy quantised ``trend`` is at or above the configurable
-``min_trend`` floor (``trend >= min_trend``): with ``min_trend=-1`` only
-bear regimes trade, with ``min_trend=0`` flat/choppy and bear regimes both
-qualify — the strategy fades rallies and breakdowns only, never a confirmed
-bull.
+**adaptive-entropy regime gate**.
+
+Two layers of AE gating keep the book from bleeding when the regime changes:
+
+  * **Per-symbol entry gate** — a short is entered only when the symbol's
+    quantised ``trend`` is at or above ``min_trend`` (``-1`` = bear-only,
+    ``0`` = flat/bear).
+  * **Market regime filter** (``market_filter``) — a dedicated feed-only AE
+    tracker on ``market_symbol`` (the broad market) acts as a macro risk
+    switch, and every market-regime call is **double-confirmed** by two
+    independent layers: (1) the market AE ``trend`` (
+    ``+1`` bullish), and (2) the market close vs its slow
+    ``market_confirm_window`` SMA. The AE layer catches short-term momentum;
+    the SMA layer is a slow, non-flipping trend filter, so a single noisy AE
+    bar can't mislabel the regime. When both layers agree the market is a
+    **confirmed bull**, the strategy BLOCKS new shorts AND FORCE-CLOSES open
+    shorts. Optionally (``require_market_bear``) new shorts are additionally
+    gated on both layers agreeing the market is a **confirmed bear** (AE
+    ``-1`` and close below SMA), so the short edge is only harvested in a
+    robust down regime.
 
 Entry signal — a **VP breakdown** (mirrors ``vp_breakout_dsl._enter``'s short
 leg, reused here for the same order-flow thesis but gated by entropy instead of
@@ -63,6 +77,10 @@ _ENT_KEY = "entropy"  # dict[sym -> OnlineAdaptiveEntropy]
 _ENT_RESULT_KEY = "entropy_result"  # dict[sym -> AdaptiveEntropyResult] (once/bar)
 _COOLDOWN_KEY = "cooldowns"
 _POS_KEY = "positions"  # dict[sym -> dynamic-trail bookkeeping]
+_MARKET_KEY = "market_trend"  # int: market AE quantised trend (-1/0/1), or None
+_MARKET_TRACKER_KEY = "market_tracker"  # OnlineAdaptiveEntropy on the market symbol
+_MARKET_BULL_RUN_KEY = "market_bull_run"  # int: consecutive market-bull bars
+_MARKET_SMA_KEY = "market_above_sma"  # bool: market close > slow SMA (layer-2 confirm)
 
 
 @dataclass(frozen=True)
@@ -78,13 +96,37 @@ class Params(StrategyParams):
     wick_check: float = 0.5  # close must sit in the lower fraction of the bar
     trend_lookback: int = 50  # concurrency: price vs its own rolling mean
     # -- adaptive-entropy regime gate --
-    # Gate threshold on the per-symbol adaptive-entropy quantised ``trend``.
-    # A short is allowed when ``trend >= min_trend``: ``-1`` = bear-only
-    # (``trend == -1``), ``0`` = non-bull (flat or bear; blocks a confirmed
-    # bull). During warmup ``trend`` is 0.
+    # Per-symbol entry gate: a short is allowed when the symbol's quantised
+    # ``trend >= min_trend`` (``-1`` = bear-only ``trend == -1``, ``0`` =
+    # non-bull flat/bear). The *market*-level regime filter below is the
+    # primary loss-prevention switch.
     entropy_lookback: int = 25
     entropy_num_bins: int = 10
     min_trend: int = 0
+    # -- market regime filter (risk-off when the market turns bullish) --
+    # When ``market_filter`` is enabled, a dedicated adaptive-entropy tracker on
+    # ``market_symbol`` (feed-only, never traded) acts as a macro risk switch.
+    # The bull risk-off condition is **confirmed by two independent layers** so a
+    # single noisy AE bar can't whip it off:
+    #   * layer 1 — the market AE ``trend == +1`` for ``market_confirm_bars``
+    #     consecutive bars, AND
+    #   * layer 2 — the market close sits above its ``market_confirm_window``-
+    #     bar SMA (a slow, long-duration trend filter that doesn't flip intraday).
+    # Both must agree the market is in a sustained up regime before the strategy
+    # blocks NEW shorts AND force-closes OPEN shorts. Symmetrically, shorts are
+    # only entered when the market is NOT bull-confirmed (a ``trend``-level
+    # bear/neutral read, per ``min_trend`` on the symbol).
+    market_filter: bool = True
+    market_symbol: str = "SPY"
+    market_confirm_bars: int = 3  # layer-1: consecutive market-bull AE bars
+    market_confirm_window: int = 100  # layer-2: market close > SMA(period)
+    # When ``require_market_bear`` is True, NEW shorts additionally require the
+    # market to be in a *confirmed bear* — the two AE/SMA confirmation layers
+    # agreeing on the down side (market AE ``trend == -1`` AND close below its
+    # slow SMA). This is the mirror of the bull risk-off gate: it only lets the
+    # book carry shorts while the broad market is robustly bearish, so the short
+    # edge is harvested where it exists instead of fired into a rising tape.
+    require_market_bear: bool = False
     # -- dynamic ATR trailing stop --
     atr_period: int = 14
     stop_atr_mult: float = 2.0
@@ -174,6 +216,99 @@ def bear_gate_ok(result, min_trend: int) -> bool:
     return bool(getattr(result, "trend", 0) >= min_trend)
 
 
+def _feed_market(ctx: StrategyContext, shared: dict, params: Params) -> None:
+    """Feed a dedicated market-level adaptive-entropy tracker from a benchmark.
+
+    The tracker runs on ``params.market_symbol`` (feed-only — the symbol is
+    never traded by this strategy) so its quantised ``trend`` is a macro regime
+    gauge independent of any single short candidate. The latest ``trend`` is
+    cached under ``_MARKET_KEY`` for both the entry gate and the open-position
+    risk-off close to read synchronously.
+
+    The market symbol must be present in the config's ``symbols`` (so its OHLCV
+    is in the TaContext feed); it is skipped for trading in the strategy loop.
+    """
+    if ctx.params.market_filter is False:
+        shared.pop(_MARKET_KEY, None)
+        return
+    try:
+        o = ctx.ohlcv(params.market_symbol)
+    except KeyError:
+        # Market symbol absent from the feed -> no market gate (fail-open rather
+        # than silently disabling the whole strategy).
+        shared.pop(_MARKET_KEY, None)
+        return
+    if len(o.close) == 0:
+        shared.pop(_MARKET_KEY, None)
+        return
+    tr = shared.get(_MARKET_TRACKER_KEY)
+    if not isinstance(tr, OnlineAdaptiveEntropy):
+        tr = OnlineAdaptiveEntropy(
+            AdaptiveEntropyConfig(
+                lookback=params.entropy_lookback,
+                num_bins=params.entropy_num_bins,
+            )
+        )
+        shared[_MARKET_TRACKER_KEY] = tr
+    result = tr.observe(float(o.close[-1]), float(o.high[-1]), float(o.low[-1]))
+    trend = getattr(result, "trend", 0)
+    shared[_MARKET_KEY] = trend
+    # Maintain a consecutive-bull-bar counter so risk-off requires a *sustained*
+    # up regime, not a single bullish AE bar (which is ~half of every year).
+    run = int(shared.get(_MARKET_BULL_RUN_KEY, 0))
+    shared[_MARKET_BULL_RUN_KEY] = run + 1 if trend == 1 else 0
+
+    # Layer-2 confirmation: is the market close above its slow SMA? This is a
+    # long-duration trend filter that does NOT flip intraday, so it anchors the
+    # AE layer-1 signal to the true macro direction.
+    above = False
+    if len(o.close) >= params.market_confirm_window:
+        sma = ctx.ta.sma(params.market_symbol, params.market_confirm_window)
+        above = float(o.close[-1]) > float(sma[-1])
+    shared[_MARKET_SMA_KEY] = above
+
+
+def market_risk_on(shared: dict, params: Params) -> bool:
+    """True when shorts may be carried / opened by the market regime filter.
+
+    Risk-off (``False``) only fires when **both** confirmation layers agree the
+    market is in a sustained up regime: (1) the market AE ``trend == +1`` for at
+    least ``market_confirm_bars`` consecutive bars, and (2) the market close is
+    above its ``market_confirm_window`` SMA. Requiring layer-2 avoids trusting a
+    noisy short-term AE trend alone (which is ~50/50 every year); the slow SMA
+    disambiguates a real bull market from a bear-year bounce. When the filter is
+    disabled, the market symbol is absent, or the layers don't agree on a
+    sustained bull, this returns ``True`` and the strategy trades as normal.
+    """
+    if not params.market_filter:
+        return True
+    run = int(shared.get(_MARKET_BULL_RUN_KEY, 0))
+    if run < params.market_confirm_bars:
+        return True  # layer-1 not sustained -> not risk-off
+    if not bool(shared.get(_MARKET_SMA_KEY, False)):
+        return True  # layer-2 not confirmed (below slow SMA) -> not risk-off
+    return False
+
+
+def market_bear_ok(shared: dict, params: Params) -> bool:
+    """True when the market is in a *confirmed bear* regime (both layers agree).
+
+    Layer-1: the market AE quantised trend is bearish (``trend == -1``).
+    Layer-2: the market close is below its slow ``market_confirm_window`` SMA.
+    Both must agree before a NEW short is permitted (when
+    ``require_market_bear`` is enabled). If the filter is off, the market symbol
+    is absent, or the layers don't both read bear, this returns ``True`` so the
+    market gate never blocks by default.
+    """
+    if not params.market_filter or not params.require_market_bear:
+        return True
+    if int(shared.get(_MARKET_KEY, 0)) != -1:
+        return False  # layer-1: market not confirmed-bear
+    # Layer-2: ``_MARKET_SMA_KEY`` stores *above* SMA; below-SMA (False) is the
+    # bear-side confirmation.
+    return not bool(shared.get(_MARKET_SMA_KEY, False))
+
+
 def _refresh_vp(ctx: StrategyContext, params: Params) -> None:
     """Feed each symbol's online VP once per candle; store the snapshots."""
     profs = ctx.shared.setdefault(_VP_KEY, {})
@@ -245,24 +380,39 @@ def on_candle(ctx: StrategyContext):
 
     _refresh_vp(ctx, params)
 
+    # Market regime gauge (feed-only; never traded).
+    _feed_market(ctx, shared, params)
+    risk_off = not market_risk_on(shared, params)
+
     # ---- Advances / exits first --------------------------------------------
     for sym in ctx.symbols:
+        if sym == params.market_symbol:
+            continue  # market gauge symbol is never traded
         o = ctx.ohlcv(sym)
         _feed_entropy(ctx, shared, sym, o)  # regime tracker every bar
 
         pos = ctx.position(sym)
         if pos is None:
             continue
+        # Risk-off flatten: if the broad market turned into a confirmed bull,
+        # force-close the short now before it bleeds into the rising tape.
+        if risk_off:
+            _exit(ctx, shared, params, sym, "market regime flipped bull (risk-off)")
+            continue
         _manage_open(ctx, shared, params, sym, o, pos)
 
     # ---- Entries ------------------------------------------------------------
     for sym in ctx.symbols:
+        if sym == params.market_symbol:
+            continue  # never open a position on the market gauge symbol
         cd = shared[_COOLDOWN_KEY].get(sym, 0)
         if cd > 0:
             shared[_COOLDOWN_KEY][sym] = cd - 1
             continue
         if ctx.position(sym) is not None:
             continue
+        if risk_off:
+            continue  # no new shorts while the market is confirmed-bull
         _enter(ctx, sym, params)
 
 
@@ -292,6 +442,12 @@ def _enter(ctx: StrategyContext, sym: str, params: Params) -> None:
     # Adaptive-entropy regime gate: never fade a confirmed bull (or tighter).
     ent = entropy_result(ctx, ctx.shared, sym)
     if not bear_gate_ok(ent, params.min_trend):
+        return
+
+    # Market-level confirmed-bear gate: when enabled, shorts require BOTH AE
+    # (market trend == -1) and slow-SMA (close below SMA) to agree the broad
+    # market is bearish — only harvest the short edge in a real down regime.
+    if not market_bear_ok(ctx.shared, params):
         return
 
     avg_vol = _avg_volume(ctx, sym, params)
@@ -352,13 +508,13 @@ def _manage_open(
     o,
     pos: Position,
 ) -> None:
-    """Manage an open short: value-area revert + dynamic ATR trailing stop.
+    """Manage an open short: market risk-off + value-area revert + ATR trail.
 
-    The trail is re-anchored every bar on the highest high of the last
-    ``trail_lookback`` bars minus ``trail_atr_mult * ATR``, and only ever moved
-    *down* for a short (a profitable position tightens the stop; a rally keeps
-    the best previous protection). Exits when close touches the trail or price
-    reverts back into the value area.
+    ``on_candle`` force-closes shorts when the market AE regime turns bull
+    (risk-off) before this runs. Here: (1) value-area revert (close back above
+    VAL) is the institutional tag stop, and (2) a dynamic ATR trail re-anchored
+    every bar on the highest high of the last ``trail_lookback`` bars minus
+    ``trail_atr_mult * ATR``, only ever moved *down* for a short.
     """
     rec = shared[_POS_KEY].get(sym)
     atr = _last(ctx.ta.atr(sym, params.atr_period))

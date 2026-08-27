@@ -28,7 +28,12 @@
     "risk_pct": 0.02,
     "max_gross_exposure": 0.5,
     "cooldown_bars": 5,
-    "min_trend": -1
+    "min_trend": -1,
+    "market_filter": false,
+    "market_symbol": "SPY",
+    "market_confirm_window": 150,
+    "market_confirm_bars": 3,
+    "require_market_bear": false
   },
   "benchmark_symbols": [
     "SPY"
@@ -130,6 +135,7 @@
     "WMT",
     "WDC",
     "WDAY",
+    "SPY",
     "XEL"
   ]
 }

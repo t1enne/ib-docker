@@ -25,6 +25,8 @@ ib-rest-api-client
 .nswarm
 
 # pipeline run artifacts
-run_pipeline.log
+pipeline.log
+data/pipeline.log
+data/pipeline.out
 data/screen_reports_*.txt
 data/analysis_*.md

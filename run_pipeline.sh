@@ -4,13 +4,15 @@
 #
 #  1. Start the IBKR Client Portal Gateway (docker compose up -d) and wait for
 #     its healthcheck /v1/api/tickle to pass.
-#  2. Login to the gateway via Playwright (scripts/login_ibkr.py).
+#  2. If /tickle already reports an authenticated session (200 + authenticated:true)
+#     skip login; otherwise login via Playwright (scripts/login_ibkr.py).
 #  3. Download candles for each configured universe (data dl -U ...).
 #  4. Run all screens (scripts/run_screens.py) over each universe.
 #  5. Pipe the combined screen report to a headless `pi` run using the Trader
 #     prompt (~/.pi/agent/prompts/trader.md) to produce a TRADE/SCALE/PASS
 #     signal list.
-#  6. Send the result to Telegram.
+#  6. Send the pi signals report to Telegram (the report IS the message body).
+#  Cleanup (trap on EXIT) prunes old artifacts and orphaned headless browsers.
 #
 # Designed to be safe to run from cron. Any step failing with a nonzero exit
 # aborts the pipeline. Missing data is fetched; existing candles are NOT
@@ -73,6 +75,29 @@ run_or_dry() {
   "$@"
 }
 
+# Check whether an authenticated gateway session already exists.
+# A valid session: /tickle returns HTTP 200 with iserver.authStatus.authenticated
+# == true. Anything else (401, or authenticated:false) means we must log in.
+session_is_valid() {
+  local code body
+  code="$(curl -ks -H 'Accept: application/json' --max-time 15 -o /tmp/ibkr_tickle.json \
+    -w '%{http_code}' "https://localhost:5000/v1/api/tickle" 2>/dev/null || true)"
+  rm -f /tmp/ibkr_tickle.json
+  if [[ "$code" != "200" ]]; then
+    log "Gateway session check: http $code -> not valid"
+    return 1
+  fi
+  # Re-tickle into a file so jq can parse the authenticated flag.
+  curl -ks -H 'Accept: application/json' --max-time 15 -o /tmp/ibkr_tickle.json \
+    "https://localhost:5000/v1/api/tickle" 2>/dev/null || { rm -f /tmp/ibkr_tickle.json; return 1; }
+  local auth
+  auth="$(jq -r '.iserver.authStatus.authenticated // false' /tmp/ibkr_tickle.json 2>/dev/null)"
+  rm -f /tmp/ibkr_tickle.json
+  log "Gateway session authenticated: $auth"
+  [[ "$auth" == "true" ]]
+}
+
+
 # Wait for the gateway to be reachable; timeout in seconds.
 # Treat 200 and 4xx as "server is up" — an unauthenticated gateway returns
 # 401 on /tickle, and the login step runs afterwards to establish the session.
@@ -98,7 +123,7 @@ wait_for_gateway() {
 # ── Step 1: Start & wait for gateway ────────────────────────────────────────
 step_gateway() {
   if [[ "${DRY:-0}" == "1" ]]; then
-    log "[DRY] gateway up: docker compose --project-directory $PROJECT_DIR up -d --no-ansi"
+    log "[DRY] gateway up: docker compose --ansi never --project-directory $PROJECT_DIR up -d"
     return
   fi
   if [[ "${SKIP_GATEWAY:-0}" == "1" ]]; then
@@ -108,17 +133,27 @@ step_gateway() {
   fi
   log "=== Step 1: docker compose up -d ==="
   # Feed /dev/null so compose can never block waiting on a TTY (cron-safe).
-  # --no-ansi avoids control chars in logs; -d detaches the gateway daemon.
+  # --ansi never avoids ANSI control chars in logs; -d detaches the gateway.
   run_or_dry "gateway up" \
-    docker compose --project-directory "$PROJECT_DIR" up -d --no-ansi
+    docker compose --ansi never --project-directory "$PROJECT_DIR" up -d
   wait_for_gateway
 }
 
 # ── Step 2: Login ───────────────────────────────────────────────────────────
 step_login() {
-  log "=== Step 2: login to gateway ==="
+  log "=== Step 2: check session / login to gateway ==="
+  if session_is_valid; then
+    log "Session already valid — skipping login."
+    return
+  fi
+  log "No valid session — logging in."
   # login_ibkr.py loads IBKR_USERNAME/PASSWORD from py/.env via its load_env().
   run_or_dry "login" uv --directory "$PY_DIR" run scripts/login_ibkr.py
+  # Fail fast if login did not actually establish an authenticated session.
+  if [[ "${DRY:-0}" != "1" ]] && ! session_is_valid; then
+    die "Login completed but /tickle still reports unauthenticated."
+  fi
+  log "Session authenticated after login."
 }
 
 # ── Step 3: Download candles per universe ───────────────────────────────────
@@ -190,11 +225,36 @@ step_telegram() {
     return 0
   fi
   [[ -s "$analysis" ]] || die "empty analysis output from pi."
-  # Monospace send from stdin — markdown may mint the trader quotes nicely.
+  # Send the pi signals report AS the message body: pipe it on stdin and pass
+  # '-' as the positional text arg (telegram.sh only reads stdin when TEXT=='-').
+  # -M renders markdown; -T adds a bold title line above the report.
   cat "$analysis" | timeout 60 \
-    /home/nasrt/.agents/skills/telegram/telegram.sh -M "IBKR signal run — $(stamp)" \
-    || log "WARN: telegram send returned nonzero."
+    /home/nasrt/.agents/skills/telegram/telegram.sh -M -T "IBKR signal run — $(stamp)" - \
+    || { log "WARN: telegram send returned nonzero."; return; }
+  log "Telegram sent ($(wc -l <"$analysis") lines)."
 }
+
+# ── Cleanup ────────────────────────────────────────────────────────────────
+# Runs after a completed pipeline (best-effort; failures never abort the run).
+#  - Prune old screen/analysis artifacts beyond KEEP_RECENT (default 20).
+#  - Kill orphaned headless chromium/playwright child processes left by a
+#    previously interrupted login (crashed cron runs). Only targets chromium
+#    owned by the current user to avoid nuking unrelated browsers.
+step_cleanup() {
+  log "=== Cleanup ==="
+  local keep="${KEEP_RECENT:-20}"
+  if [[ "${DRY:-0}" != "1" ]]; then
+    ls -1t "$PROJECT_DIR"/data/screen_reports_*.txt 2>/dev/null | tail -n +$((keep + 1)) | xargs -r rm -f
+    ls -1t "$PROJECT_DIR"/data/analysis_*.md 2>/dev/null | tail -n +$((keep + 1)) | xargs -r rm -f
+    # Orphaned headless browsers from interrupted Playwright logins.
+    pgrep -u "$(id -u)" -f "chromium .*headless.*playwright|chrome-headless" 2>/dev/null \
+      | xargs -r kill -9
+  else
+    log "[DRY] cleanup: prune old reports (keep $keep), kill orphaned headless chromium"
+  fi
+  log "Cleanup done."
+}
+
 
 # ── Main ────────────────────────────────────────────────────────────────────
 main() {
@@ -202,23 +262,36 @@ main() {
   log "IBKR pipeline start (universes: ${UNIVERSES[*]})"
   log "==================================================="
 
+  # Always clean up on exit (success or failure).
+  trap step_cleanup EXIT
+
   step_gateway
   step_login
   step_download
 
-  # Capture both screen reports AND tee to a file so the analysis has a stable
-  # record and telegram can log what was sent. Logs go to stderr (kept on the
-  # terminal); only the screen data flows into the report file.
-  local reports="$PROJECT_DIR/data/screen_reports_$(date +%Y%m%d_%H%M%S).txt"
-  step_screens | tee "$reports"
+  # In DRY mode nothing is written, so skip tee-ing empty artifacts.
+  local reports
+  local analysis
+  if [[ "${DRY:-0}" == "1" ]]; then
+    reports="/dev/null"
+    analysis="/dev/null"
+    step_screens
+    step_analysis "$reports"
+    step_telegram "$analysis"
+  else
+    # Capture both screen reports AND tee to a file so the analysis has a stable
+    # record and telegram can log what was sent. Logs go to stderr (kept on the
+    # terminal); only the screen data flows into the report file.
+    reports="$PROJECT_DIR/data/screen_reports_$(date +%Y%m%d_%H%M%S).txt"
+    step_screens | tee "$reports"
 
-  local analysis="$PROJECT_DIR/data/analysis_$(date +%Y%m%d_%H%M%S).md"
-  step_analysis "$reports" | tee "$analysis"
+    analysis="$PROJECT_DIR/data/analysis_$(date +%Y%m%d_%H%M%S).md"
+    step_analysis "$reports" | tee "$analysis"
 
-  step_telegram "$analysis"
+    step_telegram "$analysis"
+  fi
 
-  log "Pipeline complete. Reports: $reports"
-  log "Analysis: $analysis"
+  log "Pipeline complete."
   log "==================================================="
 }
 

@@ -66,17 +66,28 @@ Reuse an already-running gateway instead of bouncing it each time:
 | `PI_TIMEOUT`     | `600` s        | max pi analysis time                      |
 | `GATEWAY_TIMEOUT`| `180` s        | max wait for gateway healthcheck          |
 | `SKIP_GATEWAY`   | unset          | `1` = reuse running gateway (still waits) |
+| `KEEP_RECENT`    | `20`           | number of screen/analysis artifacts to retain |
 | `DRY`            | unset          | `1` = print commands, don't execute       |
 
 ## Failure handling
 
 - `set -euo pipefail`: any step failing with nonzero exit aborts the run.
+- A `trap ... EXIT` always runs cleanup (artifact pruning + orphaned-browser
+  kill) even when a step fails.
+- **No valid session check:** before login the script curls `/v1/api/tickle`. If
+  it returns HTTP 200 with `iserver.authStatus.authenticated == true` it skips
+  login entirely; otherwise it logs in and then *re-checks* tickle, failing fast
+  if the login did not actually authenticate. This avoids unnecessary logins and
+  re-authentication prompts on every cron tick.
 - Nothing is sent to Telegram unless the pi analysis produced non-empty output
   (prevents a telegram claiming a signal list from a failed run).
+- The telegram message body is exactly the pi signals report (piped on stdin,
+  via `-T` bold title + `-` stdin text).
 - Every `log()` line is appended to `data/pipeline.log` AND stderr, so you
   still get the record even when the redirected cron stdout is empty.
 - Screen reports (`data/screen_reports_*.txt`) and analysis
-  (`data/analysis_*.md`) are kept with timestamped filenames for audit.
+  (`data/analysis_*.md`) are kept with timestamped filenames; the cleanup step
+  prunes them beyond `KEEP_RECENT` (default 20).
 
 ## Verification
 
@@ -84,3 +95,7 @@ Reuse an already-running gateway instead of bouncing it each time:
 DRY=1 ./run_pipeline.sh        # preview every command without running
 ./run_pipeline.sh              # full run (requires gateway up / session)
 ```
+
+The cleanup step also kills orphaned headless Chromium/Playwright processes
+left by a previously interrupted login (crash recovery), scoped to the current
+user.

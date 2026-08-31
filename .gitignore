@@ -23,3 +23,8 @@ hono/static/main.css
 ib-rest-api-client
 
 .nswarm
+
+# pipeline run artifacts
+run_pipeline.log
+data/screen_reports_*.txt
+data/analysis_*.md

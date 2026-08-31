@@ -36,6 +36,14 @@ UNIVERSES=(
   "universes/biotech.json"
 )
 
+# RS benchmark downloaded alongside each universe (index-aligned with UNIVERSES)
+# and used by the rs screen: nsdq->QQQ, sector->SPY, biotech->XBI.
+BENCHMARKS=(
+  "QQQ"
+  "SPY"
+  "XBI"
+)
+
 # Start-of-history date for candle downloads (fixed; candles are not refetched).
 DL_FROM="${DL_FROM:-2026-01-01}"
 
@@ -159,10 +167,18 @@ step_login() {
 # ── Step 3: Download candles per universe ───────────────────────────────────
 step_download() {
   log "=== Step 3: download candles (from $DL_FROM) ==="
-  for uni in "${UNIVERSES[@]}"; do
+  local i
+  for i in "${!UNIVERSES[@]}"; do
+    local uni="${UNIVERSES[$i]}"
+    local bench="${BENCHMARKS[$i]:-}"
     log "  downloading: $uni"
     run_or_dry "download $uni" \
       uv --directory "$PY_DIR" run ibkr data dl -U "$uni" -f "$DL_FROM"
+    if [[ -n "$bench" ]]; then
+      log "  downloading benchmark: $bench"
+      run_or_dry "download benchmark $bench" \
+        uv --directory "$PY_DIR" run ibkr data dl "$bench" -f "$DL_FROM"
+    fi
   done
 }
 

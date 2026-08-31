@@ -60,6 +60,7 @@ Reuse an already-running gateway instead of bouncing it each time:
 | Var              | Default        | Meaning                                   |
 |------------------|----------------|-------------------------------------------|
 | `UNIVERSES`      | nsdq + sector + biotech | array of universe paths, edit in script   |
+| `BENCHMARKS`     | QQQ, SPY, XBI | RS benchmark downloaded alongside each universe (index-aligned with `UNIVERSES`) |
 | `DL_FROM`        | `2026-01-01`   | candle history start date                 |
 | `TRADER_PROMPT`  | `~/.pi/agent/prompts/trader.md` | pi system prompt for analysis |
 | `PI_MODEL`       | (ambient)      | model for the pi analysis step            |
@@ -95,6 +96,21 @@ Reuse an already-running gateway instead of bouncing it each time:
 DRY=1 ./run_pipeline.sh        # preview every command without running
 ./run_pipeline.sh              # full run (requires gateway up / session)
 ```
+
+## Per-universe RS benchmark
+
+Each universe's `rs` screen is scored against a benchmark relevant to its own
+symbols, and that benchmark's candles are downloaded as part of Step 3:
+
+| Universe            | RS benchmark |
+|---------------------|-------------|
+| `universes/nsdq.json`    | QQQ     |
+| `universes/sector.json`  | SPY     |
+| `universes/biotech.json` | XBI     |
+
+The mapping lives in `scripts/run_screens.py` (`UNIVERSE_BENCHMARKS`) and is
+mirrored by the `BENCHMARKS` array in `run_pipeline.sh`. Keep the two lists in
+sync when you add universes.
 
 The cleanup step also kills orphaned headless Chromium/Playwright processes
 left by a previously interrupted login (crash recovery), scoped to the current

@@ -32,10 +32,22 @@ from src.bt.screen.screens import _discover, init_screen, resolve_screen_params
 from src.bt.screen.adapter import state_per_interval
 
 UNIVERSE = "universes/nsdq.json"
-BENCHMARKS = ["QQQ", "SPY"]
 INTERVALS = ["1d", "4h"]
 START = "2020-01-01"
 END = "2026-12-31"
+
+# Benchmark used by the relative-strength (`rs`) screen per universe. The
+# benchmark must be relevant to the universe its symbols belong to.
+UNIVERSE_BENCHMARKS = {
+    "universes/nsdq.json": "QQQ",
+    "universes/biotech.json": "XBI",
+    "universes/sector.json": "SPY",
+}
+
+
+def benchmark_for(path: str) -> str:
+    """Return the RS benchmark for a universe file (default: broad market)."""
+    return UNIVERSE_BENCHMARKS.get(path, "SPY")
 
 # `rs` is a cross-sectional ranking, not an absolute condition — it must never
 # "corroborate" a fresh signal.
@@ -58,25 +70,32 @@ class _Vote:
 
 
 def load_symbols(path: str) -> list[str]:
+    """Universe symbols plus the per-universe RS benchmark."""
     with open(path) as f:
         data = json.load(f)
     syms = [s.upper() for s in data["symbols"]]
-    for b in BENCHMARKS:
-        if b not in syms:
-            syms.append(b)
+    bench = benchmark_for(path)
+    if bench not in syms:
+        syms.append(bench)
     return syms
 
 
-def run_all(symbols: list[str]) -> dict[str, dict[str, _Vote]]:
-    """votes[symbol][screen] = _Vote for the latest daily bar."""
+def run_all(symbols: list[str], benchmark: str) -> dict[str, dict[str, _Vote]]:
+    """votes[symbol][screen] = _Vote for the latest daily bar.
+
+    ``benchmark`` is embedded as the sole reference frame and passed to the
+    `rs` screen so every universe is scored against its own relevant benchmark.
+    """
     states = state_per_interval(
-        symbols, _ts(START), _ts(END), INTERVALS, benchmarks=BENCHMARKS
+        symbols, _ts(START), _ts(END), INTERVALS, benchmarks=[benchmark]
     )
     daily = states["1d"]
     votes: dict[str, dict[str, _Vote]] = {}
     for name in sorted(_discover().keys()):
         mod = init_screen(name)
-        resolved = resolve_screen_params(name, {})
+        resolved = resolve_screen_params(
+            name, {"benchmark": benchmark} if name == "rs" else {}
+        )
         results = mod.on_state(daily, resolved)
         for r in results:
             if r.score <= 0 or r.action == "flat":
@@ -107,14 +126,15 @@ def parse_args(argv: list[str] | None = None) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
-    symbols = load_symbols(parse_args(argv))
-    print(f"Universe: {len(symbols)} symbols (incl bench {BENCHMARKS})")
-    screens = sorted(_discover().keys())
+    universe = parse_args(argv)
+    symbols = load_symbols(universe)
+    benchmark = benchmark_for(universe)
+    print(f"Universe: {len(symbols)} symbols (incl bench {benchmark})")
     abs_screens = sorted(ABSOLUTE_SCREENS)
     print(f"Absolute screens: {abs_screens}")
-    print(f"Relative screen : {sorted(RELATIVE_SCREENS)}")
+    print(f"Relative screen : rs (benchmark {benchmark})")
 
-    votes = run_all(symbols)
+    votes = run_all(symbols, benchmark)
 
     # --- absolute-screen convergence --------------------------------------
     print("\n=== CONVERGING SIGNALS — independent absolute screens ===")

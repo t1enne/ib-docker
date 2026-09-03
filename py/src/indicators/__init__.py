@@ -17,6 +17,8 @@ from src.indicators.ta import (
     plus_di,
     minus_di,
     adx,
+    efficiency_ratio,
+    normalized_slope,
 )
 
 from src.indicators.volume_profile import (
@@ -69,6 +71,8 @@ __all__ = [
     "plus_di",
     "minus_di",
     "adx",
+    "efficiency_ratio",
+    "normalized_slope",
     # Volume Profile
     "volume_profile",
     "VolumeProfile",

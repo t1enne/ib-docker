@@ -286,6 +286,78 @@ def mfi(
     return mfi
 
 
+def efficiency_ratio(data: pd.Series, window: int = 10) -> pd.Series:
+    """Kaufman Efficiency Ratio: net path vs total path over ``window`` bars.
+
+    ER = |close[t] - close[t-window]| / sum(|close[i] - close[i-1]|).
+
+    * ER close to 1  -> a clean directional move (high signal-to-noise).
+    * ER close to 0  -> a choppy/oscillating move (net displacement far
+      smaller than the cumulative bar-to-bar travel) — the textbook
+      mean-reversion backdrop.
+
+    Scale-free and bounded [0, 1]; NaN through the first ``window`` bars and
+    whenever the denominator (gross travel) is exactly 0.
+    """
+    net = (data - data.shift(window)).abs()
+    gross = data.diff().abs().rolling(window).sum()
+    er = net / gross.replace(0, np.nan)
+    return er
+
+
+def normalized_slope(
+    price: pd.Series,
+    scale: pd.Series,
+    lookback: int,
+) -> pd.Series:
+    """OLS end-to-end slope of ``price`` over ``lookback``, / ``scale``.
+
+    The leading indicator of whether price is *drifting directionally*. It
+    fits a least-squares line to the last ``lookback`` price points and reports
+    the per-bar OLS slope, normalized by a scale series (e.g. an ATR, a rolling
+    std, or the mean price)::
+
+        normalized_slope = ols_slope(price, lookback) / scale
+
+    * |value| large  -> a persisting directional trend (mean-reversion hostile).
+    * |value| small  -> a flat/sideways equilibrium (fadeable).
+
+    Both ``price`` and ``scale`` share the same index/alignment and must have
+    at least ``lookback`` valid rows before the head (the trailing ``NaN`` head
+    is preserved). ``scale`` is applied element-wise at the line's end point,
+    so the result is per-bar and cursor-truncation safe.
+    """
+    prices = np.asarray(price, dtype=np.float64)
+    scales = np.asarray(scale, dtype=np.float64)
+    n = len(prices)
+    out = np.full(n, np.nan, dtype=np.float64)
+    if lookback < 2 or n < lookback:
+        return pd.Series(out, index=price.index)
+
+    from numpy.lib.stride_tricks import sliding_window_view
+
+    # Window ``i`` spans prices[i : i+lookback]; its per-bar OLS slope belongs
+    # to that window's final bar (index i+lookback-1). ``slopes`` is aligned so
+    # ``slopes[k]`` = the slope of the lookback window ending at bar ``k``.
+    windows = sliding_window_view(prices, lookback)  # shape (n-lb+1, lb)
+    x = np.arange(lookback, dtype=np.float64)
+    xc = x - x.mean()
+    denom = float(xc @ xc)
+    y_c = windows - windows.mean(axis=1, keepdims=True)
+    per_slope = (y_c @ xc) / denom  # (n-lb+1,)
+
+    dst = np.full(n, np.nan, dtype=np.float64)
+    dst[lookback - 1 :] = per_slope  # per_slope[i] ends at bar lookback-1+i
+
+    sc = scales[lookback - 1 :]
+    safe_sc = np.where(sc == 0, np.nan, sc)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = dst[lookback - 1 :] / safe_sc
+    out = np.full(n, np.nan, dtype=np.float64)
+    out[lookback - 1 :] = result
+    return pd.Series(out, index=price.index)
+
+
 def lsma(data: pd.Series, window: int = 14, offset: int = 0) -> pd.Series:
     """Calculate Least Squares Moving Average (LSMA).
 

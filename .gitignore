@@ -30,3 +30,4 @@ data/pipeline.log
 data/pipeline.out
 data/screen_reports_*.txt
 data/analysis_*.md
+ibgateway-stable-standalone*.sh

@@ -1,6 +1,6 @@
 MAKEFLAGS += --no-print-directory --silent
 
-SRC_DIRS := src/bt src/data src/indicators
+SRC_DIRS := src/bt src/data src/indicators src/research
 SRC      := $(SRC_DIRS) 
 .PHONY: help lint format check test run exec
 

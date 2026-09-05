@@ -1,0 +1,58 @@
+{
+  "name": "bio-failed-down-breakout-long",
+  "training_start": "2019-11-15",
+  "training_end": "2019-12-31",
+  "trading_start": "2020-01-01",
+  "trading_end": "2023-12-31",
+  "commission": 0.05,
+  "initial_capital": 100000,
+  "strategy_type": "bio_failed_down_breakout_long_dsl",
+  "bars": [
+    "1h"
+  ],
+  "benchmark_symbols": [
+    "XBI"
+  ],
+  "symbols": [
+    "ABBV",
+    "ALKS",
+    "ALNY",
+    "AMGN",
+    "ARGX",
+    "BIIB",
+    "BMRN",
+    "BMY",
+    "DXCM",
+    "EXEL",
+    "GILD",
+    "IDXX",
+    "ISRG",
+    "JAZZ",
+    "LLY",
+    "MRK",
+    "MRNA",
+    "NVO",
+    "PFE",
+    "REGN",
+    "SNY",
+    "SRPT",
+    "TMO",
+    "UNH",
+    "VRTX"
+  ],
+  "strategy_params": {
+    "vol_period": 24,
+    "vol_mult": 3.0,
+    "range_bars": 48,
+    "extend_pct": 0.005,
+    "require_flat_base": true,
+    "flat_base_slope_atr": 0.5,
+    "atr_period": 14,
+    "stop_atr_mult": 1.5,
+    "shelf_tol_atr": 0.15,
+    "risk_pct": 0.005,
+    "target_atr_rng": 1.0,
+    "cooldown_bars": 96,
+    "min_base_bars": 40
+  }
+}

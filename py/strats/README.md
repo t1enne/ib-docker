@@ -36,6 +36,7 @@ gate/benchmark index over the same backtest window.
 | `bear_breakout_dsl_2022` | 64 | 1.47 | Highest PF (4.69) but a *bear-breakout* run mostly in bull/grind → edge likely rides 2022. Needs a bear-regime split. |
 | `vp_breakout_dsl_regime` | 202 | 0.91 | Positive (+59%) but trails SPY and Sharpe<1; regime filter may cost alpha. Tune. |
 | `rsi_divergence_dsl` | 25 | 0.91 | PF 4.22 but n=25 < 30 → no statistical confidence yet. |
+| `xbi_gated_laggard_dsl` | 61 | 0.52 | Biotech XBI-gated worst-laggard basket. +21.6% vs XBI −5.6% full-window 2020–2023, but **4-fold walk-forward OOS Sharpe ~0.03** (fold-3 biotech bear −11%, SR −1.02). Cross-sectional green-regime only; gate reduces DD but not the bear. 2024+ OOS untouched. Needs regime-robust rebuilt or explicit green-biotech-only scope. |
 
 ## FAIL — negative, weak, or no statistical confidence
 
@@ -43,6 +44,7 @@ gate/benchmark index over the same backtest window.
 - **Losing / negative expectancy:** `kalman_pairs_dsl` (−13.6%, PF 0.71).
 - **Underperforms buy-and-hold badly:** `trend_pullback_atr_trail_dsl_L15_r15` (+73% vs SPY +234%), `shannons_demon_dsl` (+156% vs its own 50/50 SPY+GLD hold +189%), `kalman_mr_regime_dsl` (+9.9% vs SPY +44%).
 - **No statistical confidence (n<30):** `ema_cross_dsl` (7), `macd_mfi_divergence` (8), `pf_equal_weight` (4), `rsi_bearish_divergence` (1).
+- **Retired after honest fail — biotech 1h single-name reversions** (removed): `bio_post_catalyst_fade_dsl` (24-name biotech, short failed up-breakouts on 1h; −0.87%, SR −0.165, n=26, gap-killed) and `bio_failed_down_breakout_long_dsl` (long mirror; ≈0, SR 0.01, n=32). Both under n≥40, no OOS edge. Lesson: biotech 1h idiosyncratic catalyst gaps (kurtosis 300–800) destroy single-name time-series edges; the surviving structure is cross-sectional + basket-level.
 
 ## Research probes — `quant/` & this session
 

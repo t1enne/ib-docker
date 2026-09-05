@@ -467,7 +467,7 @@ def build_symbol_attribution(
             )
         )
 
-    return tuple(sorted(results, key=lambda x: abs(x.total_pnl), reverse=True))
+    return tuple(sorted(results, key=lambda x: x.total_pnl, reverse=True))
 
 
 def _safe_date_str(date: object | None) -> str:

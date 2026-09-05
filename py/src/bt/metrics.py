@@ -539,6 +539,7 @@ def get_backtest_results_analysis(
         lines.append("\nTrades")
         trade_cols = (
             Col("Sym", "<"),
+            Col("Cost$", ">"),
             Col("Entry", ">"),
             Col("Exit", ">"),
             Col("Entry$", ">"),
@@ -563,6 +564,7 @@ def get_backtest_results_analysis(
             trade_rows.append(
                 (
                     t.symbol,
+                    f"{t.entry_price * t.qty:.2f}",
                     _safe_date_str(t.entry_time),
                     _safe_date_str(t.exit_time),
                     f"{t.entry_price:.2f}",

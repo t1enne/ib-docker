@@ -68,6 +68,22 @@ class Params(StrategyParams):
     long_share: float = 0.5  # gross equity fraction on the long leg
     short_share: float = 0.5  # gross equity fraction shorted
     use_short: bool = True  # short the top-residual decile?
+    # -- ATR downside cap (chandelier trailing stop on longs) -----------------
+    # Each open LONG is governed by an ATR-trailed stop re-anchored every bar
+    # on the highest high of the last ``trail_lookback`` bars minus
+    # ``trail_atr_mult * ATR``. The stop only ever ratchets UP (never loosens),
+    # and the position is force-closed the bar its close breaks the trail. This
+    # caps the down-side tails of the mean-reversion book: a holding that goes
+    # wrong and keeps falling is cut early instead of riding dead weight until
+    # the next monthly rotation. ``atr_grace_bars`` gives a fresh position room
+    # to dip-and-revert before the trail starts enforcing, so an entry isn't
+    # stopped out on the first reversal wobble. Default OFF (``atr_stop=False``)
+    # is byte-identical to the ungated behaviour below.
+    atr_stop: bool = False
+    atr_period: int = 14  # ATR lookback (bars)
+    trail_lookback: int = 10  # highest-high window the trail anchors on
+    trail_atr_mult: float = 3.0  # ATR distance held under the highest high
+    atr_grace_bars: int = 3  # bars after entry before the trail is enforced
     # -- gating ---------------------------------------------------------------
     warmup_bars: int = 84  # visible daily bars (63 OLS + 21 lookback) before first book
     min_total_daily_history: int = 130  # member needs >= this many daily bars to rank
@@ -91,11 +107,22 @@ class Params(StrategyParams):
 
 
 @dataclass
+class _Trail:
+    """Mutable per-position ATR-trail bookkeeping (lives in ``ctx.shared``)."""
+
+    bars_down: int = 0  # daily bars since (re)open
+    trail: float = float("nan")  # current ratcheting stop (only ever rises)
+
+
+@dataclass
 class _Ctx:
     """Cross-call bookkeeping for one run/window (held in ``ctx.shared``)."""
 
     bars_to_refresh: int = 0  # countdown; when 0 the book is due to refresh
     initialized: bool = False  # True once the first book has formed
+    # ATR-trail bookkeeping (only used when ``atr_stop`` is on): each held long
+    # -> its ratcheting stop tracker.
+    atr_trails: dict[str, _Trail] | None = None
     # AE regime-bias state (only used when ``ae_bias`` is on).
     ae: OnlineAdaptiveEntropy | None = None  # QQQ adaptive-entropy tracker
     ae_trend: int = 0  # latest raw quantised QQQ AE trend (-1/0/1); 0 if not warm
@@ -197,6 +224,99 @@ def _leg_share(params: Params, side: str) -> float:
     share = params.long_share if side == "long" else params.short_share
     denom = max(1, params.tail_n)
     return float(max(0.0, min(share / denom, 1.0)))
+
+
+def _atr_high_anchor(ctx: StrategyContext, sym: str, lookback: int) -> float:
+    """Highest high of the last ``lookback`` visible bars for ``sym``.
+
+    Cursor-truncated (never a future bar). NaN when no highs are visible.
+    """
+    try:
+        o = ctx.ohlcv(sym)
+        highs = o.high.to_array()
+    except KeyError:
+        return float("nan")
+    if highs.size < 1:
+        return float("nan")
+    lo = max(0, highs.size - lookback)
+    return float(highs[lo:].max())
+
+
+def _trail_level_from(atr: float, anchor: float, mult: float) -> float:
+    """Chandelier stop from raw ATR: ``anchor - mult * atr``; NaN when ATR bad."""
+    if not np.isfinite(atr) or atr <= 0 or not np.isfinite(anchor):
+        return float("nan")
+    return anchor - mult * atr
+
+
+def _atr_trail_level(
+    ctx: StrategyContext,
+    sym: str,
+    params: Params,
+    anchor: float,
+) -> float:
+    """Chandelier ATR stop for ``sym``: ``anchor - mult * ATR`` (NaN if ATR bad)."""
+    try:
+        atr_view = ctx.ta.atr(sym, params.atr_period)
+    except Exception:
+        return float("nan")
+    if len(atr_view) < 1:
+        return float("nan")
+    atr = float(atr_view[-1])
+    return _trail_level_from(atr, anchor, params.trail_atr_mult)
+
+
+def _handle_long_trails(ctx: StrategyContext, st: _Ctx, params: Params) -> None:
+    """Per-bar downside management: ATR-trail stop every open long, once/bar.
+
+    Re-anchor the chandelier stop on the highest high of the last
+    ``trail_lookback`` bars and ratchet it only upward. Enforce only once the
+    position has been open (and survived) at least ``atr_grace_bars`` daily
+    bars so a fresh reversion entry gets room to dip-and-revert before the
+    trail tightens. Close the bar the close breaks the stop.
+
+    Called from the top of ``on_candle`` (before the refresh-cadence gate) so it
+    runs every trading bar regardless of the monthly rotation schedule.
+    """
+    if not params.atr_stop:
+        return
+    trails = st.atr_trails
+    if trails is None:
+        trails = {}
+        st.atr_trails = trails
+
+    held: dict[str, str] = {}
+    for sym in ctx.symbols:
+        if _is_benchmark(sym, params.benchmark):
+            continue
+        side = _side_of(_net_qty(ctx, sym))
+        if side == "long":
+            held[sym] = side
+
+    # Prune trail records for names no longer held (closed by rotation etc.).
+    for sym in [s for s in trails if s not in held]:
+        trails.pop(sym, None)
+
+    for sym in held:
+        rec = trails.get(sym)
+        if rec is None:
+            rec = _Trail()
+            trails[sym] = rec
+        rec.bars_down += 1
+        if rec.bars_down <= params.atr_grace_bars:
+            continue  # grace period: don't stop out a reversion entry early
+
+        close = float(ctx.ohlcv(sym).close[-1])
+        anchor = _atr_high_anchor(ctx, sym, params.trail_lookback)
+        level = _atr_trail_level(ctx, sym, params, anchor)
+        if not np.isfinite(level):
+            continue  # no ATR yet -> nothing to enforce
+        # Ratchet only upward (never loosen), then test the live close.
+        if np.isnan(rec.trail) or level > rec.trail:
+            rec.trail = level
+        if close < rec.trail:
+            ctx.close(sym, reason="[xmr] ATR trail stop")
+            trails.pop(sym, None)
 
 
 def _rank_targets(ctx: StrategyContext, params: Params) -> dict[str, str]:
@@ -337,6 +457,11 @@ def on_candle(ctx: StrategyContext):
         return
     if bench.size < params.warmup_bars:
         return
+
+    # Per-bar downside cap: ATR-trail every open long before the rotation gate,
+    # so a trailing holding is cut the moment it breaks the ratcheting stop,
+    # whatever the monthly refresh schedule says today.
+    _handle_long_trails(ctx, st, params)
 
     # Count down the hold window. The first book forms immediately on the first
     # warm day; after that we only refresh every ``hold_days`` trading bars.

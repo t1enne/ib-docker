@@ -2,11 +2,12 @@ MAKEFLAGS += --no-print-directory --silent
 
 SRC_DIRS := src/bt src/data src/indicators src/research
 SRC      := $(SRC_DIRS) 
-.PHONY: help lint format check test run exec
+.PHONY: help lint format check test run exec dash
 
 help:
 	@echo "Usage:"
 	@echo "  make run  <cli-args>  — Run the CLI"
+	@echo "  make dash FILE=<strategy.json>  — Streamlit dashboard over a backtest"
 	@echo "  make check            — Lint + format + typecheck + tests"
 	@echo "  make test             — Run all tests"
 	@echo "  make lint             — Ruff check"
@@ -50,6 +51,17 @@ run:
 	fi
 
 exec: run
+
+# Streamlit dashboard: run backtest -F plot to a tmp file then serve it.
+#   make dash FILE=strats/pass/ema_cross_dsl.json
+DASH_OUT ?= /tmp/bt_dash_run.json
+
+dash:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make dash FILE=<strategy.json>"; exit 1; \
+	fi
+	uv run ibkr bt run $(FILE) -F plot -o $(DASH_OUT)
+	uv run streamlit run scripts/bt_dashboard.py --server.headless true -- $(DASH_OUT)
 
 # Swallow extra words passed after make run so Make doesn't error.
 # e.g. make run bt run strat.json → args consumed by 'run'; 'bt'/'run'/'strat.json' matched here.

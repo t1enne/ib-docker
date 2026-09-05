@@ -7,6 +7,8 @@ from src.bt.output import (
     equity_points,
     render_result_json,
     render_result_jsonl,
+    render_plot_json,
+    _frame_interval,
 )
 from src.bt.state import (
     ActionType,
@@ -102,3 +104,64 @@ def test_render_result_jsonl_ends_with_summary_record():
     assert len(lines) == 4
     assert set(lines[0]) == {"ts", "equity"}
     assert set(lines[-1]) == {"metrics", "trades"}
+
+
+def _candle_df(index, closes):
+    return pd.DataFrame(
+        {
+            "open": closes,
+            "high": [c + 1 for c in closes],
+            "low": [c - 1 for c in closes],
+            "close": closes,
+            "volume": [1000.0] * len(closes),
+        },
+        index=pd.to_datetime(index),
+    )
+
+
+def _fake_store():
+    """CandleStore stand-in exposing Mapping keys + item lookup."""
+    idx = ["2021-01-05 09:30:00", "2021-01-06 10:00:00", "2021-01-07 11:00:00"]
+    closes = [100.0, 101.0, 103.0]
+    return {
+        ("AAPL", "1h"): _candle_df(idx, closes),
+        ("AAPL", "4h"): _candle_df(["2021-01-05 10:00:00"], [99.0]),
+    }
+
+
+def test_render_plot_json_shape_and_interval_resolution():
+    class FakeStore:
+        def __init__(self, store):
+            self._store = store
+
+        def keys(self):
+            return self._store.keys()
+
+        def __getitem__(self, key):
+            return self._store[key]
+
+    data = FakeStore(_fake_store())
+    obj = type("R", (), {"pf": _pf(), "data": data, "benchmark_curves": {}})()
+    r = render_plot_json(obj)
+    assert set(r) == {
+        "metrics",
+        "symbols",
+        "trades",
+        "equity_curve",
+        "benchmark_curves",
+    }
+    # two frames stored for AAPL (1h + 4h) come back as a list
+    assert len(r["symbols"]["AAPL"]) == 2
+    one_h = next(f for f in r["symbols"]["AAPL"] if f["interval"] == "1h")
+    assert len(one_h["bars"]) == 3
+    bar = one_h["bars"][1]
+    assert len(bar) == 6 and bar[1] == 101.0 and bar[4] == 101.0
+    # entry time on an index tick -> that frame's interval
+    assert r["trades"][0]["interval"] == "1h"
+
+
+def test_frame_interval_falls_back_to_first_frame():
+    data = _fake_store()
+    # a ts in no frame's index -> pick the symbol's first frame
+    off = pd.Timestamp("2021-06-01")
+    assert _frame_interval(type("R", (), {"data": data})(), "AAPL", off) == "1h"

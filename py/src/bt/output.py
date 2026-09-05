@@ -98,6 +98,74 @@ def render_result_json(results: Any) -> dict[str, Any]:
     }
 
 
+def _frame_interval(results: Any, symbol: str, entry_ts: Any) -> str | None:
+    """Resolve which candle frame a trade belongs to for the given symbol.
+
+    A trade's entry/exit timestamps are exact index points in the signal
+    interval's frame (the interval that triggered the fill). When multiple
+    intervals exist for a symbol (base + HTF read via the CandleStore), pick
+    the frame whose index actually contains the entry timestamp; otherwise
+    fall back to the symbol's first frame.
+    """
+    data = results.data
+    frames: list[tuple[str, pd.DataFrame]] = [
+        (iv, data[(sym, iv)]) for (sym, iv) in data.keys() if sym == symbol
+    ]
+    if not frames:
+        return None
+    for iv, df in frames:
+        if entry_ts in df.index:
+            return iv
+    return frames[0][0]
+
+
+def render_plot_json(results: Any) -> dict[str, Any]:
+    """BacktestResults -> one JSON doc shaped for candlestick charting.
+
+    Extends the base json shape (metrics + trades + equity) with, per symbol,
+    the candle OHLCV series used by the dashboard so no DB re-query is needed
+    to draw price markers. Each trade also gains its resolved ``interval``.
+    """
+    symbols: dict[str, list[dict[str, Any]]] = {}
+    for sym, iv in results.data.keys():
+        df = results.data[(sym, iv)]
+        symbols.setdefault(sym, []).append(
+            {
+                "interval": iv,
+                "bars": [
+                    [
+                        _ts_str(ts),
+                        float(opn),
+                        float(high),
+                        float(low),
+                        float(clse),
+                        float(vol),
+                    ]
+                    for ts, opn, high, low, clse, vol in zip(
+                        df.index,
+                        df["open"],
+                        df["high"],
+                        df["low"],
+                        df["close"],
+                        df["volume"],
+                    )
+                ],
+            }
+        )
+    trades = []
+    for t in results.pf.trades:
+        tj = trade_json(t)
+        tj["interval"] = _frame_interval(results, t.symbol, t.entry_time)
+        trades.append(tj)
+    return {
+        "metrics": dict(_metric_pairs(results.pf)),
+        "symbols": symbols,
+        "trades": trades,
+        "equity_curve": equity_points(results.pf.equity_curve),
+        "benchmark_curves": benchmark_json(results.benchmark_curves),
+    }
+
+
 def render_result_jsonl(results: Any) -> list[dict[str, Any]]:
     """BacktestResults -> JSONL-shaped list.
 
@@ -123,4 +191,5 @@ __all__ = [
     "benchmark_json",
     "render_result_json",
     "render_result_jsonl",
+    "render_plot_json",
 ]

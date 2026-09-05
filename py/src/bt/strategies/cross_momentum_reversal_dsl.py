@@ -158,8 +158,13 @@ def _side_of(qty: float) -> str | None:
     return None
 
 
-def _leg_size(params: Params, side: str) -> float:
-    """Per-name 0..1 capital fraction for one book side (gross split over tail)."""
+def _leg_share(params: Params, side: str) -> float:
+    """0..1 live-equity fraction each name on a book side gets (gross/tail split).
+
+    Combined with ``ctx.long/short(..., size_mode="equity")`` this sizes every
+    name off the current MTM book, so positions compound with PnL and capital
+    utilization stays high rather than drifting down off fixed seed capital.
+    """
     share = params.long_share if side == "long" else params.short_share
     denom = max(1, params.tail_n)
     return float(max(0.0, min(share / denom, 1.0)))
@@ -248,17 +253,28 @@ def _refresh(ctx: StrategyContext, st: _Ctx, params: Params) -> None:
         if targets.get(sym) != side:
             ctx.close(sym, reason=f"[xmr] rotate out of {side} {sym}")
 
-    # (b) open fresh targets absent a same-side current position
+    # (b) open fresh targets absent a same-side current position. Sizes target a
+    # ``size_mode="equity"`` live fraction of the book (compounds with PnL).
     for sym, side in targets.items():
         if current.get(sym) == side:
             continue
-        size = _leg_size(params, side)
+        size = _leg_share(params, side)
         if size <= 0:
             continue
         if side == "long":
-            ctx.long(sym, size=size, reason=f"[xmr] long worst-resid {sym}")
+            ctx.long(
+                sym,
+                size=size,
+                size_mode="equity",
+                reason=f"[xmr] long worst-resid {sym}",
+            )
         else:
-            ctx.short(sym, size=size, reason=f"[xmr] short top-resid {sym}")
+            ctx.short(
+                sym,
+                size=size,
+                size_mode="equity",
+                reason=f"[xmr] short top-resid {sym}",
+            )
 
     # (c) reset the hold cadence and mark initialized
     st.bars_to_refresh = params.hold_days

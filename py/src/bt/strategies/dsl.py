@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import sys
 from types import FunctionType
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from src.bt.state import ActionType, TradeSignal, BacktestState, Candle, Position
 from src.bt.strategies.series import SeriesView
@@ -201,6 +201,21 @@ class StrategyContext:
 
         return avg_entry(self._state.portfolio, sym)
 
+    def current_equity(self) -> float:
+        """Live mark-to-market equity: cash + unrealized across all open lots.
+
+        Flat book -> equals cash (grows/shrinks with realized PnL). Used as the
+        base for ``size_mode="equity"`` sizing so a ``size`` is a live fraction
+        of the current book rather than a fixed amount of seed capital.
+        """
+        portfolio = self._state.portfolio
+        positions_value = sum(
+            pos.qty * pos.last_price
+            for lots in portfolio.positions.values()
+            for pos in lots
+        )
+        return float(portfolio.cash + positions_value)
+
     # -- lot-targeted mutation -------------------------------------------------
 
     def partial_close(
@@ -253,22 +268,29 @@ class StrategyContext:
         tp: float | None = None,
         tag: str = "",
         reason: Any = "long",
+        size_mode: Literal["capital", "equity"] = "capital",
     ) -> None:
         """Open a long position in ``sym`` ``size`` fraction of capital.
 
         Always opens a **fresh lot** — this is Pine ``entry`` semantics, never
-        a netting adjust. ``size`` is a 0..1 fraction of *initial* capital
-        converted to an absolute share count (``size * initial_capital /
-        price``) before emission — a fixed-size order, not scaled by available
-        cash. When omitted, the engine's shared sizing layer sizes the position
-        from ``SizingParams`` (signal emitted with ``qty=0``).
+        a netting adjust. ``size`` is a 0..1 fraction of a capital base
+        converted to an absolute share count (``size * base / price``) before
+        emission — a fixed-size order, not scaled by available cash.
+
+        ``size_mode='capital'`` (default) sizes off *initial* capital (legacy;
+        fixed dollar amount). ``size_mode='equity'`` sizes off *current* MTM
+        equity so a ``size`` is a live fraction that grows/shrinks with PnL and
+        keeps capital utilization high — the share count is recomputed from the
+        live book at emit time. When ``size`` is omitted the engine's shared
+        sizing layer sizes the position (signal emitted with ``qty=0``),
+        regardless of ``size_mode``.
         ``sl``/``tp`` are fractional percentages converted to absolute levels.
         ``tag`` is an optional strategy-facing lot label (Pine entry-name
         analogue, e.g. ``"spy-r1"``) stored on the :class:`Position` so
         ``partial_close(..., tag=...)`` is readable lot targeting instead of
         raw ``position_id`` strings.
         """
-        self._emit(ActionType.long, sym, size, sl, tp, reason, tag)
+        self._emit(ActionType.long, sym, size, sl, tp, reason, tag, size_mode)
 
     def short(
         self,
@@ -278,20 +300,27 @@ class StrategyContext:
         tp: float | None = None,
         tag: str = "",
         reason: Any = "short",
+        size_mode: Literal["capital", "equity"] = "capital",
     ) -> None:
         """Open a short position in ``sym`` ``size`` fraction of capital.
 
-        ``size`` is a 0..1 fraction of *initial* capital converted to an
-        absolute share count (``size * initial_capital / price``) before
-        emission — a fixed-size order, not scaled by available cash. When
-        omitted, the engine's shared sizing layer sizes the position
-        from ``SizingParams`` (signal emitted with ``qty=0``). ``sl``/
-        ``tp`` are fractional percentages converted to absolute levels.
+        ``size`` is a 0..1 fraction of a capital base converted to an absolute
+        share count (``size * base / price``) before emission — a fixed-size
+        order, not scaled by available cash.
+
+        ``size_mode='capital'`` (default) sizes off *initial* capital (legacy;
+        fixed dollar amount). ``size_mode='equity'`` sizes off *current* MTM
+        equity so ``size`` is a live fraction that grows/shrinks with PnL and
+        keeps capital utilization high — the share count is recomputed from the
+        live book at emit time. When ``size`` is omitted the engine's shared
+        sizing layer sizes the position (signal emitted with ``qty=0``),
+        regardless of ``size_mode``. ``sl``/``tp`` are fractional percentages
+        converted to absolute levels.
         ``tag`` is an optional strategy-facing lot label (Pine entry-name
         analogue) stored on the :class:`Position` for readable ``partial_close``
         lot targeting.
         """
-        self._emit(ActionType.short, sym, size, sl, tp, reason, tag)
+        self._emit(ActionType.short, sym, size, sl, tp, reason, tag, size_mode)
 
     def close(
         self, sym: str, reason: Any = "close", guard_price: float | None = None
@@ -341,20 +370,25 @@ class StrategyContext:
         tp: float | None,
         reason: Any,
         tag: str = "",
+        size_mode: Literal["capital", "equity"] = "capital",
     ) -> None:
         price = self.price(sym)
         is_long = action == ActionType.long
         sl_price, tp_price = sl_tp_from_pct(
             price, sl or 0.0, tp or 0.0, is_long=is_long
         )
-        # Explicit ``size`` -> fixed-size order: 0..1 fraction of *initial*
-        # capital -> absolute share count (unchanged legacy behavior).
-        # Omitted ``size`` -> qty=0, sized by the engine's shared sizing layer.
-        qty = (
-            0.0
-            if size is None
-            else round(size * self._state.portfolio.initial_capital / price, 4)
+        # Explicit ``size`` -> 0..1 fraction of a capital base -> absolute share
+        # count. ``size_mode`` picks the base: ``"capital"`` = initial capital
+        # (legacy fixed-dollar behavior); ``"equity"`` = live MTM equity, so a
+        # ``size`` tracks the growing/shrinking book (compounds with PnL, keeps
+        # utilization high). Omitted ``size`` -> qty=0, sized by the engine's
+        # shared sizing layer regardless of ``size_mode``.
+        base = (
+            self._state.portfolio.initial_capital
+            if size_mode == "capital"
+            else self.current_equity()
         )
+        qty = 0.0 if size is None else round(size * base / price, 4)
         self._signals.append(
             TradeSignal(
                 action=action,

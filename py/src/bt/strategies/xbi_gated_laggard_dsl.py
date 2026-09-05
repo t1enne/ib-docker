@@ -227,7 +227,12 @@ def _refresh(ctx: StrategyContext, st: _Ctx, params: Params) -> None:
     for sym in targets:
         if sym in current:
             continue
-        ctx.long(sym, size=params.position_size, reason=f"[xbi-gld] long laggard {sym}")
+        ctx.long(
+            sym,
+            size=params.position_size,
+            reason=f"[xbi-gld] long laggard {sym}",
+            size_mode="equity",
+        )
 
     st.bars_to_refresh = params.hold_days
     st.initialized = True

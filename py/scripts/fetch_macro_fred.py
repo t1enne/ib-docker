@@ -57,6 +57,11 @@ DEFAULT_SERIES: dict[str, dict] = {
         "id": "BOPGSTB",
         "title": "Trade Balance: Goods and Services, Balance of Payments",
     },
+    "dgs2": {"id": "DGS2", "title": "Treasury Yield 2-Year"},
+    "t10y2y": {
+        "id": "T10Y2Y",
+        "title": "Market Yield on U.S. Treasury Securities at 10-Year, 2-Year Constant Maturity,",
+    },
 }
 
 

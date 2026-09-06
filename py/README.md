@@ -6,9 +6,12 @@ Modular CLI toolkit for quantitative trading: data synchronization, indicator co
 
 ```bash
 uv sync
-uv run ibkr bt run strats/trend_pullback_atr_enhanced.json
-make run bt run strats/trend_pullback_atr_enhanced.json   # same, via Make shortcut
+uv run ibkr bt run strats/pass/<config>.json
+make run bt run strats/pass/<config>.json   # same, via Make shortcut
 ```
+
+Configs live classified under `strats/{pass,wip,fail}/` (see `SKILL.md`);
+the module behind each is `strategy_type` in the JSON.
 
 `make run` with no args shows available commands:
 
@@ -20,7 +23,7 @@ make run bt -- --help              # Click help for backtesting subgroup
 you must separate them with `--`:
 
 ```bash
-make run bt run strats/trend_pullback_atr_enhanced.json -- --format jsonl
+make run bt run strats/pass/<config>.json -- --format jsonl
 ```
 
 Run `make run <args>` for zero extra typing; use `uv run ibkr <args>` directly to avoid the `--` syntax.
@@ -42,9 +45,12 @@ append_candle → execute_pending → generate_signals
 
 ### Composition
 
-Strategies are plain modules with `on_candle(state, candle, params) → list[TradeSignal]`.
-Handlers (`ExecutionHandler`, `RiskHandler`) are dataclasses wrapping injectable functions.
-Auto-discovery scans `src/bt/strategies/` — any `.py` with `STRATEGY_TYPE` + `on_candle()` is registered.
+Strategies are authored two ways: on the **strategy DSL** (`@strategy()`-decorated
+functions of a `StrategyContext` — the default; see `src/bt/strategies/dsl.py`)
+or as raw `on_candle(state, candle, params) → list[TradeSignal]` modules. Both
+compile to the same auto-discovered hook. Handlers (`ExecutionHandler`,
+`RiskHandler`) are dataclasses wrapping injectable functions. Auto-discovery
+scans `src/bt/strategies/` — any module exposing `STRATEGY_TYPE` is registered.
 
 ### Multi-Symbol & Multi-Interval Data Flow
 
@@ -202,8 +208,8 @@ Evaluates a strategy's **fixed** parameter set across IS/OOS windows. Two modes:
 - `--folds <n>` — expansion-window walk-forward: IS always starts at `trading_start` and grows, producing `n` non-empty folds.
 
 ```bash
-uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --folds 4
-uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --is-end 2020-12-31 --format json
+uv run ibkr bt split strats/pass/<config>.json --folds 4
+uv run ibkr bt split strats/pass/<config>.json --is-end 2020-12-31 --format json
 ```
 
 Options: `--min-is-years` (walk-forward first-fold history floor, default 5.0),
@@ -223,7 +229,7 @@ fold's in-sample window**, pick the best combo (by `--sort-by`, default
 params. OOS metrics are never optimized against.
 
 ```bash
-uv run ibkr bt optimize strats/trend_pullback_atr_enhanced.json \
+uv run ibkr bt optimize strats/pass/<config>.json \
   '{"strategy_params":{"atr_mult":[1.5,2.0,2.5]}}' --folds 4
 uv run ibkr bt optimize strat.json '{...grid...}' --is-end 2020-12-31 --format json
 ```
@@ -329,7 +335,7 @@ from src.bt import load_strategy, Backtest, run, get_backtest_results_analysis
 from src.bt.data_feed import load_candles
 from src.bt.strategies import init_strat
 
-config = load_strategy("strats/momentum_regime.json")
+config = load_strategy("strats/pass/momentum_compression_breakout_ae_gate_SPY.json")
 bt = Backtest(config)
 df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bars[0])
 results = run(bt, df, strat_mod=init_strat(config.strategy_type))

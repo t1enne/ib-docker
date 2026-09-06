@@ -14,8 +14,9 @@ gate/benchmark index over the same backtest window.
 | `cup_handle_dsl` | 1d | 122 | 1.38 | +187% | SPY +80% | Beats hold 2.3x, PF 2.82, +768/trade, 5yr. Re-validated. |
 
 > **Read this before trusting either number.** Both winners carry two standing
-> caveats established by A/B stress tests (see `quant/` run configs + session
-> notes):
+> caveats established by A/B stress tests (findings recorded here with the
+> historical session notes; probe configs were retired after the negatives were
+documented):
 > 1. **Survivorship-weighted universe.** Symbol lists are curated today's
 >    winners. A point-in-time/survivorship-free rebuild cut the momentum
 >    config's +491%→~+187%, SR 1.40→~1.0 (one-variable A/B, same engine). Any
@@ -46,20 +47,26 @@ gate/benchmark index over the same backtest window.
 - **No statistical confidence (n<30):** `ema_cross_dsl` (7), `macd_mfi_divergence` (8), `pf_equal_weight` (4), `rsi_bearish_divergence` (1).
 - **Retired after honest fail — biotech 1h single-name reversions** (removed): `bio_post_catalyst_fade_dsl` (24-name biotech, short failed up-breakouts on 1h; −0.87%, SR −0.165, n=26, gap-killed) and `bio_failed_down_breakout_long_dsl` (long mirror; ≈0, SR 0.01, n=32). Both under n≥40, no OOS edge. Lesson: biotech 1h idiosyncratic catalyst gaps (kurtosis 300–800) destroy single-name time-series edges; the surviving structure is cross-sectional + basket-level.
 
-## Research probes — `quant/` & this session
+## Documented negatives from the momentum-gate investigation
 
-`strats/quant/` holds A/B run configs from the momentum-gate investigation
-(QQQ-gate, biotech/XBI-gate, and the gate×benchmark split). They are NOT pass
-candidates; they document negative transfers:
+These A/B probes (QQQ-gate, biotech/XBI-gate, and the gate×benchmark split)
+were standalone run configs, since retired after recording — they are NOT pass
+candidates, and the findings survive here as documented negative transfers:
 - Momentum AE-gate on a Nasdaq/QQQ bench: SR → ~0.77 (edge was SPY-gate).
 - Momentum AE-gate on biotech/XBI: near-dead (SR ~0.25, PF ~1.24) — setup does
   not fit biotech's binary-event / gap profile.
 
-## Run any of them
+They can be rebuilt from the caveats above if re-testing is ever needed.
+
+## Run any resident config
+
+Configs live by classification under `strats/{pass,wip,fail}/` (names drift as
+strategies are moved/retired — this ledger tracks them, the filesystem is
+canonical):
 
 ```bash
 uv run ibkr bt run strats/pass/momentum_compression_breakout_ae_gate_SPY.json
-uv run ibkr bt run strats/pass/cup_handle_dsl.json
+uv run ibkr bt run strats/wip/cup_handle_dsl.json
 uv run ibkr bt run strats/wip/entropy_vp_breakdown.json
 # batch all configurations in one bucket to JSON/text:
 uv run ibkr bt run <config> -F json

@@ -13,9 +13,9 @@ Full backtesting agent for the IBKR PY quantitative trading toolkit. Design, imp
 When asked to backtest, create a strategy, or evaluate a trading idea, follow this sequence:
 
 1. **Understand the request** — what symbols, what kind of strategy, what timeframe?
-2. **Pick or write a strategy module** — reuse existing if possible (see table below), otherwise write `on_candle()`.
-3. **Write the JSON config** — create `strats/<name>.json` with appropriate params.
-4. **Run the backtest** — `uv run ibkr bt run strats/<name>.json`.
+2. **Pick or write a strategy module** — reuse an existing `STRATEGY_TYPE` if one fits, otherwise write a new one (DSL by default).
+3. **Write the JSON config** — create `strats/<pass|wip|fail>/<name>.json`.
+4. **Run the backtest** — `uv run ibkr bt run strats/<pass|wip|fail>/<name>.json`.
 5. **Interpret and report** — summarize equity curve, metrics, drawdowns, trade log.
 
 ## Project Location
@@ -46,89 +46,76 @@ cd /home/nasrt/Documents/code/dev/ibkr/py
 
 ### Step 1: Pick or Write a Strategy Module
 
-Strategies live in `src/bt/strategies/`. A strategy module must export one function:
+Strategies live in `src/bt/strategies/`. Two authoring styles, both auto-discovered
+(any module exposing `STRATEGY_TYPE` is registered; nothing to wire):
 
-```python
-def on_candle(
-    state: BacktestState, candle: Candle, strategy_params: dict
-) -> list[TradeSignal]:
-    """Called on every candle. Return signals to open/close positions."""
-    ...
-```
-
-**The state object gives you:**
-
-- `state.portfolio` — `PortfolioState` with `.cash`, `.positions` (dict), `.trades`, `.equity_curve`
-- `state.portfolio.positions.get(symbol)` — check if already in a position
-- `state.candles` — `CandleStore` (Mapping keyed by `(symbol, interval)`), supports:
-  - `state.candles[(sym, interval)]` — `pd.DataFrame` of OHLCV bars (cursor-truncated, lookahead-safe)
-  - `state.candles.get((sym, interval))` — same, but returns `None` if missing
-  - `state.candles.latest(sym, interval)` — O(1) latest close (`float | None`)
-  - `state.candles.count(sym, interval)` — O(1) bar count (`int`)
-- `state.timestamp` — current `pd.Timestamp`
-
-**Available indicators** (`from src.indicators.ta import ...`) :
-`ema`, `sma`, `rsi`, `atr`, `bollinger_bands`, `macd`, `stochastic`, `momentum`, `volatility`, `vwma`, `obv`, `mfi`, `lsma`, `plus_di`, `minus_di`, `adx`
-
-**Signal helpers** (`from src.bt.strategies.utils import ...`):
-
-```python
-open(candle, ActionType.long, "reason", hedge=1.0)    # → [TradeSignal]
-close(candle, position, "reason")                       # → [TradeSignal]
-htf_candles(state, "4h", candle)                        # → pd.DataFrame (lookahead-safe)
-```
-
-**HTF access pattern:**
-
-HTF candles accumulate in `state.candles` keyed by their interval. Use the same
-CandleStore interface — no separate `state.htf_data` dict:
-
-```python
-# Direct CandleStore access (preferred — zero-function-call overhead)
-htf_df = state.candles.get((candle.symbol, "4h"))
-if htf_df is not None and len(htf_df) >= 2:
-    htf_ema = ta.ema(htf_df["close"], 20).iloc[-1]
-
-# Or via the helper (lookahead-safe wrapper)
-htf = htf_candles(state, "4h", candle)
-if not htf.empty:
-    htf_close = htf["close"]
-    htf_ema = ta.ema(htf_close, 20).iloc[-1]
-```
-
-**Existing strategies** (in `src/bt/strategies/`):
-
-| File                             | `strategy_type` key                          | Description                                                                      |
-| -------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
-| `aegis.py`                       | `aegis`                                      | Multi-asset adaptive equity generation (momentum/correlation/risk-free rotation) |
-| `kalman_pairs.py`                | `kalman_pairs`                               | Kalman-filter pairs trading (mean-reversion, z-score of filtered spread)         |
-| `momentum_regime.py`             | `momentum_regime`                            | Momentum strategy filtered by regime (HMM/trend detection)                       |
-| `sector_mean_reversion.py`       | `sector_mean_reversion`                      | Sector rotation: buy worst 6-month performers, sell when they recover            |
-| `sector_mean_reversion_trail.py` | `sector_mean_reversion_trail`                | Sector mean reversion + regime gating, ATR sizing, trail exit                    |
-| `shannons_demon.py`              | `shannons_demon`                             | Volatility harvesting via periodic rebalancing                                   |
-| `trend_pullback_atr_enhanced.py` | `trend_pullback_atr_enhanced`                | Weekly-trend-confirmed mean reversion, dual-position entry                       |
-| `trend_pullback_atr_size.py`     | `trend_pullback_atr_size`                    | Weekly-trend mean reversion with ATR position sizing                             |
-| `trend_pullback_atr_trail.py`    | `trend_pullback_atr_trail`                   | Weekly-trend mean reversion with progressive trail exit                          |
-| `vol_extension_pullback.py`      | `volatility_expansion_pullback_continuation` | ATR compression → breakout → pullback continuation                               |
-
-**To register a new strategy**, drop a `.py` file in `src/bt/strategies/` that declares
-`STRATEGY_TYPE` and `on_candle()` — it's auto-discovered, no manual wiring:
+**DSL (default).** Decorate a function of a `StrategyContext` with `@strategy(...)`.
+The framework owns candle iteration, cursor-safe indicator prefetch, and signal
+construction, so you write *what* to do, not *how* data reaches you:
 
 ```python
 # src/bt/strategies/my_strategy.py
+from src.bt.strategies.dsl import strategy
+
 STRATEGY_TYPE = "my_strategy"
 
+@strategy(bars="1d")
+def on_candle(ctx):
+    fast = ctx.ta.ema("AAPL", 9)
+    slow = ctx.ta.ema("AAPL", 21)
+    if ctx.cross_over(fast, slow):
+        ctx.long("AAPL", size=0.1, sl=0.04, tp=0.08, reason="ema cross up")
+    elif ctx.cross_under(fast, slow):
+        ctx.close("AAPL", reason="ema cross down")
+```
+
+Surface (all cursor-safe, no future bars):
+
+- `ctx.ta` — prefetched indicators: `ema`, `sma`, `atr`, `rsi`, `adx`, `highest`,
+  `lowest`, `sum`, `close`, `ohlcv`, `field` — e.g. `ctx.ta.rsi("AAPL", 14)` returns a `SeriesView`.
+  Read the current bar with `view[-1]` / `.last()`; count back with negative indexing
+  (`view[-2]` = one bar ago); never out of range — the view is cursor-truncated, so it
+  structurally cannot leak a future bar.
+- `ctx.long / ctx.short(sym, size=, sl=, tp=, size_mode="capital"|"equity")` — open a fresh lot,
+  `size` = 0..1 fraction of the capital base. `sl`/`tp` are fractional percentages (0.04 = 4%).
+- `ctx.close(sym)` — close all lots; `ctx.partial_close(sym, qty, lot=, tag=)` — shed a fraction of one.
+- `ctx.ohlcv(sym)`, `ctx.price(sym)`, `ctx.position(sym)`, `ctx.quantity(sym)`, `ctx.avg_entry(sym)`.
+- `ctx.cross_over / cross_under`, `ctx.change`, `ctx.barssince`, `ctx.nz` (Pine built-ins).
+- `ctx.shared` — cross-call state, only with `@strategy(stateful=True)`; a fresh dict per run/window
+  (never module globals; clear between `split`/`sweep` windows by construction).
+- `ctx.state` — raw `BacktestState` for power needs (portfolio/candles lookup is not forbidden,
+  just bypassed — prefer the shortcut methods).
+
+Cross-timeframe reads (base bar vs HTF) go through `ctx.ta.<indicator>(sym, interval=...)`
+or `state.candles.get((sym, interval))` — both cursor-truncated.
+
+**Raw `on_candle` (power path).** The engine contract underneath: a plain module
+function `on_candle(state, candle, params) -> list[TradeSignal]`, plus `STRATEGY_TYPE`.
+Use this when the DSL's shape doesn't fit (event/multi-lot bookkeeping outside the
+`ctx` helpers, direct `CandleStore` access, etc.):
+
+```python
+# src/bt/strategies/my_raw.py
+STRATEGY_TYPE = "my_raw"
+
 def on_candle(state, candle, params) -> list[TradeSignal]:
-    """Called on every base-interval candle. Return signals to open/close."""
+    """Return signals to open/close positions. candle fires on the last symbol."""
     ...
 ```
 
-Optional: define a typed `Params` dataclass (see `src/bt/strategies/types.py`) and the
-engine instantiates it from `strategy_params` instead of passing a raw dict.
+The raw surface: `state.portfolio` (`PortfolioState` `.cash`/`.positions`/`.trades`),
+`state.candles` (`CandleStore`, `Mapping[(sym, interval)] -> DataFrame`, plus
+`.latest(sym, interval)`/`.count(sym, interval)` O(1) fast paths), `state.timestamp`, and the
+global indicators in `src.indicators.ta` (`ema`, `sma`, `rsi`, `atr`, `macd`, `adx`, `obv`, `mfi`, …).
+
+Either style: register by dropping the file in `src/bt/strategies/` — the import path is
+`src.bt.strategies.<module_name>`. Optional typed `Params` dataclass (subclass of
+`StrategyParams`, see `types.py`) and the engine instantiates it from `strategy_params` instead of a dict.
 
 ### Step 2: Write the JSON Config
 
-Create `strats/<name>.json`:
+Create `strats/<pass|wip|fail>/<name>.json` (configs are dropped in the
+classification bucket they earn — see `strats/README.md`):
 
 ```json
 {
@@ -139,7 +126,7 @@ Create `strats/<name>.json`:
   "trading_end": "2025-01-01",
   "commission": 0.1,
   "initial_capital": 10000,
-  "strategy_type": "momentum_regime",
+  "strategy_type": "my_strategy",   // must match a discovered STRATEGY_TYPE
   "bars": ["1h", "4h"],
   "strategy_params": {
     "fast": 9,
@@ -168,8 +155,8 @@ Create `strats/<name>.json`:
 
 ```bash
 cd /home/nasrt/Documents/code/dev/ibkr/py
-uv run ibkr bt run strats/<name>.json
-make run bt run strats/<name>.json   # same, via Make shortcut
+uv run ibkr bt run strats/<bucket>/<name>.json
+make run bt run strats/<bucket>/<name>.json   # same, via Make shortcut
 ```
 
 > **Note:** Make intercepts its own flags (`--help`, `--format`). To pass them through to `ibkr`, use `-- ` separator: `make run bt run strat.json -- --format jsonl`.
@@ -182,7 +169,7 @@ from src.bt import load_strategy, Backtest, run
 from src.bt.data_feed import load_candles
 from src.bt.strategies import init_strat
 
-config = load_strategy("strats/trend_pullback_atr_enhanced.json")
+config = load_strategy("strats/wip/<config>.json")
 bt = Backtest(config)
 df = load_candles(config.symbols, bt.window.train_start, bt.window.test_end, config.bars[0])
 strat_mod = init_strat(config.strategy_type)
@@ -211,11 +198,13 @@ One function, no classes. Read state, compute indicators, return signals. The en
 
 ### Volume filtering
 
-Volume confirmation is a common guard — see `vol_extension_pullback.py` for volume-confirmation patterns.
+Volume confirmation is a common guard. Cross-check volume against price action
+before emitting an entry signal.
 
 ### Ranging/squeeze detection
 
-Use EMA convergence + ATR contraction. See `vol_extension_pullback.py` for ATR-compression/squeeze detection.
+Use EMA convergence + ATR contraction to detect a squeeze before a guarded
+breakout entry.
 
 ### Statefulness within strategy
 
@@ -237,12 +226,12 @@ else:
     # exit logic
 ```
 
-### Use htf_candles() for multi-timeframe
+### Multi-timeframe reads
 
-Use `state.candles.get((sym, freq))` or `htf_candles(state, freq, tick)` for
-higher-timeframe bars — both are cursor-truncated and lookahead-safe. There is
-no `state.model_state` channel; cross-candle model/indicator state is owned by
-the strategy (see `ctx.shared` for the stateful DSL earlier in this file).
+Prefer `state.candles.get((sym, freq))` (or DSL `ctx.ta` with an explicit
+`interval=`) for HTF bars — both are cursor-truncated and lookahead-safe.
+There is no `state.model_state` channel; cross-candle model state is owned by
+the strategy (`ctx.shared`).
 
 ## Testing a Strategy
 
@@ -258,12 +247,13 @@ uv run pytest src/bt/risk/tests/ -v
 
 - **Data availability**: not all symbols in `universes/*.json` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run ibkr data query <SYMBOL>` (or `make run data query <SYMBOL>`).
 - **Bar size**: strategies expect the bar size in config to match available data. Most data is `1h`.
-- **HTF lookahead**: `state.candles.get((sym, freq))` and `htf_candles()` are both safe (cursor-truncated).
+- **HTF lookahead**: `state.candles.get((sym, freq))` and the DSL `ctx.ta`
+  `interval=` reads are both safe (cursor-truncated).
 - **Multiple symbols**: the engine iterates all symbols per timestamp. `on_candle` fires only on the last symbol per timestamp (so `state.candles` has all symbols' data). Signals for any symbol are valid — engine routes fills by `signal.symbol`. Pending signals for non-current symbols fill when that symbol's own `_execute_pending` stage runs (same bar cycle, later in the timestamp iteration).
-- **Pairs strategy** (`kalman_pairs_dsl`): requires exactly 2 symbols. The Kalman
-  signal is strategy-owned — an `OnlinePairs` filter (`from src.indicators.kalman.strategy`)
-  is held in `ctx.shared` and fed once per candle from `state.candles`. No engine
-  `model_updater` is involved.
+- **Model-backed strategies** (e.g. a Kalman pairs filter): the model is
+  strategy-owned — an `OnlinePairs`-style filter object lives in `ctx.shared`
+  (stateful DSL), fed per candle from `state.candles`. No engine `model_updater`
+  is involved.
 
 ## Module Reference
 
@@ -297,8 +287,8 @@ Evaluates a strategy's **fixed** params across in-sample/out-of-sample windows
 - `--folds <n>` — expansion-window walk-forward (IS grows from `trading_start`).
 
 ```bash
-uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --folds 4
-uv run ibkr bt split strats/trend_pullback_atr_enhanced.json --is-end 2020-12-31 --format json
+uv run ibkr bt split strats/<bucket>/<config>.json --folds 4
+uv run ibkr bt split strats/<bucket>/<config>.json --is-end 2020-12-31 --format json
 ```
 
 Reports per-fold IS/OOS ann-return, Sharpe, maxDD, calmar, win-rate, plus a
@@ -316,9 +306,9 @@ Per fold it sweeps a param grid **on the in-sample window**, locks the best
 combo, and validates it on the out-of-sample window.
 
 ```bash
-uv run ibkr bt optimize strats/trend_pullback_atr_enhanced.json \
+uv run ibkr bt optimize strats/<bucket>/<config>.json \
   '{"strategy_params":{"atr_mult":[1.5,2.0,2.5]}}' --folds 4
-uv run ibkr bt optimize strats/trend_pullback_atr_enhanced.json \
+uv run ibkr bt optimize strats/<bucket>/<config>.json \
   '{"strategy_params":{"ma_slow":[50,100,200]}}' --is-end 2020-12-31 --format json
 ```
 

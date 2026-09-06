@@ -11,6 +11,7 @@ Usage:
 """
 
 from __future__ import annotations
+from src.data import resample_ohlcv
 
 import sqlite3
 import sys
@@ -26,7 +27,6 @@ from streamlit.delta_generator import DeltaGenerator
 _proj_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_proj_root))
 
-from src.market_data import resample_ohlcv
 from src.utils import get_local_candles
 
 # ── Page config ────────────────────────────────────────────────

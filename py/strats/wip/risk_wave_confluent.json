@@ -1,0 +1,60 @@
+{
+  "name": "risk-wave-confluent",
+  "training_start": "2020-01-02",
+  "training_end": "2020-11-13",
+  "trading_start": "2020-11-16",
+  "trading_end": "2026-09-01",
+  "commission": 0.05,
+  "initial_capital": 100000,
+  "strategy_type": "risk_wave_confluent_dsl",
+  "bars": [
+    "1d"
+  ],
+  "benchmark_symbols": [
+    "SPY"
+  ],
+  "symbols": [
+    "QQQ",
+    "SMH",
+    "XLE",
+    "XLV",
+    "XLY",
+    "XLI",
+    "VNQ",
+    "HYG",
+    "IEF",
+    "TLT",
+    "IWM",
+    "CPER",
+    "GLD",
+    "XLF",
+    "XLU",
+    "XLK",
+    "XLB",
+    "XLP",
+    "XLRE",
+    "SPY"
+  ],
+  "strategy_params": {
+    "z_enter": 0.0,
+    "z_exit": -0.5,
+    "book_symbols": [
+      "SPY",
+      "QQQ",
+      "SMH",
+      "XLE",
+      "XLK",
+      "XLV",
+      "XLY",
+      "XLI",
+      "XLB",
+      "VNQ"
+    ],
+    "target_allocation": 0.97,
+    "rebalance_days": 21,
+    "min_names": 3,
+    "min_history_bars": 130,
+    "trend_symbol": "SPY",
+    "entropy_lookback": 25
+  }
+}

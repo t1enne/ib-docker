@@ -9,13 +9,14 @@ with rolling statistics so you can visually assess regime state.
 Usage:
     uv run streamlit run scripts/streamlit_cycle.py
 
-Layers (top → bottom): (1) Market-Health composite verdict — a mean of the
-fresh ratio legs' trailing-z scores mapped to RISK-ON / NEUTRAL / RISK-OFF with
-an explicit confidence; (2) a Macro Cycle / FRED backdrop drawn from the
-packaged lookahead-safe macro assets (GDP, unemployment, payrolls, capacity,
-industrial), each tile showing its real as-of release month; (3) a staleness
-warning when any leg that would otherwise vote stopped being current; then the
-usual per-ratio history charts and summary table.
+Layers (top → bottom): (1) Market-Health composite verdict as a *smoothed wave* —
+the per-day mean of the fresh ratio legs' trailing-z scores (not a single
+number), set against RISK-ON / NEUTRAL / RISK-OFF threshold bands; (2) a Macro
+Cycle / FRED backdrop drawn from the packaged lookahead-safe macro assets (GDP,
+unemployment, payrolls, capacity, industrial), each tile showing its real
+as-of release month; (3) a staleness warning when any leg that would otherwise
+vote stopped being current; then the usual per-ratio history charts and
+summary table.
 """
 
 from __future__ import annotations
@@ -48,16 +49,18 @@ st.set_page_config(
 
 # ── Ratio definitions ordered by signal hierarchy ──
 # A deliberately lean set — each ratio earns its place on a DISTINCT axis of
-# risk, no two-leg redundancy. 1. Equities-vs-duration risk appetite (SPY/TLT);
-# 2. Credit risk, the classic leading regime signal (HYG/TLT); 3. Yield-curve
-# slope (IEF/TLT), the private recession clock; 4. Equity breadth (IWM/SPY);
-# 5. Real-economy copper demand (CPER/GLD); 6. Credit transmission into
-# financials (XLF/XLU). Deliberately slimmed-from over-fitted set (see git
-# history): dropped the ÷GLD commodity redundancy (SLV, USO), the secular
-# QQQ/SPY drift, discretionary XLY/XLP (breadth already spans it), and the
-# second credit ratio HYG/LQD (HYG/TLT carries the signal).
+# risk, no two-leg redundancy. 1. Credit risk, the classic leading regime
+# signal (HYG/TLT); 2. Yield-curve slope (IEF/TLT), the private recession
+# clock; 3. Equity breadth (IWM/SPY); 4. Real-economy copper demand (CPER/GLD);
+# 5. Credit transmission into financials (XLF/XLU). Deliberately slimmed from
+# the over-fitted set (see git history): dropped the ÷GLD commodity redundancy
+# (SLV, USO), the secular QQQ/SPY drift, discretionary XLY/XLP (breadth already
+# spans it), and the second credit ratio HYG/LQD (HYG/TLT carries the signal).
+# SPY/TLT was also dropped: at the useful (126d+) forward-equity horizon it is a
+# NEGATIVE predictor (the SPY numerator makes it a trailing-equity-momentum
+# proxy, contaminating a cross-asset regime read); the equity outcome is better
+# signalled by HYG, IEF/TLT curve and XLF credit legs (see scripts/check_legs*).
 _RATIO_DEFS: list[tuple[str, str, str]] = [
-    ("SPY / TLT (risk appetite)", "SPY", "TLT"),
     ("HYG / TLT (credit risk)", "HYG", "TLT"),
     ("IEF / TLT (curve slope)", "IEF", "TLT"),
     ("IWM / SPY (equity breadth)", "IWM", "SPY"),
@@ -80,7 +83,7 @@ MIN_QUORUM_FRACTION: float = 0.30
 STALE_TRADING_DAYS: int = 7
 # Rolling window (fast-settling proxy) used to normalise a ratio level to a
 # z-score for the health composite.
-HEALTH_Z_WINDOW: int = 252
+HEALTH_Z_WINDOW: int = 126
 
 
 # Composite phase decision boundaries on the mean z of the voting legs.
@@ -340,7 +343,7 @@ st.sidebar.title("Cycle Ratios")
 lookback = st.sidebar.slider(
     "Lookback (trading days)",
     min_value=60,
-    max_value=1260,
+    max_value=126,
     value=504,
     step=21,
 )
@@ -653,51 +656,161 @@ if lookback > 0:
 st.title("Macro Cycle Ratio Explorer")
 
 
-_HEALTH_LABELS: dict[RiskPhase, tuple[str, str]] = {
-    "RISK-ON": ("RISK-ON", "#0f7a3d"),
-    "NEUTRAL": ("NEUTRAL", "#8a6d1c"),
-    "RISK-OFF": ("RISK-OFF", "#b00020"),
-    "INSUFFICIENT": ("INSUFFICIENT", "#5b6472"),
-}
-
-
 def _calendar_from(closes: Mapping[str, pd.Series]) -> pd.DatetimeIndex:
     """Sorted unique union of every daily bar date across the tickers used."""
     all_dates: list[pd.Timestamp] = [ts for s in closes.values() for ts in s.index]
     return pd.DatetimeIndex(sorted(set(all_dates)))
 
 
-def _verdict_block(snapshot: HealthSnapshot) -> None:
-    """Render the verdict + confidence columns under the health header."""
-    text, color = _HEALTH_LABELS[snapshot.phase]
-    vcol, ccol, zcol = st.columns(3)
-    with vcol:
-        st.markdown(
-            f"## <span style='color:{color}'>{text}</span>  "
-            f"<small>mean z {snapshot.mean_z:+.2f}</small>",
-            unsafe_allow_html=True,
+def _leg_z_series(
+    closes: Mapping[str, pd.Series],
+    num_ticker: str,
+    den_ticker: str,
+) -> pd.Series:
+    """Full trailing-z series of one ratio, defined only on days with history.
+
+    Mirrors :func:`ratio_health_z`'s normalisation per bar (rolling mean/std over
+    ``HEALTH_Z_WINDOW``, ``NaN`` until ``MIN_HISTORY_DAYS`` and on flat/zero
+    dispersion). ``NaN`` wherever the leg cannot yet speak — those days the leg
+    simply does not contribute to the composite.
+    """
+    joint = _skim_closes(closes, num_ticker, den_ticker)
+    if joint.empty or len(joint) < MIN_HISTORY_DAYS:
+        return pd.Series(dtype=float)
+    ratio = (joint["num"] / joint["den"]).dropna()
+    if ratio.empty:
+        return pd.Series(dtype=float)
+    agg = ratio.rolling(HEALTH_Z_WINDOW, min_periods=MIN_HISTORY_DAYS).agg(
+        ["mean", "std"]
+    )
+    return (ratio - agg["mean"]) / agg["std"].replace(0.0, np.nan)
+
+
+def _alive_mask(n_contributors: pd.Series) -> pd.Series:
+    """Days where enough legs hold a reading to justify a composite mean."""
+    frac = n_contributors / len(_COMPOSITE_LEGS)
+    return frac > MIN_QUORUM_FRACTION
+
+
+def composite_wave(closes: Mapping[str, pd.Series]) -> pd.DataFrame:
+    """Composite risk as a per-day smoothed wave over the window.
+
+    Returns a DataFrame indexed by the union trading ``calendar`` with
+    ``mean_z`` (cross-leg mean of each leg's trailing-126d z, leg contributes
+    only where it has >=MIN_HISTORY_DAYS history and non-flat dispersion) and
+    ``smooth`` (``mean_z`` exponentially smoothed). Days below the quorum
+    threshold, or with no contributing leg, are NaN (no area to call a verdict).
+    Each leg's full-history z is used, so the wave is lookahead-free by
+    construction; the terminal value aligns with ``build_health_snapshot``.
+    """
+    calendar = _calendar_from(closes)
+    if len(calendar) == 0:
+        return pd.DataFrame()
+    z_by_leg: dict[str, pd.Series] = {}
+    for label, num_ticker, den_ticker in _COMPOSITE_LEGS:
+        z = _leg_z_series(closes, num_ticker, den_ticker)
+        # Carry a fresh leg's value forward up to STALE_TRADING_DAYS so a leg
+        # that printed within the freshness window still votes on the following
+        # global days — mirror of the "7 trading days" staleness gate. No
+        # forward-fill beyond that limit keeps the wave as-of honest.
+        z_by_leg[label] = z.reindex(calendar).ffill(limit=STALE_TRADING_DAYS)
+    stack = pd.DataFrame(z_by_leg)  # columns = legs, index = calendar
+    n_contrib = stack.notna().sum(axis=1)
+    mean_z = stack.mean(axis=1, skipna=True)
+    mean_z = mean_z.where(_alive_mask(n_contrib))
+    smooth = mean_z.ewm(span=7, adjust=False, min_periods=3).mean()
+    return pd.DataFrame(
+        {"mean_z": mean_z, "smooth": smooth, "legs": n_contrib}, index=calendar
+    )
+
+
+def _risk_wave_figure(wave: pd.DataFrame, current_phase: RiskPhase) -> go.Figure | None:
+    """Plot the smoothed composite risk wave with phase bands.
+
+    Adds horizontal fills at ``±HEALTH_RISKON_Z`` (the RISK-OFF / RISK-ON
+    threshold band) so a glance reads over-tilt vs neutral. ``None`` when the
+    window has no usable composite readings.
+    """
+    if wave.empty or wave["smooth"].dropna().empty:
+        return None
+    fig = go.Figure()
+    fig.add_hline(y=HEALTH_RISKON_Z, line_dash="dot", line_color="#0f7a3d", opacity=0.5)
+    fig.add_hline(
+        y=-HEALTH_RISKON_Z, line_dash="dot", line_color="#b00020", opacity=0.5
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=wave.index,
+            y=wave["smooth"],
+            mode="lines",
+            line=dict(color="#2e4a7d", width=2.4),
+            hovertemplate="%{x|%Y-%m-%d}: %{y:+.2f}<extra></extra>",
         )
-    with ccol:
-        st.metric("Confidence", f"{snapshot.confidence:.0%}")
-    with zcol:
-        st.metric("Voting legs", f"{snapshot.used_count} / {snapshot.candidate_count}")
+    )
+    # neutral band (between thresholds) shaded lightly behind the line
+    fig.add_hrect(
+        y0=-HEALTH_RISKON_Z,
+        y1=HEALTH_RISKON_Z,
+        fillcolor="rgba(128,128,128,0.08)",
+        line_width=0,
+        layer="below",
+    )
+    zone = None
+    if current_phase == "RISK-ON":
+        zone = "above the RISK-ON line"
+        accent = "#0f7a3d"
+    elif current_phase == "RISK-OFF":
+        zone = "below the RISK-OFF line"
+        accent = "#b00020"
+    elif current_phase == "NEUTRAL":
+        zone = "inside the neutral band"
+        accent = "#8a6d1c"
+    else:
+        zone = "no reading (insufficient data)"
+        accent = "#5b6472"
+    fig.update_layout(
+        title=dict(
+            text=(
+                "Composite Risk Wave"
+                f"<br><sup>current {zone} · smoother = EWMA of per-leg trailing-126d z</sup>"
+            ),
+            x=0.01,
+            font=dict(size=14, color=accent),
+        ),
+        xaxis_title=None,
+        yaxis_title="composite z",
+        template="plotly_white",
+        hovermode="x unified",
+        height=260,
+        margin=dict(l=10, r=10, t=52, b=10),
+        showlegend=False,
+    )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
+    return fig
 
 
-def _render_health(snapshot: HealthSnapshot) -> None:
-    """Top-of-page market-health verdict (fresh ratio legs only)."""
+def _render_health(snapshot: HealthSnapshot, wave: pd.DataFrame) -> None:
+    """Top-of-page market-health verdict: a smoothed risk wave, not a number."""
     st.subheader("Market Health · RISK-ON vs RISK-OFF")
-    if snapshot.used_count == 0:
+    fig = _risk_wave_figure(wave, snapshot.phase)
+    if fig is not None:
+        st.plotly_chart(fig, width="stretch")
+    else:
         st.caption(
-            "Only stale/short ratio legs present; verdict is INSUFFICIENT "
+            "Only stale/short ratio legs present; no risk wave to draw "
             "(refresh credit/fixed-income data to power the composite)."
         )
-    _verdict_block(snapshot)
-    st.caption(
-        "Score = mean of each surviving leg's trailing-252d z-score. A leg votes "
-        "only with ≥90 trading days and when its last bar is ≤7 trading days "
-        "behind the freshest series. FRED gauges below are a separate backdrop "
-        "layer (lagging), not folded into this price-risk verdict."
+    caption = (
+        "Wave = cross-leg mean of each fresh leg's trailing-126d z, exponentially "
+        "smoothed (EWMA span 7). A leg contributes only with ≥90 trading days "
+        "history and while its last bar sits within 7 trading days of the freshest "
+        "series. Above the top dashed line → RISK-ON; below the bottom → RISK-OFF; "
+        "between them → NEUTRAL. Grey band marks the neutral zone."
     )
+    if snapshot.used_count == 0:
+        caption += " Current verdict: INSUFFICIENT (no fresh legs)."
+    st.caption(caption)
 
 
 def _macro_print_frame(name: str, cursor: pd.Timestamp) -> pd.DataFrame | None:
@@ -815,13 +928,14 @@ def _render_staleness_warning(snapshot: HealthSnapshot) -> None:
 
 _calendar_idx: pd.DatetimeIndex = _calendar_from(closes)
 _health: HealthSnapshot = build_health_snapshot(closes, _calendar_idx)
+_health_wave: pd.DataFrame = composite_wave(closes)
 _macro_cursor: pd.Timestamp = (
     _calendar_idx.max() if len(_calendar_idx) else pd.Timestamp.today()
 )
 _macro_kpis: tuple[MacroKpi, ...] = build_fred_kpis(_macro_cursor)
 _macro_narrative: tuple[str, ...] = build_cycle_narrative(_macro_kpis)
 
-_render_health(_health)
+_render_health(_health, _health_wave)
 st.markdown("---")
 _render_macro_layer(_macro_kpis, _macro_narrative)
 st.markdown("---")

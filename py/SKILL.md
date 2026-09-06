@@ -245,7 +245,7 @@ uv run pytest src/bt/risk/tests/ -v
 
 ## Common Gotchas
 
-- **Data availability**: not all symbols in `universes/*.json` have backfill on disk. If `load_candles()` returns empty, data needs syncing first via `uv run ibkr data query <SYMBOL>` (or `make run data query <SYMBOL>`).
+- **Data availability**: when an agent needs candles that are missing/stale, just run `data dl` (see the runbook below) — `data query` only *reads* the local DB and never fetches.
 - **Bar size**: strategies expect the bar size in config to match available data. Most data is `1h`.
 - **HTF lookahead**: `state.candles.get((sym, freq))` and the DSL `ctx.ta`
   `interval=` reads are both safe (cursor-truncated).
@@ -254,6 +254,30 @@ uv run pytest src/bt/risk/tests/ -v
   strategy-owned — an `OnlinePairs`-style filter object lives in `ctx.shared`
   (stateful DSL), fed per candle from `state.candles`. No engine `model_updater`
   is involved.
+
+## `data dl` — one-shot candle download (when data is missing/stale)
+
+When a backtest has no data or a symbol's daily read looks stale, just attempt:
+
+```bash
+uv run ibkr data dl AAPL MSFT --from 2019-01-01        # backfill + refresh
+uv run ibkr data dl --universe universes/nsdq.json --from 2019-01-01
+```
+
+Idempotent and gap-based; `--from` earlier = deeper history. Don't loop chunks.
+Its `0 fetch gaps`/`up to date` tail can print even on success, so confirm the
+file actually grew:
+
+```bash
+uv run ibkr data query AAPL        # max date should advance
+```
+
+Needs an authenticated Gateway at `https://localhost:5000/v1/api`:
+
+```bash
+uv run python -c "import httpx;print(httpx.get('https://localhost:5000/v1/api/iserver/auth/status',verify=False,timeout=8).json().get('authenticated'))"  # True = ready
+uv run python scripts/login_ibkr.py   # else login
+```
 
 ## Module Reference
 

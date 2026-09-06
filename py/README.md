@@ -177,12 +177,41 @@ uv run ibkr bt optimize <strategy.json> '{...grid...}' --folds 4  # per-fold IS 
 # All three parallelize units across worker processes with:
 #   --workers N   (default 1 = sequential)
 
-# Data
-uv run ibkr data query AAPL --from 2024-01-01
+# Inspect what's on disk (recap: date range, rows, gaps >48h) — no Gateway needed
+uv run ibkr data query AAPL
+uv run ibkr data query --universe universes/nsdq.json
+
+# Download / refresh candles (see `data dl` runbook below)
+uv run ibkr data dl AAPL MSFT --from 2019-01-01
 
 # Pipe workflows
 uv run ibkr data query AAPL --from 2024-01-01 | uv run ibkr bt run strategy.json
 ```
+
+### `data dl` — download / refresh OHLCV
+
+```bash
+uv run ibkr data dl AAPL MSFT --from 2019-01-01   # backfill + refresh tail
+uv run ibkr data dl --universe universes/nsdq.json --from 2019-01-01
+```
+
+Idempotent (`on_conflict_ignore`); safe to call as-is. `--from` sets the history
+floor — earlier = deeper backfill plus the trailing tail in one call. Its
+`0 fetch gaps`/`up to date` tail is *post-download* output and can print even on
+a successful fill; always confirm with:
+
+```bash
+uv run ibkr data query AAPL        # max date should advance
+```
+
+Needs an authenticated IBKR Gateway at `https://localhost:5000/v1/api`:
+
+```bash
+uv run python -c "import httpx;print(httpx.get('https://localhost:5000/v1/api/iserver/auth/status',verify=False,timeout=8).json().get('authenticated'))"  # True = ready
+uv run python scripts/login_ibkr.py   # else login (.env holds creds)
+```
+
+`data query`/`preview` need no login — only `data dl` touches the live Gateway.
 
 ### `bt sweep` — hyperparameter sweep
 

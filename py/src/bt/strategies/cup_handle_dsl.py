@@ -228,9 +228,34 @@ def _find_handle(
     *,
     max_handle_bars: int,
     max_handle_drop_pct: float,
+    cup_bars: int = 0,  # parent cup width in bars (left_-> right_ rim)
+    cup_depth: float = 0.0,  # absolute price depth of the parent cup
+    handle_width_scale: float = 0.0,  # >0: cap width at frac of cup width
+    handle_depth_scale: float = 0.0,  # >0: cap drop at frac of cup depth
+    handle_width_floor: int = 3,  # min handle search window when scaled
 ) -> Optional[Handle]:
-    """Locate the small pullback (handle) immediately following the right rim."""
-    end = min(right.idx + max_handle_bars, n)
+    """Locate the small pullback (handle) following the right rim.
+
+    Two optional cup-size scalings gate the handle so it is not declared on
+    the first blip above the rim:
+
+    * width: the search horizon is bounded to a fraction of the parent cup's
+      bar-width (``handle_width_scale``), so a handle must carve out of a base
+      proportionate to the cup rather than trigger on a 1-2 bar retrace.
+    * depth: the allowed retrace off the rim is bounded to a fraction of the
+      cup's price depth (``handle_depth_scale``) and combined with the fixed
+      ``max_handle_drop_pct`` cap. Deeper bowls tolerate proportionally
+      deeper handles, but a handle still cannot slice into the lower half of
+      the cup.
+    """
+    window = (
+        max_handle_bars
+        if cup_bars <= 0 or handle_width_scale <= 0
+        else min(
+            max_handle_bars, max(handle_width_floor, int(handle_width_scale * cup_bars))
+        )
+    )
+    end = min(right.idx + window, n)
     seg = [s for s in swings if right.idx < s.idx < end]
 
     seg_lows = [s for s in seg if not s.high]
@@ -239,7 +264,12 @@ def _find_handle(
     handle_low = min(seg_lows, key=lambda s: s.level)
 
     drop = (right.level - handle_low.level) / right.level
-    if drop > max_handle_drop_pct:
+    # Depth scaling: a cup that dropped deep allows, at most, a handle that
+    # pulls ``handle_depth_scale`` of that bowl back -- still tight vs rim.
+    cap = max_handle_drop_pct
+    if cup_depth > 0 and handle_depth_scale > 0 and right.level > 0:
+        cap = min(cap, handle_depth_scale * cup_depth / right.level)
+    if drop > cap:
         return None
 
     return Handle(
@@ -277,6 +307,9 @@ def detect_cup_and_handle(
     max_cup_bars: int = 260,
     max_handle_bars: int = 40,
     max_handle_drop_pct: float = 0.12,
+    handle_width_scale: float = 0.0,  # cap handle width as frac of cup bars
+    handle_depth_scale: float = 0.0,  # cap handle retrace as frac of cup depth
+    handle_width_floor: int = 3,
     volume_confirm_breakout: bool = True,
 ) -> CupHandleResult:
     """Detect a cup-and-handle formation ending at (breaking on) the last bar."""
@@ -332,6 +365,11 @@ def detect_cup_and_handle(
                     n,
                     max_handle_bars=max_handle_bars,
                     max_handle_drop_pct=max_handle_drop_pct,
+                    cup_bars=right.idx - left.idx,
+                    cup_depth=depth,
+                    handle_width_scale=handle_width_scale,
+                    handle_depth_scale=handle_depth_scale,
+                    handle_width_floor=handle_width_floor,
                 )
                 if handle is None:
                     continue
@@ -374,6 +412,9 @@ class Params(StrategyParams):
     # Handle geometry
     max_handle_bars: int = 40
     max_handle_drop_pct: float = 0.12
+    handle_width_scale: float = 0.0  # cap handle width as frac of cup bars
+    handle_depth_scale: float = 0.0  # cap handle retrace as frac of cup depth
+    handle_width_floor: int = 3
     # Volume confirmation
     volume_confirm_breakout: bool = True
     # Sizing / risk
@@ -459,6 +500,9 @@ def _maybe_enter(ctx: StrategyContext, sym: str, arr: dict[str, pd.Series]) -> N
         max_cup_bars=params.max_cup_bars,
         max_handle_bars=params.max_handle_bars,
         max_handle_drop_pct=params.max_handle_drop_pct,
+        handle_width_scale=params.handle_width_scale,
+        handle_depth_scale=params.handle_depth_scale,
+        handle_width_floor=params.handle_width_floor,
         volume_confirm_breakout=params.volume_confirm_breakout,
     )
     if not result.entry_ok or result.handle is None:

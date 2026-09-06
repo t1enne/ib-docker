@@ -7,9 +7,7 @@
   "commission": 0.1,
   "initial_capital": 50000,
   "strategy_type": "cup_handle_dsl",
-  "bars": [
-    "1d"
-  ],
+  "bars": ["1d"],
   "strategy_params": {
     "swing_lookback": 3,
     "max_cup_depth_pct": 0.4,
@@ -19,6 +17,9 @@
     "max_cup_bars": 260,
     "max_handle_bars": 40,
     "max_handle_drop_pct": 0.12,
+    "handle_width_scale": 0.25,
+    "handle_depth_scale": 0.15,
+    "handle_width_floor": 3,
     "volume_confirm_breakout": true,
     "per_symbol_size": 0.15,
     "max_risk_pct": 0.035,
@@ -37,12 +38,5 @@
     "cooldown_bars": 5,
     "profit_target_mult": 1.2
   },
-  "symbols": [
-    "QQQ",
-    "XLK",
-    "GOOG",
-    "META",
-    "NVDA",
-    "AAPL"
-  ]
+  "symbols": ["QQQ", "GOOG", "META", "NVDA", "AAPL"]
 }
